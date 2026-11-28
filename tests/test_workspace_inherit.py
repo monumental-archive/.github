@@ -25,14 +25,12 @@ two `publish` rows are why publish gets no verdict at all.
 Run through the gate as `mise run test`, which `ci` collects.
 """
 
-import io
 import json
 import subprocess
 import sys
-from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import TYPE_CHECKING, Self
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -43,7 +41,6 @@ from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from types import TracebackType
 
 BELT = support.MISE
 
@@ -68,49 +65,6 @@ NO_FINDINGS: list[wi.Finding] = []
 # declared VALUE the check resolves, never a flag on the call.
 DISCOVER = True
 NO_README = False
-
-
-class Stops:
-    """Expect the task to stop: exit 1, its finding said on stderr (#1934).
-
-    The refusal is a finding, written through the writer; `said` is what
-    it printed, without the final newline.
-    """
-
-    def __init__(self) -> None:
-        """Start with nothing said."""
-        self.said = ""
-        self._err = io.StringIO()
-        self._redirect = redirect_stderr(self._err)
-
-    def __enter__(self) -> Self:
-        """Start capturing stderr.
-
-        Returns:
-            This expectation, to read `said` from afterwards.
-
-        """
-        self._redirect.__enter__()
-        return self
-
-    def __exit__(
-        self,
-        kind: type[BaseException] | None,
-        exc: BaseException | None,
-        tb: TracebackType | None,
-    ) -> bool:
-        """Stop capturing, and hold the block to a stop with status 1.
-
-        Returns:
-            True: the expected stop is swallowed.
-
-        """
-        self._redirect.__exit__(kind, exc, tb)
-        self.said = self._err.getvalue().rstrip("\n")
-        if not isinstance(exc, SystemExit):
-            pytest.fail(f"the task did not stop: {exc!r}")
-        assert exc.code == 1, self.said
-        return True
 
 
 def member(name: str, **fields: object) -> wi.Member:
@@ -303,10 +257,11 @@ def test_a_workspace_without_the_table_reads_empty() -> None:
         assert wi.workspace_package(root) == none
 
 
-def test_an_unreadable_manifest_stops_the_task() -> None:
+def test_an_unreadable_manifest_stops_the_task(tmp_path: Path) -> None:
     """A manifest missing where cargo named the root is broken."""
-    with TemporaryDirectory() as tmp, Stops():
-        wi.workspace_package(Path(tmp))
+    with pytest.raises(SystemExit) as stop:
+        wi.workspace_package(tmp_path)
+    assert stop.value.code == 1
 
 
 # Each wrong-shaped account, and where its refusal says it is wrong.
@@ -334,69 +289,80 @@ WRONG_SHAPES: tuple[tuple[object, str], ...] = (
 
 
 # The guards, driven end to end over a real metadata document.
-def _run(manifest: str, packages: list[dict[str, object]]) -> tuple[int, str, str]:
-    """Lay out a workspace root, feed cargo's account, capture all.
+def account(root: Path, manifest: str, packages: list[dict[str, object]]) -> str:
+    """Lay out a workspace root at `root`, and say cargo's account of it.
 
     Returns:
-        The exit status, stdout and stderr.
+        The metadata document, as cargo prints it.
 
     """
-    with TemporaryDirectory() as tmp:
-        root = Path(tmp)
-        (root / "Cargo.toml").write_text(manifest, encoding="utf-8")
-        for package in packages:
-            crate = root / "crates" / decoded.as_str(package["name"], "name")
-            package["manifest_path"] = str(crate / "Cargo.toml")
-        document: dict[str, object] = {
-            "workspace_root": str(root),
-            "workspace_members": [p["id"] for p in packages],
-            "packages": packages,
-        }
-        out, err = io.StringIO(), io.StringIO()
-        with redirect_stdout(out), redirect_stderr(err):
-            status = wi.check(json.dumps(document), "Cargo.toml")
-        return status, out.getvalue(), err.getvalue()
+    (root / "Cargo.toml").write_text(manifest, encoding="utf-8")
+    for package in packages:
+        crate = root / "crates" / decoded.as_str(package["name"], "name")
+        package["manifest_path"] = str(crate / "Cargo.toml")
+    return json.dumps({
+        "workspace_root": str(root),
+        "workspace_members": [p["id"] for p in packages],
+        "packages": packages,
+    })
 
 
-def test_no_workspace_package_table_skips_clean() -> None:
+def test_no_workspace_package_table_skips_clean(
+    capfd: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
     """Nothing is declared here, so nothing can be inert."""
-    status, out, _ = _run(
-        '[workspace]\nmembers = ["crates/*"]\n',
-        [raw_member("a")],
+    document = account(
+        tmp_path, '[workspace]\nmembers = ["crates/*"]\n', [raw_member("a")]
     )
+    status = wi.check(document, "Cargo.toml")
+    out = capfd.readouterr().out
     assert status == 0
     assert f"{TASK}: Cargo.toml: no [workspace.package] table, skipped\n" in out
 
 
-def test_an_inherited_key_passes_and_says_what_it_measured() -> None:
+def test_an_inherited_key_passes_and_says_what_it_measured(
+    capfd: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
     """The green path counts the keys and the members."""
-    status, out, _ = _run(
+    document = account(
+        tmp_path,
         '[workspace.package]\nrust-version = "1.82"\n',
         [raw_member("a", rust_version="1.82")],
     )
+    status = wi.check(document, "Cargo.toml")
+    out = capfd.readouterr().out
     assert status == 0
     assert f"{TASK}: Cargo.toml: 1 [workspace.package] key, every" in out
 
 
-def test_an_inert_key_fails_with_the_one_line_remedy() -> None:
+def test_an_inert_key_fails_with_the_one_line_remedy(
+    capfd: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
     """The red path names the key, the members and the fix."""
-    status, _, err = _run(
+    document = account(
+        tmp_path,
         '[workspace.package]\nrust-version = "1.97"\n',
         [raw_member("a", rust_version=None), raw_member("b", rust_version=None)],
     )
+    status = wi.check(document, "Cargo.toml")
+    err = capfd.readouterr().err
     assert status == 1
     assert "reach no member" in err
     assert "rust-version.workspace = true" in err
     assert "a, b" in err
 
 
-def test_a_declared_table_with_no_member_fails() -> None:
+def test_a_declared_table_with_no_member_fails(
+    capfd: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
     """A declaration with nobody to read it, in the limit.
 
     Skipping here would be the vacuous success this whole class is
     about: the keys are declared and reach nothing.
     """
-    status, _, err = _run('[workspace.package]\nversion = "0.1.0"\n', [])
+    document = account(tmp_path, '[workspace.package]\nversion = "0.1.0"\n', [])
+    status = wi.check(document, "Cargo.toml")
+    err = capfd.readouterr().err
     assert status == 1
     assert "names no workspace member" in err
 
@@ -412,16 +378,18 @@ def test_metadata_of_the_wrong_shape_stops_the_task_by_where(
     assert f"{said} ({where})\n" == err
 
 
-def test_a_manifest_of_the_wrong_shape_stops_the_task() -> None:
+def test_a_manifest_of_the_wrong_shape_stops_the_task(
+    tmp_path: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
     """`[workspace]` that is not a table is named, never a crash."""
-    with TemporaryDirectory() as tmp:
-        root = Path(tmp)
-        (root / "Cargo.toml").write_text("workspace = 1\n", encoding="utf-8")
-        with Stops() as stopped:
-            wi.workspace_package(root)
+    (tmp_path / "Cargo.toml").write_text("workspace = 1\n", encoding="utf-8")
+    with pytest.raises(SystemExit) as stop:
+        wi.workspace_package(tmp_path)
+    err = capfd.readouterr().err
+    assert stop.value.code == 1
     assert (
-        f"{TASK}: {root}/Cargo.toml is unreadable (workspace is not an object)"
-        == stopped.said
+        f"{TASK}: {tmp_path}/Cargo.toml is unreadable (workspace is not an object)\n"
+        == err
     )
 
 
@@ -475,6 +443,7 @@ INERT_IN_FUZZ = (
     "        could take it: a-fuzz\n"
     "        add `edition.workspace = true`\n"
 )
+ROOTS = ["Cargo.toml", "fuzz/Cargo.toml"]
 TOP_GREEN = (
     f"{TASK}: Cargo.toml: 1 [workspace.package] key, every one inherited"
     " by a member of 1\n"
@@ -544,23 +513,12 @@ class TwoRoots:
         )
         self.env["PATH"] = f"{bindir}:{self.env.get('PATH', '')}"
 
-    def main(self, *, capfd: pytest.CaptureFixture[str]) -> tuple[int, str, str]:
-        """Run the helper over both roots, in this process.
-
-        Returns:
-            The status and both streams.
-
-        """
-        roots = ["Cargo.toml", "fuzz/Cargo.toml"]
-        with pytest.MonkeyPatch.context() as patched:
-            patched.setattr(wi, "CARGO", str(self.cargo))
-            with pytest.MonkeyPatch.context() as patched:
-                for name, value in self.env.items():
-                    patched.setenv(name, value)
-                patched.chdir(self.tree)
-                status, out, err = wi.main(roots)
-            out, err = capfd.readouterr()
-            return status, out, err
+    def enter(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Stand in the tree as the task does, the stub cargo answering."""
+        monkeypatch.setattr(wi, "CARGO", str(self.cargo))
+        for name, value in self.env.items():
+            monkeypatch.setenv(name, value)
+        monkeypatch.chdir(self.tree)
 
     def task(self) -> subprocess.CompletedProcess[str]:
         """Run the task's own body in the tree, as mise does.
@@ -592,11 +550,16 @@ class TwoRoots:
 
 # Each workspace in the tree is judged, past a red one (#2004).
 def test_a_key_no_member_of_the_second_root_takes_is_red(
-    tmp_path: Path, capfd: pytest.CaptureFixture[str], env: support.Env
+    tmp_path: Path,
+    capfd: pytest.CaptureFixture[str],
+    env: support.Env,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """fuzz/Cargo.toml's `edition`: nonzero, naming the key and the root."""
     planted = TwoRoots(tmp_path, env=env)
-    status, out, err = planted.main(capfd=capfd)
+    planted.enter(monkeypatch)
+    status = wi.main(ROOTS)
+    out, err = capfd.readouterr()
     assert (status, out) == (1, TOP_GREEN)
     assert err.startswith(INERT_IN_FUZZ), err
     declared = f"  Declared in {planted.tree}/fuzz/Cargo.toml under"
@@ -604,22 +567,27 @@ def test_a_key_no_member_of_the_second_root_takes_is_red(
 
 
 def test_a_failing_cargo_is_red_with_its_text_and_the_rest_judged(
-    tmp_path: Path, capfd: pytest.CaptureFixture[str], env: support.Env
+    tmp_path: Path,
+    capfd: pytest.CaptureFixture[str],
+    env: support.Env,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Fetch refused for the top root: cargo's words; fuzz still judged."""
-    done = TwoRoots(tmp_path, fetch_fails="Cargo.toml", env=env).main(capfd=capfd)
-    assert (done.returncode, done.stdout) == (1, "")
+    TwoRoots(tmp_path, fetch_fails="Cargo.toml", env=env).enter(monkeypatch)
+    status = wi.main(ROOTS)
+    out, err = capfd.readouterr()
+    assert (status, out) == (1, "")
     assert (
         f"{TASK}: Cargo.toml: cargo fetch failed\n"
         "  error: planted: failed to fetch for Cargo.toml\n"
-    ) in done.stderr
-    assert INERT_IN_FUZZ in done.stderr
+    ) in err
+    assert INERT_IN_FUZZ in err
 
 
 def test_no_root_is_a_usage_error(capfd: pytest.CaptureFixture[str]) -> None:
     """The task always passes one; none at all is refused, exit 2."""
     none: list[str] = []
-    status, out, err = wi.main(none)
+    status = wi.main(none)
     out, err = capfd.readouterr()
     assert (status, out, err) == (
         2,
