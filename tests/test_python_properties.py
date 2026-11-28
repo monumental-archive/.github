@@ -21,14 +21,20 @@ scored on exit alone can pass for the wrong reason.
 import os
 import re
 import subprocess
+import sys
 import tempfile
+import types
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from belt import decoded, python_properties, shard, workflow_yaml
 from belt.typed_pytest import fixture
 from tests import support
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 # The processes the run fans out over when it is handed four files.
 WORKERS = 4
@@ -636,3 +642,390 @@ def test_both_jobs_carry_a_bound_planned_shards_and_one_seed() -> None:
         outputs = decoded.as_object(planner["outputs"], "outputs")
         for name in ("python-shards", "python-of"):
             assert f"${{{{ steps.shards.outputs.{name} }}}}" == outputs[name]
+
+
+# The runner in this process, over a stand-in pytest: the rows above
+# start the task body, whose runner is a child they do not measure.
+GATE_LABEL = python_properties.LABELS["gate"]
+AUDIT_LABEL = python_properties.LABELS["audit"]
+# The plugin as the runner reads it, after a collection: a stand-in,
+# since importing the real one here is a module pytest could not
+# rewrite when a row's own pytest loads it.
+
+
+class StandIn(types.ModuleType):
+    """The plugin module as the runner reads it: its refusals."""
+
+    def __init__(self) -> None:
+        """Name the module as the plugin, refusing nothing."""
+        super().__init__(python_properties.PLUGIN)
+        self.REFUSED: list[str] = []
+
+
+STAND_IN = StandIn()
+
+
+class Pytest:
+    """A stand-in for `pytest.main`: each call recorded, each answer told."""
+
+    def __init__(self, *answers: tuple[int, list[str]]) -> None:
+        """Answer the calls in turn: a status, and what the plugin refused."""
+        self.answers = list(answers)
+        self.calls: list[list[str]] = []
+
+    def __call__(self, argv: list[str]) -> int:
+        """Record one call and give its answer.
+
+        Returns:
+            The status told for this call.
+
+        """
+        self.calls.append(argv)
+        status, refused = self.answers.pop(0)
+        STAND_IN.REFUSED = refused
+        return status
+
+
+@fixture
+def labelled(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], None]:
+    """Ready `run` with a stand-in pytest, restoring what a run sets.
+
+    Returns:
+        A function that names the task `profile` runs under.
+
+    """
+    monkeypatch.setattr(sys, "dont_write_bytecode", sys.dont_write_bytecode)
+    monkeypatch.setitem(sys.modules, python_properties.PLUGIN, STAND_IN)
+    STAND_IN.REFUSED = []
+    for name in (python_properties.STORAGE, "PYTHONDONTWRITEBYTECODE"):
+        monkeypatch.delenv(name, raising=False)
+
+    def label(profile: str) -> None:
+        monkeypatch.setenv("MISE_TASK_NAME", python_properties.LABELS[profile])
+
+    return label
+
+
+# The runner over a stand-in pytest: collect, then run.
+def test_a_held_run_collects_then_runs(
+    labelled: Callable[[str], None], capfd: pytest.CaptureFixture[str]
+) -> None:
+    """Collected with no refusal, run, held: exit 0 and the count."""
+    stub = Pytest((0, []), (0, []))
+    labelled("gate")
+    status = python_properties.run(
+        "gate", [Path("a/prop_x.py")], {"ORG_TEST_WORKERS": "1"}, pytest_main=stub
+    )
+    out, err = capfd.readouterr()
+    assert (status, out, err) == (0, f"{GATE_LABEL}: 1 file(s) held\n", "")
+    collect, run = stub.calls
+    assert collect[-3:] == ["a/prop_x.py", "--collect-only", "-q"]
+    assert run[-1] == "a/prop_x.py"
+    assert "--collect-only" not in run
+    assert os.environ[python_properties.STORAGE]
+    assert sys.dont_write_bytecode
+    assert os.environ["PYTHONDONTWRITEBYTECODE"] == "1"
+
+
+def test_each_refusal_is_named_and_nothing_runs(
+    labelled: Callable[[str], None], capfd: pytest.CaptureFixture[str]
+) -> None:
+    """The plugin refused two: both named, exit 1, no run after."""
+    refused = ["prop_x.py: holds no Hypothesis test (no @given)", "prop_y.py::t"]
+    stub = Pytest((0, refused))
+    labelled("gate")
+    status = python_properties.run(
+        "gate", [Path("prop_x.py"), Path("prop_y.py")], {}, pytest_main=stub
+    )
+    out, err = capfd.readouterr()
+    assert (status, out) == (1, "")
+    assert err == "".join(f"{GATE_LABEL}: {line}\n" for line in refused)
+    assert len(stub.calls) == 1
+
+
+def test_a_collection_that_failed_is_red_by_its_status(
+    labelled: Callable[[str], None], capfd: pytest.CaptureFixture[str]
+) -> None:
+    """Pytest could not collect (an import error): exit 1, its status named."""
+    stub = Pytest((2, []))
+    labelled("gate")
+    status = python_properties.run("gate", [Path("prop_x.py")], {}, pytest_main=stub)
+    out, err = capfd.readouterr()
+    assert (status, out) == (1, "")
+    assert err == f"{GATE_LABEL}: pytest could not collect the files (exit 2)\n"
+
+
+def test_a_failed_gate_run_is_red(
+    labelled: Callable[[str], None], capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A property failed: exit 1, pytest's status named."""
+    labelled("gate")
+    status = python_properties.run(
+        "gate", [Path("prop_x.py")], {}, pytest_main=Pytest((0, []), (1, []))
+    )
+    out, err = capfd.readouterr()
+    assert (status, out) == (1, "")
+    assert err == f"{GATE_LABEL}: pytest exited 1; failures above\n"
+
+
+def test_the_runner_prints_the_audit_seed_and_honours_a_given_one(
+    labelled: Callable[[str], None], capfd: pytest.CaptureFixture[str]
+) -> None:
+    """ORG_PROPERTY_SEED reproduces a run; the seed comes first."""
+    stub = Pytest((0, []), (1, []))
+    labelled("audit")
+    status = python_properties.run(
+        "audit",
+        [Path("prop_x.py")],
+        {"ORG_PROPERTY_SEED": "7", "ORG_TEST_WORKERS": "1"},
+        pytest_main=stub,
+    )
+    out, err = capfd.readouterr()
+    assert status == 1
+    assert out == f"{AUDIT_LABEL}: seed 7 (reproduce: ORG_PROPERTY_SEED=7)\n"
+    assert err == (
+        f"{AUDIT_LABEL}: seed 7 — commit each falsifying example above as an"
+        " @example row with its fix\n"
+    )
+    assert "--hypothesis-seed=7" not in stub.calls[0]
+    assert [
+        word for word in stub.calls[1] if word.startswith("--d") or "seed" in word
+    ] == ["--hypothesis-seed=7", "--durations=10"]
+
+
+def test_more_workers_than_one_spread_the_files(
+    labelled: Callable[[str], None], capfd: pytest.CaptureFixture[str]
+) -> None:
+    """Two workers asked for, two files: `-n 2` on the run, none to collect."""
+    stub = Pytest((0, []), (0, []))
+    labelled("gate")
+    files = [Path("prop_a.py"), Path("prop_b.py")]
+    status = python_properties.run(
+        "gate", files, {python_properties.WORKERS: "2"}, pytest_main=stub
+    )
+    assert (status, capfd.readouterr().out) == (0, f"{GATE_LABEL}: 2 file(s) held\n")
+    collect, run_ = stub.calls
+    assert "-n" not in collect
+    assert run_[run_.index("-n") + 1] == "2"
+
+
+@pytest.mark.parametrize("named", ["", "0", "x"])
+def test_workers_default_to_the_cores_at_most_eight(named: str) -> None:
+    """ORG_TEST_WORKERS unset, zero or not a number: the cores, capped."""
+    cores = min(os.cpu_count() or 1, python_properties.MAX_WORKERS)
+    assert python_properties.workers({python_properties.WORKERS: named}) == cores
+
+
+def test_an_audit_with_no_seed_chooses_and_prints_one(
+    labelled: Callable[[str], None], capfd: pytest.CaptureFixture[str]
+) -> None:
+    """No ORG_PROPERTY_SEED: a seed is drawn, printed, and handed to pytest."""
+    stub = Pytest((0, []), (0, []))
+    labelled("audit")
+    status = python_properties.run("audit", [Path("prop_x.py")], {}, pytest_main=stub)
+    out = capfd.readouterr().out
+    assert status == 0
+    seed = re.fullmatch(
+        rf"{AUDIT_LABEL}: seed (\d+) \(reproduce: ORG_PROPERTY_SEED=\1\)\n"
+        rf"{AUDIT_LABEL}: 1 file\(s\) held\n",
+        out,
+    )
+    assert seed is not None
+    assert f"--hypothesis-seed={seed.group(1)}" in stub.calls[1]
+
+
+class Ran:
+    """A stand-in for the run itself: what it was handed, answering 0."""
+
+    def __init__(self) -> None:
+        """Hold no call yet."""
+        self.calls: list[tuple[str, list[Path], dict[str, str]]] = []
+
+    def __call__(self, profile: str, files: list[Path], environ: dict[str, str]) -> int:
+        """Record one call.
+
+        Returns:
+            0, as a run that held.
+
+        """
+        self.calls.append((profile, files, environ))
+        return 0
+
+
+@fixture
+def ran(monkeypatch: pytest.MonkeyPatch, as_task: Callable[[str], None]) -> Ran:
+    """Put a stand-in run under `main`, naming the gate's task.
+
+    Returns:
+        The stand-in, holding each call `main` made.
+
+    """
+    stand_in = Ran()
+    monkeypatch.setattr(python_properties, "run", stand_in)
+    monkeypatch.setenv("ORG_SHARD_REPORTS", "")
+    as_task(GATE_LABEL)
+    return stand_in
+
+
+def test_an_unsharded_run_takes_every_file_as_given(ran: Ran) -> None:
+    """No ORG_SHARD: every file, in the order given, the workers untouched."""
+    assert python_properties.main(["gate", "b/prop_y.py", "a/prop_x.py"]) == 0
+    ((profile, files, environ),) = ran.calls
+    assert (profile, files) == ("gate", [Path("b/prop_y.py"), Path("a/prop_x.py")])
+    assert python_properties.WORKERS not in environ
+
+
+def test_one_of_one_is_every_file_unsharded(
+    ran: Ran, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """ORG_SHARD=1/1 is the whole run: no shard line, the workers untouched."""
+    monkeypatch.setenv(shard.VARIABLE, "1/1")
+    assert python_properties.main(["gate", "prop_x.py"]) == 0
+    assert not capfd.readouterr().out
+    ((_, _, environ),) = ran.calls
+    assert python_properties.WORKERS not in environ
+
+
+def test_a_named_shard_runs_its_share_in_one_process(
+    ran: Ran, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """2/2 of three files is the second sorted one, on one worker."""
+    monkeypatch.setenv(shard.VARIABLE, "2/2")
+    argv = ["gate", "c/prop_z.py", "a/prop_x.py", "b/prop_y.py"]
+    assert python_properties.main(argv) == 0
+    assert capfd.readouterr().out == f"{GATE_LABEL}: shard 2/2, 1 of 3 file(s)\n"
+    ((_, files, environ),) = ran.calls
+    assert files == [Path("b/prop_y.py")]
+    assert environ[python_properties.WORKERS] == "1"
+
+
+def test_a_shard_holding_no_file_says_so_and_runs_nothing(
+    ran: Ran, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """3/3 of two files holds none: exit 0, said, nothing run."""
+    monkeypatch.setenv(shard.VARIABLE, "3/3")
+    assert python_properties.main(["gate", "prop_a.py", "prop_b.py"]) == 0
+    held = "holds none of the 2 file(s), skipped"
+    assert capfd.readouterr().out == f"{GATE_LABEL}: shard 3/3 {held}\n"
+    assert ran.calls == []
+
+
+def test_a_shard_that_is_not_k_of_n_is_a_usage_error(
+    ran: Ran, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """ORG_SHARD=3/2 is refused by name, exit 2, nothing run."""
+    monkeypatch.setenv(shard.VARIABLE, "3/2")
+    assert python_properties.main(["gate", "prop_a.py"]) == python_properties.EXIT_USAGE
+    assert capfd.readouterr().err == (
+        f"{GATE_LABEL}: ORG_SHARD='3/2' is not a shard (k/n, 1 <= k <= n)\n"
+    )
+    assert ran.calls == []
+
+
+def test_no_plugin_loaded_is_no_refusal(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A collection that never loaded the plugin refused nothing."""
+    monkeypatch.delitem(sys.modules, python_properties.PLUGIN, raising=False)
+    assert python_properties.refused() == []
+
+
+# The real plugin, collecting planted property files in a pytest this
+# row runs in process: what it refuses, and what it lets through.
+PLANTED_HOLDS = """\
+from hypothesis import given, strategies as st
+
+
+@given(st.integers())
+def test_holds(n):
+    assert 2 * n % 2 == 0
+"""
+PLANTED_PLAIN = """\
+def test_plain():
+    pass
+"""
+PLANTED_BOUNDED = """\
+from hypothesis import given, settings, strategies as st
+
+
+@settings(max_examples=3)
+@given(st.integers())
+def test_few(n):
+    assert isinstance(n, int)
+"""
+
+
+class Kept:
+    """A plugin for a row's own pytest: it keeps the belt's plugin module.
+
+    The row's pytest imports the belt's plugin itself and drops it from
+    `sys.modules` when it returns, as every in-process run does; this
+    holds the module it collected with, for the runner to read.
+    """
+
+    def __init__(self) -> None:
+        """Hold no module yet."""
+        self.module: types.ModuleType | None = None
+
+    def pytest_collection_finish(self) -> None:
+        """Keep the plugin module the collection ran."""
+        self.module = sys.modules.get(python_properties.PLUGIN)
+
+
+def collected_by_the_plugin(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch, **files: str
+) -> int:
+    """Run the gate over planted files, its pytest a real in-process one.
+
+    Returns:
+        The runner's exit status.
+
+    """
+    monkeypatch.setattr(sys, "dont_write_bytecode", sys.dont_write_bytecode)
+    monkeypatch.chdir(pytester.path)
+    monkeypatch.setenv("MISE_TASK_NAME", GATE_LABEL)
+    for name, text in files.items():
+        pytester.makepyfile(**{name: text})
+
+    def inprocess(argv: list[str]) -> int:
+        # Each run imports the plugin afresh, with the Hypothesis it
+        # imports: the module kept from the last would register its
+        # profiles with a Hypothesis this run no longer has.
+        monkeypatch.delitem(sys.modules, python_properties.PLUGIN, raising=False)
+        kept = Kept()
+        plugins: list[object] = [kept]
+        status = int(pytester.runpytest_inprocess(*argv, plugins=plugins).ret)
+        if kept.module is not None:
+            monkeypatch.setitem(sys.modules, python_properties.PLUGIN, kept.module)
+        return status
+
+    paths = [pytester.path / f"{name}.py" for name in files]
+    environ = {python_properties.WORKERS: "1"}
+    return python_properties.run("gate", paths, environ, pytest_main=inprocess)
+
+
+def test_the_plugin_lets_a_property_file_run(
+    pytester: pytest.Pytester,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """A file whose one test is a property, under the profile's bounds, holds."""
+    status = collected_by_the_plugin(pytester, monkeypatch, prop_holds=PLANTED_HOLDS)
+    assert status == 0, capfd.readouterr()
+    assert capfd.readouterr().out.endswith(f"{GATE_LABEL}: 1 file(s) held\n")
+
+
+def test_the_plugin_refuses_a_bare_file_and_a_test_with_its_own_bounds(
+    pytester: pytest.Pytester,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """Both refusals named by the real plugin, and nothing run after."""
+    status = collected_by_the_plugin(
+        pytester, monkeypatch, prop_plain=PLANTED_PLAIN, prop_few=PLANTED_BOUNDED
+    )
+    err = capfd.readouterr().err
+    assert status == 1
+    assert f"{GATE_LABEL}: prop_plain.py: holds no Hypothesis test (no @given)" in err
+    assert (
+        f"{GATE_LABEL}: prop_few.py::test_few sets its own bounds (max_examples=3);"
+        " the belt's profile owns them"
+    ) in err
