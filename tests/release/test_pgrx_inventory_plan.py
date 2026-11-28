@@ -302,3 +302,19 @@ def test_a_wrong_argument_count_is_usage(
     assert (ended.value.code, out) == (2, "")
     assert err.startswith("usage: belt inventory-plan "), err
     assert err.splitlines()[-1] == error
+
+
+# The workflow passes the caller's crate dir after `--`: a value that reads
+# as an option is a crate dir, refused by name, never argparse's help.
+def test_a_crate_dir_that_reads_as_an_option_is_refused(
+    plant: Plant, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """`-h` after `--`: exit 1 naming it, no plan and no help."""
+    planted = plant()
+    status = inventory_plan.main(["--", "-h", "16"])
+    run = planted.ran(status, capfd.readouterr())
+    assert (run.returncode, run.stdout) == (1, "")
+    assert run.stderr == (
+        "::error::inventory-plan: -h/Cargo.toml: [Errno 2] No such file or"
+        " directory: '-h/Cargo.toml'\n"
+    )

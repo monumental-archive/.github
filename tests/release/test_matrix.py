@@ -690,6 +690,11 @@ def test_malformed_command_lines(
             "::error::matrix: -h is not a PG major",
             id="pgrx-images",
         ),
+        pytest.param(
+            ["pgrx-extension", MAPPING, "--", "-h"],
+            "::error::matrix: -h is not a PG major",
+            id="pgrx-extension",
+        ),
     ],
 )
 def test_a_request_that_reads_as_an_option_is_refused(
