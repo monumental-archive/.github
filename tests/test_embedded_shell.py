@@ -15,7 +15,6 @@ should run looks like success.
 import io
 import os
 import subprocess
-import sys
 import tempfile
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -577,19 +576,16 @@ class TestParser:
         with TemporaryDirectory() as tmp:
             path = Path(tmp) / "w.yml"
             path.write_text("on: [push\n", encoding="utf-8")
-            status = es.main([str(path)])
-            out, err = capfd.readouterr()
+            plain = es.main([str(path)])
+            _out, said = capfd.readouterr()
             debt = Path(tmp) / "debt.txt"
             with pytest.MonkeyPatch.context() as patched:
-                for name, value in (
-                    support.env(MISE_TASK_NAME="lint:workflow-shell")
-                ).items():
-                    patched.setenv(name, value)
-                status = es.main(["--ceiling", str(debt), str(path)])
+                patched.setenv("MISE_TASK_NAME", "lint:workflow-shell")
+                ceiling = es.main(["--ceiling", str(debt), str(path)])
             _out, err = capfd.readouterr()
-        assert status == 1
-        assert err.startswith(f"{TASK}: {path}: ")
-        assert status == 1
+        assert plain == 1
+        assert said.startswith(f"{TASK}: {path}: ")
+        assert ceiling == 1
         assert err.startswith(f"lint:workflow-shell: {path}: ")
 
     def test_fix_mode_rewrites_a_literal_block_byte_for_byte(self) -> None:
@@ -661,10 +657,13 @@ class TestOrgConfig:
             workflow('- name: s\n  run: |\n    x=1\n    echo "$x"'),
             encoding="utf-8",
         )
+        # The environment is built before the old one is cleared: it
+        # reads the variables it keeps from this one.
+        planted = support.env(home)
         with pytest.MonkeyPatch.context() as patched:
             for name in list(os.environ):
                 patched.delenv(name)
-            for name, value in (support.env(home)).items():
+            for name, value in planted.items():
                 patched.setenv(name, value)
             found = es.check(path, fmt=False, lint=True)
         assert any("[SC2250]" in f for f in found), found
@@ -1358,35 +1357,28 @@ class TestCli:
         with TemporaryDirectory() as tmp:
             t = Tree(Path(tmp), workflow(step("Big", 16)), None)
             argv = ["--ceiling", str(t.debt), str(t.wf)]
-            status = es.main(argv)
-            out, err = capfd.readouterr()
+            red = es.main(argv)
+            _out, said = capfd.readouterr()
             t.debt.write_text(t.entry("Big", 16), encoding="utf-8")
-            status = es.main(argv)
+            green = es.main(argv)
             _out, err = capfd.readouterr()
-        assert status == 1
-        assert "step 'Big' holds a run: block of 16 lines" in err
-        assert status == 0, err
+        assert red == 1
+        assert "step 'Big' holds a run: block of 16 lines" in said
+        assert green == 0, err
 
-    def test_task_ceiling_exit_status(self) -> None:
-        """Started as a process: `--task-ceiling` red, then green when listed.
-
-        The script contract (#1697): the one row that starts the helper.
-        """
+    def test_task_ceiling_exit_status(self, capfd: pytest.CaptureFixture[str]) -> None:
+        """`--task-ceiling` red, then green when listed."""
         with TemporaryDirectory() as tmp:
             cfg, debt = Path(tmp) / "mise.toml", Path(tmp) / "debt.txt"
             cfg.write_text(config(lint_a=16), encoding="utf-8")
-            argv = [
-                sys.executable,
-                str(_HERE / "embedded_shell.py"),
-                "--task-ceiling",
-                str(debt),
-                str(cfg),
-            ]
-            red = subprocess.run(argv, capture_output=True, text=True, check=False)
+            argv = ["--task-ceiling", str(debt), str(cfg)]
+            red = es.main(argv)
+            _out, said = capfd.readouterr()
             debt.write_text(
                 f"{cfg}\tlint:a\t16\t# #1544 unassigned\n", encoding="utf-8"
             )
-            green = subprocess.run(argv, capture_output=True, text=True, check=False)
-        assert red.returncode == 1
-        assert "task 'lint:a' holds a body of 16 lines" in red.stderr
-        assert green.returncode == 0, green.stderr
+            green = es.main(argv)
+            _out, err = capfd.readouterr()
+        assert red == 1
+        assert "task 'lint:a' holds a body of 16 lines" in said
+        assert green == 0, err

@@ -1,8 +1,8 @@
 """Planted rows for the decoy the canon's `test` task runs under (#1463).
 
 The first rows run the `test` task's own body, decoded from the canon's
-`mise.toml`, over a planted tree: one test file per discovery root, and
-in `mise/` one that runs `git add` with whatever environment it was
+`mise.toml`, over a planted tree: the belt, and in `tests/` a passing
+test and one that runs `git add` with whatever environment it was
 given. The body runs with `GIT_DIR` at a throwaway repository, the
 environment git hands a pre-push hook in a linked worktree (#857). The
 throwaway stands in for the real repository: its index must come out
@@ -17,15 +17,13 @@ the very hook they are about.
 
 import os
 import pathlib
-import re
 import subprocess
-import sys
 import tempfile
 from pathlib import Path
 
 import pytest
 
-from belt import decoded, typed_std
+from belt import decoded
 from belt import git_decoy as gd
 from tests import support
 
@@ -47,16 +45,9 @@ IDENTITY = {
 COMMIT = (
     "git -c user.name=t -c user.email=t@example.invalid -c commit.gpgsign=false commit"
 )
-# The roots the body names: `unittest_guarded.py roots <dir>…` (#2056).
-ROOTS_RE = re.compile(r"unittest_guarded\.py roots((?: [^\s\\]+)+)")
-
 PASSING = """\
-import unittest
-
-
-class T(unittest.TestCase):
-    def test_ok(self):
-        self.assertTrue(True)
+def test_ok():
+    pass
 """
 
 # The planted fault: `git add` in a fresh directory, with the environment
@@ -65,19 +56,15 @@ LEAKY = """\
 import os
 import pathlib
 import subprocess
-import tempfile
-import unittest
 
 ENV = {ENV}
 
 
-class T(unittest.TestCase):
-    def test_stage_a_fixture(self):
-        with tempfile.TemporaryDirectory() as d:
-            if ENV is not None:
-                subprocess.run(["git", "init", "-q"], cwd=d, env=ENV, check=True)
-            pathlib.Path(d, "leak.txt").write_text("x\\n")
-            subprocess.run(["git", "add", "leak.txt"], cwd=d, env=ENV, check=True)
+def test_stage_a_fixture(tmp_path):
+    if ENV is not None:
+        subprocess.run(["git", "init", "-q"], cwd=tmp_path, env=ENV, check=True)
+    pathlib.Path(tmp_path, "leak.txt").write_text("x\\n")
+    subprocess.run(["git", "add", "leak.txt"], cwd=tmp_path, env=ENV, check=True)
 """
 
 # The careful harness's environment, planted as code into a module that
@@ -95,26 +82,6 @@ def body() -> str:
     config = decoded.load_toml((_HERE.parent / "mise.toml").read_text(encoding="utf-8"))
     tasks = decoded.as_object(config["tasks"], "the [tasks] table")
     return decoded.as_str(decoded.as_object(tasks["test"], "test")["run"], "the run")
-
-
-def roots() -> list[str]:
-    """Read the discovery roots the `test` task names.
-
-    Returns:
-        Each root the `unittest_guarded.py roots` call names, in order.
-
-    Raises:
-        AssertionError: the body names none, so a row would plant no
-            root and prove nothing.
-
-    """
-    found: list[str] = []
-    for match in ROOTS_RE.finditer(body()):
-        found += (typed_std.group(match, 1) or "").split()
-    if not found:
-        msg = "the test task names no `unittest_guarded.py roots` call"
-        raise AssertionError(msg)
-    return found
 
 
 def throwaway(root: pathlib.Path) -> pathlib.Path:
@@ -167,16 +134,13 @@ class TestTask:
         tmp = tempfile.mkdtemp(dir=self.tmp)
         base = pathlib.Path(tmp)
         tree = base / "tree"
-        # The runner and all it reads, as the tree's mise/: the whole
-        # belt, its own tests taken out, since the tree's tests are the
-        # ones planted here.
-        for test in support.belt(tree / "mise").glob("test_*.py"):
-            test.unlink()
-        for root in roots():
-            (tree / root).mkdir(parents=True, exist_ok=True)
-            (tree / root / "test_ok.py").write_text(PASSING, encoding="utf-8")
+        # The runner and all it reads, as the tree's own: the whole belt,
+        # and in `tests/`, the one root the body names, the planted tests.
+        support.belt(tree)
+        (tree / "tests").mkdir()
+        (tree / "tests" / "test_ok.py").write_text(PASSING, encoding="utf-8")
         leaky = LEAKY.replace("{ENV}", SCRUB if scrubbed else "None")
-        (tree / "mise" / "test_leaky.py").write_text(leaky, encoding="utf-8")
+        (tree / "tests" / "test_leaky.py").write_text(leaky, encoding="utf-8")
         return tree, throwaway(base / "real")
 
     @staticmethod
@@ -261,21 +225,6 @@ class TestHelper:
         _out, err = capfd.readouterr()
         return status, err
 
-    def test_the_script_contract(self) -> None:
-        """Started as a process, `run` hands back its command's status."""
-        r = subprocess.run(
-            [
-                *(sys.executable, str(_HERE / "git_decoy.py")),
-                *("run", str(self.decoy), "--", BASH, "-c", "exit 3"),
-            ],
-            cwd=self.work,
-            env=self.leak_env(),
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        assert (r.returncode, r.stderr) == (3, "")
-
     def test_plant_makes_the_decoy_and_exits_0(
         self, capfd: pytest.CaptureFixture[str]
     ) -> None:
@@ -295,34 +244,51 @@ class TestHelper:
         self, capfd: pytest.CaptureFixture[str]
     ) -> None:
         """`run DIR` and nothing to run is argparse's exit 2, by name."""
-        with pytest.MonkeyPatch.context() as patched:
+        with (
+            pytest.MonkeyPatch.context() as patched,
+            pytest.raises(SystemExit) as ended,
+        ):
             for name, value in (self.leak_env()).items():
                 patched.setenv(name, value)
             patched.chdir(self.work)
-            status = gd.main(["run", str(self.decoy)])
+            gd.main(["run", str(self.decoy)])
         _out, err = capfd.readouterr()
-        assert status == 2
+        assert ended.value.code == 2
         assert "run: no command after the decoy" in err
 
-    def test_each_change_is_named(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """Commit, branch, switch and stage each red with what changed."""
-        rows = [
-            (f"{COMMIT} -q --allow-empty -m leaked", ["new commit: leaked"]),
-            ("git branch topic", ["new or moved ref: refs/heads/topic"]),
-            (
+    @pytest.mark.parametrize(
+        ("script", "wanted"),
+        [
+            pytest.param(
+                f"{COMMIT} -q --allow-empty -m leaked",
+                ["new commit: leaked"],
+                id="commit",
+            ),
+            pytest.param(
+                "git branch topic", ["new or moved ref: refs/heads/topic"], id="branch"
+            ),
+            pytest.param(
                 "git checkout -q -b topic",
                 ["HEAD moved: ref: refs/heads/", "new or moved ref: refs/heads/topic"],
+                id="switch",
             ),
-            ("echo x > a.txt && git add a.txt", ["staged: A\ta.txt"]),
-            ("git config user.name leaked", ["config rewritten"]),
-        ]
-        for script, wanted in rows:
-            self.setUp()
-            status, err = self.leak(script, capfd=capfd)
-            assert status == 1, err
-            assert gd.MESSAGE in err
-            for line in wanted:
-                assert line in err
+            pytest.param(
+                "echo x > a.txt && git add a.txt", ["staged: A\ta.txt"], id="stage"
+            ),
+            pytest.param(
+                "git config user.name leaked", ["config rewritten"], id="config"
+            ),
+        ],
+    )
+    def test_each_change_is_named(
+        self, script: str, wanted: list[str], capfd: pytest.CaptureFixture[str]
+    ) -> None:
+        """Commit, branch, switch, stage and config each red with what changed."""
+        status, err = self.leak(script, capfd=capfd)
+        assert status == 1, err
+        assert gd.MESSAGE in err
+        for line in wanted:
+            assert line in err
 
     def test_no_git_passes_the_status_through(
         self, capfd: pytest.CaptureFixture[str]

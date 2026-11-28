@@ -17,7 +17,6 @@ Each row plants one repository, runs the task body as mise does
 they would red this repository's own `lint:typos`.
 """
 
-import contextlib
 import io
 import os
 import subprocess
@@ -252,10 +251,13 @@ class TestProducers:
         in, so the list is that repository's own.
         """
         tree = self.planted()
-        with pytest.MonkeyPatch.context() as patched, contextlib.chdir(tree):
+        # Built before the old environment is cleared: it reads from it.
+        planted = support.env(tree.parent / "home")
+        with pytest.MonkeyPatch.context() as patched:
+            patched.chdir(tree)
             for name in list(os.environ):
                 patched.delenv(name)
-            for name, value in (support.env(tree.parent / "home")).items():
+            for name, value in planted.items():
                 patched.setenv(name, value)
             narrowed: list[str] = tracked.tracked("é*")
             every: list[str] = sorted(tracked.tracked())

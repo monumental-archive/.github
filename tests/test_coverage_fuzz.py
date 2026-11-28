@@ -15,6 +15,7 @@ Each row asserts the message, not just the exit status: a planted row
 scored on exit alone can pass for the wrong reason.
 """
 
+import io
 import os
 import subprocess
 import sys
@@ -337,7 +338,9 @@ class TestFloorRows(TestFuzzCase):
         done = self.check()
         assert done.returncode == 0, done.stderr
         assert "coverage:check: go leg holds its floor 80.0 (93.0%)\n" in done.stdout
-        assert "fuzz" not in done.stdout + done.stderr
+        # The row's own scratch path carries its name, which says "fuzz".
+        said = (done.stdout + done.stderr).replace(str(self.tmp), "<tmp>")
+        assert "fuzz" not in said
         assert self.fuzz_calls() == NO_LINES
 
     def test_a_fuzz_line_and_its_record_are_refused_by_name(self) -> None:
@@ -349,33 +352,24 @@ class TestFloorRows(TestFuzzCase):
         assert f"coverage:check: .coverage-floor states fuzz-x: {LEFT}\n" == done.stderr
         assert self.log("go") == NO_LINES
 
-    def test_adopt_writes_no_fuzz_line(self) -> None:
+    def test_adopt_writes_no_fuzz_line(self, capfd: pytest.CaptureFixture[str]) -> None:
         """coverage:adopt's measurement and writer, over fuzz targets: no `fuzz-`."""
         self.both()
         measured = self.measure()
         assert measured.returncode == 0, measured.stderr
         assert measured.stdout == "go 93.0\n"
-        written = subprocess.run(
-            [
-                sys.executable,
-                str(BELT / "coverage_floor.py"),
-                "write",
-                "--provenance",
-                "coverage:adopt",
-                "--adopt",
-            ],
-            cwd=self.tree,
-            env=self.env,
-            input=measured.stdout,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        assert written.returncode == 0, written.stderr
-        assert (
-            written.stdout
-            == "coverage-floor: adopted .coverage-floor: go 90 (measured 93.0)\n"
-        )
+        capfd.readouterr()
+        with pytest.MonkeyPatch.context() as patched:
+            for key, value in self.env.items():
+                patched.setenv(key, value)
+            patched.delenv("MISE_TASK_NAME", raising=False)
+            patched.chdir(self.tree)
+            patched.setattr(sys, "stdin", io.StringIO(measured.stdout))
+            patched.setattr(sys, "argv", ["coverage-floor"])
+            status = cf.main(["write", "--provenance", "coverage:adopt", "--adopt"])
+        out, err = capfd.readouterr()
+        assert status == 0, err
+        assert out == "coverage-floor: adopted .coverage-floor: go 90 (measured 93.0)\n"
         text = (self.tree / ".coverage-floor").read_text(encoding="utf-8")
         assert "fuzz-" not in text
         parsed, problems = cf.parse(text)

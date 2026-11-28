@@ -1625,7 +1625,7 @@ PLAN_ROWS: tuple[tuple[str, str, int, str], ...] = (
         "a recorded major the plan does not make",
         "rust pgrx-pg14 pgrx-pg15",
         1,
-        "coverage_floor.py: the floor records pgrx-pg14, measured by the pgrx:14 job,"
+        "coverage-floor: the floor records pgrx-pg14, measured by the pgrx:14 job,"
         " and this run plans none (planned majors: 15,16,17,18)\n"
         + NO_OWNER.format(leg="pgrx-pg14"),
     ),
@@ -1730,7 +1730,12 @@ class TestThePlanFeedsTheHelper:
 
     @pytest.mark.parametrize(("name", "legs", "status", "err"), PLAN_ROWS)
     def test_the_producers_stdout_is_the_helpers_input(
-        self, name: object, legs: object, status: object, err: object
+        self,
+        name: str,
+        legs: str,
+        status: int,
+        err: str,
+        capfd: pytest.CaptureFixture[str],
     ) -> None:
         """pgrx-plan.sh's literal stdout, given to `planned --majors-json`."""
         plan = self.run_in_tree([
@@ -1741,14 +1746,17 @@ class TestThePlanFeedsTheHelper:
         assert plan.returncode == 0, plan.stderr
         assert plan.stdout == '["15","16","17","18"]\n'
         self.floor(legs)
-        done = self.run_in_tree([
-            sys.executable,
-            str(self.canon / "mise" / "coverage_floor.py"),
-            "planned",
-            "--majors-json",
-            plan.stdout,
-        ])
-        assert (status, "", err) == (done.returncode, done.stdout, done.stderr)
+        capfd.readouterr()
+        with pytest.MonkeyPatch.context() as patched:
+            for key, value in self.env.items():
+                patched.setenv(key, value)
+            # ci.yml's plan step runs under no task: the command names it.
+            patched.delenv("MISE_TASK_NAME", raising=False)
+            patched.chdir(self.tree)
+            patched.setattr(sys, "argv", ["coverage-floor"])
+            said = cf.main(["planned", "--majors-json", plan.stdout])
+        out, wrote = capfd.readouterr()
+        assert (status, "", err) == (said, out, wrote)
 
     @pytest.mark.parametrize(("name", "legs", "status", "err"), PLAN_ROWS)
     def test_the_plan_step_hands_the_producer_to_the_helper(

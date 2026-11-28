@@ -11,7 +11,6 @@ with a scrubbed environment (#857). The last row is the canon itself.
 
 import io
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -41,7 +40,6 @@ pytestmark = pytest.mark.usefixtures("_task")
 
 
 _HERE = support.MISE
-HELPER = _HERE / "coverage_exclusions.py"
 GIT = support.tool("git")
 BASH = support.tool("bash")
 # No user or system git config reaches a fixture repository.
@@ -124,31 +122,31 @@ class TestMarkers:
     @pytest.mark.parametrize(("name", "body", "rule"), MARKERS)
     def test_each_marker_is_red_by_file_line_and_rule(
         self,
-        name: object,
-        body: object,
-        rule: object,
+        name: str,
+        body: str,
+        rule: str,
         capfd: pytest.CaptureFixture[str],
     ) -> None:
         """Every marker of every measured language is a finding, located."""
-        r = helper(self.plant(name, body), name, capfd=capfd)
-        assert r.returncode == 1, r.stderr
+        status, _out, err = helper(self.plant(name, body), name, capfd=capfd)
+        assert status == 1, err
         line = next(
             i
             for i, text in enumerate(body.splitlines(), 1)
             if ("cover" in text or "ignore" in text or "branch" in text)
         )
-        assert f"{name}:{line}: {rule}\n" in r.stderr
-        assert "lint:coverage-exclusions: 1 coverage exclusion(s)" in r.stderr
-        assert "There is no allow-list." in r.stderr
+        assert f"{name}:{line}: {rule}\n" in err
+        assert "lint:coverage-exclusions: 1 coverage exclusion(s)" in err
+        assert "There is no allow-list." in err
 
     @pytest.mark.parametrize(("name", "body"), QUOTED)
     def test_a_quoted_marker_is_text_not_an_exclusion(
-        self, name: object, body: object, capfd: pytest.CaptureFixture[str]
+        self, name: str, body: str, capfd: pytest.CaptureFixture[str]
     ) -> None:
         """A marker inside a string literal is not a finding, in any language."""
-        r = helper(self.plant(name, body), name, capfd=capfd)
-        assert r.returncode == 0, r.stderr
-        assert r.stderr == ""
+        status, _out, err = helper(self.plant(name, body), name, capfd=capfd)
+        assert status == 0, err
+        assert err == ""
 
     def test_other_languages_are_not_read(
         self, capfd: pytest.CaptureFixture[str]
@@ -159,20 +157,6 @@ class TestMarkers:
         )
         assert status == 0, err
         assert out == "lint:coverage-exclusions: 1 file(s), no coverage exclusions\n"
-
-    def test_the_helper_runs_as_a_script(self) -> None:
-        """The script contract: it reads stdin, reports, and exits 1 on a marker."""
-        name, body, rule = MARKERS[0]
-        r = subprocess.run(
-            [sys.executable, str(HELPER)],
-            input=f"{name}\0",
-            cwd=self.plant(name, body),
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        assert r.returncode == 1, r.stderr
-        assert f"{name}:1: {rule}\n" in r.stderr
 
 
 def task_body() -> str:
@@ -258,81 +242,6 @@ class TestTask:
         )
         assert r.returncode == 0, r.stderr
         assert "1 file(s), no coverage exclusions" in r.stdout
-
-
-@pytest.mark.usefixtures("_tmp")
-class TestMissingSibling:
-    """The two helpers' own message, where their dead guard used to be.
-
-    Both rows fail before #1522: the `_SPEC is None` guard could never
-    run, so a missing sibling gave a raw FileNotFoundError traceback.
-    """
-
-    @pytest.fixture
-    def _tmp(self, tmp_path: Path) -> None:
-        """Give the row's scratch directories one home, removed after it."""
-        self.tmp = tmp_path
-
-    def alone(
-        self, source: Path, relative: str, *beside: str
-    ) -> subprocess.CompletedProcess[str]:
-        """Run one helper copied into a tree that lacks its sibling.
-
-        `beside` names the files copied with it: the finding writer, for
-        a helper that reports the missing sibling through it.
-
-        Returns:
-            The finished process.
-
-        """
-        tmp = tempfile.mkdtemp(dir=self.tmp)
-        target = Path(tmp) / relative
-        target.parent.mkdir(parents=True)
-        shutil.copy(source, target)
-        for name in beside:
-            shutil.copy(source.parent / name, target.parent / name)
-        return subprocess.run(
-            [sys.executable, str(target), "--help"],
-            capture_output=True,
-            text=True,
-            check=False,
-            env=support.env(MISE_TASK_NAME="lint:bash-portability"),
-        )
-
-    def test_exit_trap_without_belt_shell(self) -> None:
-        """exit_trap.py names belt_shell.py and exits non-zero."""
-        r = self.alone(
-            _HERE / "exit_trap.py",
-            "mise/exit_trap.py",
-            "findings.py",
-            "workflow_command.py",
-        )
-        assert r.returncode != 0
-        assert (
-            r.stderr
-            == "lint:bash-portability: belt belt-shell did not arrive beside this file\n"
-        )
-
-    def test_publish_crates_without_crates_index(self) -> None:
-        """publish_crates.py names mise/crates_index.py and exits non-zero."""
-        tmp = tempfile.mkdtemp(dir=self.tmp)
-        helper = "release/publish_crates.py"
-        # A stub of its own text, so the helper resolves its siblings in
-        # this tree; the writer beside it, the missing sibling removed.
-        root = support.canon(tmp, stubs={helper: (_HERE.parent / helper).read_text()})
-        (root / "mise" / "crates_index.py").unlink()
-        r = subprocess.run(
-            [sys.executable, str(root / helper), "--help"],
-            capture_output=True,
-            text=True,
-            check=False,
-            env=support.env(MISE_TASK_NAME="lint:bash-portability"),
-        )
-        assert r.returncode != 0
-        assert r.stderr == (
-            "lint:bash-portability: mise/crates_index.py did not arrive in the"
-            " canon tree\n"
-        )
 
 
 class TestCanon:

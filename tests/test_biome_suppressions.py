@@ -31,7 +31,6 @@ if TYPE_CHECKING:
 
 # The task that runs the helper, whose name its findings carry (#1934).
 TASK = "lint:biome"
-HELPER = support.MISE / "biome_suppressions.py"
 BELT = support.MISE
 SCAFFOLD = BELT.parent / "scaffold"
 GIT = support.tool("git")
@@ -212,30 +211,32 @@ class TestMain:
     """The command: paths on stdin, findings and remedy on stderr."""
 
     @staticmethod
-    def run_helper(root: Path, names: str) -> subprocess.CompletedProcess[str]:
-        """Run the helper in `root` with `names` on stdin.
+    def run_helper(
+        root: Path, names: str, capfd: pytest.CaptureFixture[str]
+    ) -> subprocess.CompletedProcess[str]:
+        """Run the helper in `root` with `names` on stdin, in process.
 
         Returns:
-            The finished process.
+            Its status and what it wrote, as a finished process's.
 
         """
-        return subprocess.run(
-            [sys.executable, str(HELPER)],
-            cwd=root,
-            input=names,
-            env=support.env(MISE_TASK_NAME=TASK),
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        with pytest.MonkeyPatch.context() as patched:
+            patched.setenv("MISE_TASK_NAME", TASK)
+            patched.chdir(root)
+            patched.setattr(sys, "stdin", io.StringIO(names))
+            status = bsup.main([])
+        out, err = capfd.readouterr()
+        return subprocess.CompletedProcess([], status, out, err)
 
-    def test_findings_name_each_file_line_and_the_remedy(self) -> None:
+    def test_findings_name_each_file_line_and_the_remedy(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Every file's forms together, then the remedy; exit 1."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "a.ts").write_text("\n// biome-ignore-all x\n")
             (root / "b.css").write_text("/* biome-ignore-start x */\n")
-            done = self.run_helper(root, "a.ts\0\0b.css\0gone.ts\0")
+            done = self.run_helper(root, "a.ts\0\0b.css\0gone.ts\0", capfd)
         assert done.returncode == 1
         assert done.stdout == ""
         assert (
@@ -246,19 +247,23 @@ class TestMain:
             + "".join(f"  {line}\n" for line in bsup.REMEDY)
         ) == done.stderr
 
-    def test_clean_input_prints_nothing(self) -> None:
+    def test_clean_input_prints_nothing(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """No finding: exit 0, silent."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "a.ts").write_text("// biome-ignore lint/x/y: z\n")
-            done = self.run_helper(root, "a.ts\0")
+            done = self.run_helper(root, "a.ts\0", capfd)
         assert (done.returncode, done.stdout, done.stderr) == (0, "", "")
 
-    def test_a_file_that_is_not_utf8_is_refused_by_name(self) -> None:
+    def test_a_file_that_is_not_utf8_is_refused_by_name(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Name a file biome could not read either."""
         with tempfile.TemporaryDirectory() as tmp:
             (Path(tmp) / "a.ts").write_bytes(b"\xff\n")
-            done = self.run_helper(Path(tmp), "a.ts\0")
+            done = self.run_helper(Path(tmp), "a.ts\0", capfd)
         assert done.returncode == 1
         assert done.stderr == "lint:biome: a.ts: not UTF-8\n"
 

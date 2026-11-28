@@ -53,22 +53,8 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-# A missing sibling is named, never a bare traceback (#1522): the
-# writer's own absence on its own line, any other through the writer.
-try:
-    from belt import findings as writer
-except ModuleNotFoundError as missing:
-    if missing.name not in {"findings", "workflow_command"}:
-        raise
-    msg = f"exit-trap: {missing.name}.py did not arrive beside this file"
-    raise SystemExit(msg) from None
-try:
-    from belt import belt_shell
-except ModuleNotFoundError as missing:
-    if missing.name != "belt_shell":
-        raise
-    writer.finding("", "belt_shell.py did not arrive beside this file")
-    raise SystemExit(1) from None
+from belt import belt_shell
+from belt import findings as writer
 
 if TYPE_CHECKING:
     from collections.abc import Iterator

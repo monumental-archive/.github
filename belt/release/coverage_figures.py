@@ -34,15 +34,7 @@ import sys
 import zipfile
 from dataclasses import dataclass
 
-from belt import findings
-
-try:
-    from belt import decoded
-except ModuleNotFoundError as missing:
-    if missing.name != "decoded":
-        raise
-    findings.finding("", "mise/decoded.py did not arrive in the canon tree")
-    raise SystemExit(1) from None
+from belt import decoded, findings
 
 LABEL = "release:coverage-floor"
 FILE = "coverage-figures.txt"

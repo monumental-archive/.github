@@ -7,8 +7,6 @@ vitest run `measured` reads off its own command line (`--measured-run`).
 import contextlib
 import io
 import json
-import subprocess
-import sys
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -17,7 +15,6 @@ import pytest
 
 from belt import coverage_js_runner as cj
 from belt import decoded
-from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -35,7 +32,6 @@ def _task(as_task: Callable[[str], None]) -> None:
 pytestmark = pytest.mark.usefixtures("_task")
 
 
-HERE = support.MISE
 
 
 class TestReaders:
@@ -303,19 +299,3 @@ class TestMeasuredRun:
         _out, err = capfd.readouterr()
         assert status == 2
         assert "usage" in err
-
-
-class TestScript:
-    """The one row that starts the helper as a process: the script contract."""
-
-    def test_the_helper_runs_as_a_script(self) -> None:
-        """No tracked package.json: it starts, prints nothing and exits 0."""
-        with tempfile.TemporaryDirectory() as tmp:
-            done = subprocess.run(
-                [sys.executable, str(HERE / "coverage_js_runner.py"), "yarn.lock"],
-                cwd=tmp,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-        assert (done.returncode, done.stdout, done.stderr) == (0, "", "")

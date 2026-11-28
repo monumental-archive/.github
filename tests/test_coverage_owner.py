@@ -10,8 +10,9 @@ clean` as a warning is red, one that cleaned is not.
 
 import os
 import subprocess
-import sys
 import tempfile
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -19,7 +20,6 @@ import pytest
 from belt import coverage_owner
 from tests import support
 
-OWNER = support.MISE / "coverage_owner.py"
 SH = support.tool("sh")
 # What cargo 1.97.1 wrote into a target directory it created, read off
 # a real build (#2070); the claim must leave the same bytes.
@@ -61,21 +61,26 @@ def dead_pid() -> int:
     return int(done.stdout)
 
 
-def claim(target: Path, run: Path) -> subprocess.CompletedProcess[str]:
-    """Run the helper's `claim` as the belt does.
+type Claim = Callable[[Path, Path], subprocess.CompletedProcess[str]]
+
+
+@pytest.fixture
+def claim(capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> Claim:
+    """Run the helper's `claim` as the belt does, in process.
 
     Returns:
-        The finished process, text mode.
+        The claimer: `claim(target, run)`, giving the status and what it
+        wrote as a finished process's.
 
     """
-    return subprocess.run(
-        [sys.executable, str(OWNER), "claim", str(target), str(run)],
-        env=support.env(MISE_TASK_NAME="test"),
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=60,
-    )
+    monkeypatch.setenv("MISE_TASK_NAME", "test")
+
+    def run(target: Path, run_dir: Path) -> subprocess.CompletedProcess[str]:
+        status = coverage_owner.main(["claim", str(target), str(run_dir)])
+        out, err = capfd.readouterr()
+        return subprocess.CompletedProcess([], status, out, err)
+
+    return run
 
 
 def owner(target: Path) -> str:
@@ -105,21 +110,21 @@ class TestClaim:
         self.target.mkdir(parents=True)
         (self.target / coverage_owner.OWNER).write_text(f"{held}\n", encoding="utf-8")
 
-    def test_no_file_writes_this_run(self) -> None:
+    def test_no_file_writes_this_run(self, claim: Claim) -> None:
         """No claim yet, and no directory: made, and claimed for this run."""
         out = claim(self.target, self.run_dir)
         assert out.returncode == 0, out.stderr
         assert out.stderr == ""
         assert f"{self.run_dir}\n" == owner(self.target)
 
-    def test_this_runs_own_claim_is_kept(self) -> None:
+    def test_this_runs_own_claim_is_kept(self, claim: Claim) -> None:
         """A second call in the same run finds its own claim: 0."""
         self.plant(self.run_dir)
         out = claim(self.target, self.run_dir)
         assert out.returncode == 0, out.stderr
         assert f"{self.run_dir}\n" == owner(self.target)
 
-    def test_a_dead_pids_run_is_taken_over(self) -> None:
+    def test_a_dead_pids_run_is_taken_over(self, claim: Claim) -> None:
         """`org-coverage-<pid>` present, its pid gone: not live, taken over."""
         dead = self.tmp / f"org-coverage-{dead_pid()}"
         dead.mkdir()
@@ -128,14 +133,14 @@ class TestClaim:
         assert out.returncode == 0, out.stderr
         assert f"{self.run_dir}\n" == owner(self.target)
 
-    def test_a_missing_gate_named_run_is_taken_over(self) -> None:
+    def test_a_missing_gate_named_run_is_taken_over(self, claim: Claim) -> None:
         """A gate-named run whose directory is gone: not live, taken over."""
         self.plant(self.tmp / "coverage-run")
         out = claim(self.target, self.run_dir)
         assert out.returncode == 0, out.stderr
         assert f"{self.run_dir}\n" == owner(self.target)
 
-    def test_a_live_other_run_is_refused_by_name(self) -> None:
+    def test_a_live_other_run_is_refused_by_name(self, claim: Claim) -> None:
         """The test's own pid, its directory present: 1, and nothing written."""
         other = self.tmp / f"org-coverage-{os.getpid()}"
         other.mkdir()
@@ -148,7 +153,7 @@ class TestClaim:
         ) == out.stderr
         assert f"{other}\n" == owner(self.target)
 
-    def test_a_present_gate_named_run_is_live(self) -> None:
+    def test_a_present_gate_named_run_is_live(self, claim: Claim) -> None:
         """Any other name is live while its directory exists."""
         other = self.tmp / "coverage-run"
         other.mkdir()
@@ -162,21 +167,13 @@ class TestClaim:
         runs = [self.tmp / f"run-{n}" for n in range(8)]
         for run in runs:
             run.mkdir()
-        procs = [
-            subprocess.Popen(
-                [sys.executable, str(OWNER), "claim", str(self.target), str(run)],
-                env=support.env(MISE_TASK_NAME="test"),
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                text=True,
+        with ThreadPoolExecutor(max_workers=len(runs)) as pool:
+            held = list(
+                pool.map(lambda run: coverage_owner.claim(self.target, str(run)), runs)
             )
-            for run in runs
-        ]
-        codes: list[int] = [proc.wait(timeout=60) for proc in procs]
-        expected: list[int] = [0] + [1] * (len(runs) - 1)
-        ranked = sorted(codes)
-        assert expected == ranked
-        winner = runs[codes.index(0)]
+        won = [run for run, by in zip(runs, held, strict=True) if by is None]
+        assert len(won) == 1, held
+        winner = won[0]
         assert f"{winner}\n" == owner(self.target)
 
 
@@ -201,13 +198,13 @@ class TestTag:
         """
         return (self.target / coverage_owner.TAG).read_text(encoding="utf-8")
 
-    def test_a_new_directory_carries_cargos_tag(self) -> None:
+    def test_a_new_directory_carries_cargos_tag(self, claim: Claim) -> None:
         """The planted row: on main the claim made the directory untagged."""
         out = claim(self.target, self.run_dir)
         assert out.returncode == 0, out.stderr
         assert self.tag() == CARGO_TAG
 
-    def test_a_restored_untagged_directory_is_tagged(self) -> None:
+    def test_a_restored_untagged_directory_is_tagged(self, claim: Claim) -> None:
         """A cache saved by main's claim holds the directory with no tag."""
         self.target.mkdir(parents=True)
         (self.target / "stale").write_text("from an earlier build\n")
@@ -216,7 +213,7 @@ class TestTag:
         assert self.tag() == CARGO_TAG
         assert (self.target / "stale").exists()
 
-    def test_an_invalid_tag_is_replaced(self) -> None:
+    def test_an_invalid_tag_is_replaced(self, claim: Claim) -> None:
         """A tag with the wrong signature is what cargo calls invalid."""
         self.target.mkdir(parents=True)
         (self.target / coverage_owner.TAG).write_text("Signature: wrong\n")
@@ -224,7 +221,7 @@ class TestTag:
         assert out.returncode == 0, out.stderr
         assert self.tag() == CARGO_TAG
 
-    def test_a_valid_tag_is_kept(self) -> None:
+    def test_a_valid_tag_is_kept(self, claim: Claim) -> None:
         """Cargo's own tag, whatever its comments say, is left as it is."""
         self.target.mkdir(parents=True)
         mine = "Signature: 8a477f597d28d172789f06886806bc55\n# written by cargo\n"
@@ -233,7 +230,7 @@ class TestTag:
         assert out.returncode == 0, out.stderr
         assert mine == self.tag()
 
-    def test_a_refusal_writes_no_tag(self) -> None:
+    def test_a_refusal_writes_no_tag(self, claim: Claim) -> None:
         """Another live run's directory is left exactly as it holds it."""
         other = self.tmp / f"org-coverage-{os.getpid()}"
         other.mkdir()
@@ -244,52 +241,57 @@ class TestTag:
         assert not (self.target / coverage_owner.TAG).exists()
 
 
+type Clean = Callable[[str], tuple[subprocess.CompletedProcess[str], list[str]]]
+
+
+@pytest.fixture
+def clean(
+    tmp_path: Path, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> Clean:
+    """Run `clean` in process beside a stand-in cargo answering as told.
+
+    Returns:
+        The cleaner: `clean(how)`, giving the status and what it wrote
+        as a finished process's, and the stand-in's calls.
+
+    """
+    stubs = tmp_path / "stubs"
+    stubs.mkdir()
+    (stubs / "cargo").write_text(CARGO, encoding="utf-8")
+    (stubs / "cargo").chmod(0o755)
+    log = tmp_path / "cargo.log"
+    for name, value in {
+        "MISE_TASK_NAME": "test",
+        "PATH": f"{stubs}{os.pathsep}{os.environ['PATH']}",
+        "STUB_LOG": str(log),
+        "CARGO_TARGET_DIR": "/work/target/llvm-cov-target-0123",
+    }.items():
+        monkeypatch.setenv(name, value)
+
+    def run(how: str) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+        monkeypatch.setenv("STUB_CLEAN", how)
+        status = coverage_owner.main(["clean"])
+        out, err = capfd.readouterr()
+        calls = log.read_text().splitlines() if log.exists() else []
+        return subprocess.CompletedProcess([], status, out, err), calls
+
+    return run
+
+
 class TestClean:
     """`clean` is red when cargo-llvm-cov did not clean (#2070)."""
 
-    @staticmethod
-    def clean(how: str) -> tuple[subprocess.CompletedProcess[str], list[str]]:
-        """Run `clean` beside a stand-in cargo answering as `how` says.
-
-        Returns:
-            The finished process and the stand-in's calls.
-
-        """
-        with tempfile.TemporaryDirectory() as tmp:
-            base = Path(tmp)
-            stubs = base / "stubs"
-            stubs.mkdir()
-            (stubs / "cargo").write_text(CARGO, encoding="utf-8")
-            (stubs / "cargo").chmod(0o755)
-            log = base / "cargo.log"
-            out = subprocess.run(
-                [sys.executable, str(OWNER), "clean"],
-                env=support.env(
-                    MISE_TASK_NAME="test",
-                    PATH=f"{stubs}{os.pathsep}{os.environ['PATH']}",
-                    STUB_LOG=str(log),
-                    STUB_CLEAN=how,
-                    CARGO_TARGET_DIR="/work/target/llvm-cov-target-0123",
-                ),
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=60,
-            )
-            calls = log.read_text().splitlines() if log.exists() else []
-        return out, calls
-
-    def test_a_clean_that_ran_is_green(self) -> None:
+    def test_a_clean_that_ran_is_green(self, clean: Clean) -> None:
         """Nothing reported: 0, and the workspace clean was the call."""
-        out, calls = self.clean("ok")
+        out, calls = clean("ok")
         assert out.returncode == 0, out.stderr
         assert out.stderr == ""
         expected: list[str] = ["llvm-cov clean --workspace"]
         assert expected == calls
 
-    def test_a_refused_clean_is_red_by_name(self) -> None:
+    def test_a_refused_clean_is_red_by_name(self, clean: Clean) -> None:
         """The planted row: cargo-llvm-cov exits 0 over a refused clean."""
-        out, _ = self.clean("refused")
+        out, _ = clean("refused")
         assert out.returncode == 1
         assert "missing or invalid `CACHEDIR.TAG` file\n" in out.stderr
         assert (
@@ -299,9 +301,9 @@ class TestClean:
             " warning\n"
         ) in out.stderr
 
-    def test_a_failed_cargo_llvm_cov_is_its_status(self) -> None:
+    def test_a_failed_cargo_llvm_cov_is_its_status(self, clean: Clean) -> None:
         """cargo-llvm-cov's own failure is passed through unchanged."""
-        out, _ = self.clean("failed")
+        out, _ = clean("failed")
         assert out.returncode == 3
 
 

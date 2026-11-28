@@ -14,7 +14,6 @@ belt's tools (`mise run test`, or `mise x --`).
 """
 
 import subprocess
-import sys
 from typing import TYPE_CHECKING
 
 import pytest
@@ -68,9 +67,12 @@ class TestActionsLint:
     """One planted workflow; actionlint's verdict through the helper."""
 
     @pytest.fixture
-    def _set_up_test_actions_lint(self, tmp_path: Path) -> None:
+    def _set_up_test_actions_lint(
+        self, tmp_path: Path, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Plant an empty workflows directory."""
         self.tree = tmp_path
+        self.capfd = capfd
         (self.tree / ".github" / "workflows").mkdir(parents=True)
 
     def plant(self, text: str) -> str:
@@ -85,23 +87,19 @@ class TestActionsLint:
         return rel
 
     def run_helper(self, *argv: str, **env: str) -> subprocess.CompletedProcess[str]:
-        """Start the helper as the task does, in the planted tree.
+        """Run the helper as the task does, in the planted tree, in process.
 
         Returns:
-            The finished process.
+            Its status and what it wrote, as a finished process's.
 
         """
-        base = support.env(
-            MISE_TASK_NAME=TASK, ORG_FINDINGS="", ORG_CANON_DIR=str(CANON_DIR)
-        )
-        return subprocess.run(
-            [sys.executable, str(BELT / "actions_lint.py"), *argv],
-            cwd=self.tree,
-            env=base | env,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        with pytest.MonkeyPatch.context() as patched:
+            for name, value in ({"ORG_CANON_DIR": str(CANON_DIR)} | env).items():
+                patched.setenv(name, value)
+            patched.chdir(self.tree)
+            status = actions_lint.main(list(argv))
+        out, err = self.capfd.readouterr()
+        return subprocess.CompletedProcess(list(argv), status, out, err)
 
     def test_a_clean_workflow_passes_and_writes_nothing(self) -> None:
         """`$/` and ubuntu-26.04 pass under the two ignores; the tree is untouched."""

@@ -67,17 +67,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
-from belt import findings
+from belt import crates_index, decoded, findings, typed_std, workflow_command
 from belt.belt_scripts import script
 from belt.tree import RELEASE
-
-try:
-    from belt import crates_index, decoded, typed_std, workflow_command
-except ModuleNotFoundError as missing:
-    if missing.name != "crates_index":
-        raise
-    findings.finding("", "mise/crates_index.py did not arrive in the canon tree")
-    raise SystemExit(1) from None
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
