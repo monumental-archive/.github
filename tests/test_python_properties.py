@@ -176,7 +176,7 @@ def real_tool_dir() -> str:
         The directory, which the row puts on PATH.
 
     """
-    return str(Path(support.tool("hypothesis")).parent)
+    return str(Path(support.tool("pytest")).parent)
 
 
 class TestRefusals:
@@ -200,8 +200,8 @@ class TestRefusals:
         assert (done.returncode, done.stderr) == (
             1,
             (
-                "test:python-properties: hypothesis missing — the belt pins"
-                " pipx:hypothesis; run: mise install\n"
+                "test:python-properties: pytest missing — the belt pins"
+                " pipx:pytest; run: mise install\n"
             ),
         )
 
@@ -236,8 +236,8 @@ class TestRefusals:
         assert done.returncode == 1
         assert "import Hypothesis" not in done.stderr
         assert (
-            "test:python-properties: hypothesis missing — the belt pins"
-            " pipx:hypothesis; run: mise install\n"
+            "test:python-properties: pytest missing — the belt pins"
+            " pipx:pytest; run: mise install\n"
         ) in done.stderr
 
     def test_a_venv_on_another_interpreter_is_red(self) -> None:
@@ -245,16 +245,16 @@ class TestRefusals:
         with tempfile.TemporaryDirectory() as venv:
             bin_dir = Path(venv) / "bin"
             bin_dir.mkdir()
-            for name in ("hypothesis", "python"):
+            for name in ("pytest", "python"):
                 (bin_dir / name).write_text(STUB_PYTHON, encoding="utf-8")
                 (bin_dir / name).chmod(0o755)
             done = run(GATE, {"prop_x.py": HOLDS}, tool_dir=str(bin_dir))
         assert done.returncode == 1
         assert re.search(
-            r"\Atest:python-properties: hypothesis runs on '3\.0\.0 \(stub"
+            r"\Atest:python-properties: pytest runs on '3\.0\.0 \(stub"
             r" interpreter\)' but the suite's python3 is '3\.[^']+' — the tool"
             r" venv must be built on the belt's python pin \(reinstall: mise"
-            r" install -f pipx:hypothesis\)\n\Z",
+            r" install -f pipx:pytest\)\n\Z",
             done.stderr,
         )
 
@@ -325,7 +325,7 @@ class TestScript:
 
     def test_the_runner_runs_as_a_script(self) -> None:
         """No file named: the usage line on stderr, exit 2."""
-        venv = Path(os.path.realpath(support.tool("hypothesis"))).parent
+        venv = Path(os.path.realpath(support.tool("pytest"))).parent
         done = subprocess.run(
             [str(venv / "python"), str(BELT / "python_properties.py"), "gate"],
             env=support.env(),

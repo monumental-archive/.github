@@ -180,10 +180,10 @@ CALLER_COMMANDS = {
 }
 
 # Calls a tool's name never appears in: the Postgres a pgrx task runs is
-# located by pgrx_postgres.py from `mise ls` and handed to pgrx as a
+# located by `belt pgrx-postgres` from `mise ls` and handed to pgrx as a
 # clone's pg_config (#1940), both by path.
 PROVISIONS = {
-    r"pgrx_postgres\.py": ["postgresql-binaries"],
+    r"belt[\"']?\s+pgrx-postgres\b": ["postgresql-binaries"],
 }
 
 # What stele execs, read from its source (internal/cargo, internal/osv,
@@ -427,7 +427,7 @@ def installs(job: Job) -> tuple[list[str], list[str], list[str]]:
         (pins,) = [
             s for s in workflow_yaml.steps(job) if field(s, "id") == ref.group(1)
         ]
-        call = field(pins, "run").replace("\\\n", " ").split("caller_pins.py", 1)[1]
+        call = field(pins, "run").replace("\\\n", " ").split("belt caller-pins", 1)[1]
         words = shlex.split(call.split(">", 1)[0])
         it = iter(words[1:])
         for word in it:
@@ -632,12 +632,42 @@ def prose(node: object) -> Iterator[tuple[int, int]]:
         yield from prose(value)
 
 
-def scripts(text: str, seen: set[str]) -> str:
-    """Follow the canon scripts and belt tasks a body runs.
+def followed(module: Path, seen: set[str]) -> str:
+    """Follow a belt module: what it runs, and the belt modules it imports.
+
+    A helper's own text is never scanned (#1903): each command, as one
+    bare word per line, is judged exactly as a word in a shell body is
+    (#1499), and the `;` keeps CARGO_SUB from pairing two. Only the
+    scripts it hands `script()` and the strings its subprocess calls run
+    are followed (#2037), and the modules it imports, whose code it runs
+    in its own process (#2177).
 
     Returns:
-        The code of every canon script and belt task the text reaches,
-        transitively, each once.
+        The commands and followed code of the module and its imports,
+        each module once.
+
+    """
+    rel = str(module.relative_to(CANON))
+    if rel in seen:
+        return ""
+    seen.add(rel)
+    source = module.read_text("utf-8")
+    runs = python_code(source, rel)
+    out = [f"{c};" for c in sorted(runs.commands)]
+    out.append(scripts("\n".join(runs.scripts + runs.tasks), seen))
+    out += [
+        followed(imported, seen)
+        for imported in support.belt_modules(source, CANON / "belt")
+    ]
+    return "\n".join(out)
+
+
+def scripts(text: str, seen: set[str]) -> str:
+    """Follow the canon scripts, belt commands and belt tasks a body runs.
+
+    Returns:
+        The code of every canon script, belt command and belt task the
+        text reaches, transitively, each once.
 
     Raises:
         UndecodableError: a reached task whose run is not text.
@@ -645,27 +675,19 @@ def scripts(text: str, seen: set[str]) -> str:
     """
     out = []
     tasks = belt_table("tasks")
-    for name in [m.group() for m in re.finditer(r"[\w-]+\.(?:sh|py)\b", text)]:
+    for command in support.launched(text):
+        module = support.command_module(command, CANON / "belt")
+        if module is not None:
+            out.append(followed(module, seen))
+    for name in [m.group() for m in re.finditer(r"[\w-]+\.sh\b", text)]:
         if name in seen or name in PRE_INSTALL:
             continue
         for home in ("release", "mise"):
             path = CANON / home / name
             if path.is_file():
                 seen.add(name)
-                source = path.read_text("utf-8")
-                if name.endswith(".py"):
-                    # A helper's own text is never scanned (#1903): each
-                    # command, as one bare word per line, is judged
-                    # exactly as a word in a shell body is (#1499), and
-                    # the `;` keeps CARGO_SUB from pairing two. Only the
-                    # scripts it hands `script()` and the strings its
-                    # subprocess calls run are followed (#2037).
-                    runs = python_code(source, f"{home}/{name}")
-                    out += [f"{c};" for c in sorted(runs.commands)]
-                    out.append(scripts("\n".join(runs.scripts + runs.tasks), seen))
-                else:
-                    body = code(source)
-                    out += [body, scripts(body, seen)]
+                body = code(path.read_text("utf-8"))
+                out += [body, scripts(body, seen)]
     # A task is reached by name, however it is run: `mise run audit:deny`
     # and `for task in audit:deny audit:go-vulns; do mise run "${task}"`.
     for task in [t for t in tasks if ":" in t and word(t, text)]:
@@ -1241,7 +1263,7 @@ class TestGateUploadMeasuresNothing:
             == found[:2]
         )
         # Followed into coverage:check and the measurement it runs.
-        for tool in ("aqua:taiki-e/cargo-llvm-cov", "pipx:coverage", "go"):
+        for tool in ("aqua:taiki-e/cargo-llvm-cov", "pipx:pytest", "go"):
             assert f"ci.yml coverage-upload: calls {tool}" in found
 
     def test_a_measuring_call_in_the_upload_is_named(self) -> None:
@@ -1388,17 +1410,17 @@ class TestPythonCode:
         A file name in a constant, a message or a table runs nothing:
         testing_adoption.py names the mutation scripts and runs none.
         """
-        nxt = 'import subprocess\nsubprocess.run(["ruff", "check"], check=True)\n'
+        nxt = "ruff check .\n"
         located = (
-            "from pathlib import Path\nfrom belt_scripts import script\n"
-            'NEXT = script(support.RELEASE, "planted-next.py")\n'
+            "from belt.belt_scripts import script\n"
+            'NEXT = script(RELEASE, "planted-next.sh")\n'
         )
         for helper, red in (
             (located, PLANTED_RED),
-            ('import sys\nNEXT = "planted-next.py"\n', strings()),
-            ('"""Runs planted-next.py, once."""\n', strings()),
+            ('import sys\nNEXT = "planted-next.sh"\n', strings()),
+            ('"""Runs planted-next.sh, once."""\n', strings()),
         ):
-            assert red == planted_uninstalled(helper, {"release/planted-next.py": nxt})
+            assert red == planted_uninstalled(helper, {"release/planted-next.sh": nxt})
 
     def test_a_task_in_an_argv_is_followed(self) -> None:
         """A task a subprocess call runs is reached; one a message names is not."""
@@ -1423,7 +1445,7 @@ PLANTED_RED = ["attach-release.yml attach: calls ruff and does not install it"]
 
 
 def planted_uninstalled(helper: str, also: dict[str, str] | None = None) -> list[str]:
-    """Plant `helper` as release/planted-call.py and read the attach job (#1499).
+    """Plant `helper` as `belt planted-call` and read the attach job (#1499).
 
     `also` plants further helpers beside it (#1903).
 
@@ -1432,13 +1454,13 @@ def planted_uninstalled(helper: str, also: dict[str, str] | None = None) -> list
 
     """
     with tempfile.TemporaryDirectory() as tmp:
-        stubs = {"release/planted-call.py": helper, **(also or {})}
+        stubs = {"belt/release/planted_call.py": helper, **(also or {})}
         root = support.canon(tmp, stubs=stubs)
         job = appended(
             load("attach-release.yml")["attach"],
             {
                 "name": "Planted",
-                "run": 'python3 "${GITHUB_WORKSPACE}/release/planted-call.py"',
+                "run": '"${ORG_PYTHON}" -I .org-canon/belt planted-call',
             },
         )
         with pytest.MonkeyPatch.context() as patched:
@@ -1699,20 +1721,23 @@ class TestOneReader:
     )
     def test_the_pgrx_build_calls_the_reader(self, path: object) -> None:
         """Both pgrx readers moved onto the helper, not merely deleted."""
-        assert "caller_pins.py" in path.read_text("utf-8")
+        assert "caller-pins" in support.launched(path.read_text("utf-8"))
 
 
 # The canon's helpers run under the belt's Python (#1543). The runner's
 # python3 is pinned by nothing, and on 2026-11-18 it refused the belt's
-# own 3.14 spelling in release/registry.py and broke every image publish
-# in the org. So a `run:` step starts a tracked helper one way only,
-# `"${ORG_PYTHON}" <helper.py>`, and the job has run the canon action,
-# which installs that interpreter and exports it, before any step uses
-# the name.
+# own 3.14 spelling in the registry helper and broke every image publish
+# in the org. So a `run:` step starts a belt command one way only,
+# `"${ORG_PYTHON}" -I <canon>/belt <command>` (#2177), any other tracked
+# helper as `"${ORG_PYTHON}" <helper.py>`, and the job has run the canon
+# action, which installs that interpreter and exports it, before any
+# step uses the name.
 ACTIONS = CANON / ".github" / "actions"
 ORG_PYTHON_START = re.compile(r'"\$\{ORG_PYTHON\}"\s+$')
 INTERPRETER = re.compile(r"(?<![\w./$-])(python[\d.]*)\s+$")
 COMMAND_POSITION = re.compile(r"(?:^|[;&|(]|\$\()\s*$")
+# The launcher's directory, then the command: `-I` comes before both.
+LAUNCH = re.compile(r"-I\s+\S*belt[\"']?\s+([a-z][a-z0-9]*(?:-[a-z0-9]+)*)\b")
 
 
 def tracked_helpers() -> set[str]:
@@ -1725,12 +1750,69 @@ def tracked_helpers() -> set[str]:
     return {Path(p).name for p in support.tracked(CANON, "*.py")}
 
 
-def helper_starts(rel: str, job_id: str, job: Job, tracked: set[str]) -> list[str]:
-    """Name each step that starts a tracked helper but not as `"${ORG_PYTHON}"`.
+def spelled(name: str) -> str:
+    """Spell a tracked helper the way a step runs it.
 
-    A helper path is a start where it stands in a command's place (a
-    line's first word, or after `;`, `|`, `&`, `(` or `$(`), or after an
-    interpreter's name. Anywhere else it is an argument.
+    Returns:
+        `belt <command>` for a module of the belt package, else the
+        file's own name.
+
+    """
+    command = name.removesuffix(".py").replace("_", "-")
+    return f"belt {command}" if support.command_module(command) else name
+
+
+def started_how(before: str) -> str | None:
+    """Say how a step starts what follows `before`, unless under ORG_PYTHON.
+
+    Returns:
+        With the runner's interpreter, or by its own first line; None
+        under ORG_PYTHON, or where it is an argument.
+
+    """
+    if ORG_PYTHON_START.search(before):
+        return None
+    interpreter = INTERPRETER.search(before)
+    if interpreter:
+        return f"with the runner's {interpreter.group(1)}"
+    if COMMAND_POSITION.search(before):
+        return "by its own first line"
+    return None
+
+
+def line_starts(line: str, tracked: set[str]) -> list[tuple[str, str]]:
+    """Find each tracked helper one line starts other than under ORG_PYTHON.
+
+    A launcher start is the launcher's directory after `-I`, held to the
+    interpreter before it. A helper path is a start where it stands in a
+    command's place (a line's first word, or after `;`, `|`, `&`, `(`
+    or `$(`), or after an interpreter's name. Anywhere else it is an
+    argument.
+
+    Returns:
+        The helper, spelled as a step runs it, and how it is started.
+
+    """
+    found: list[tuple[str, str]] = []
+    for launch in LAUNCH.finditer(line):
+        command = launch.group(1)
+        if f"{command.replace('-', '_')}.py" not in tracked:
+            continue
+        how = started_how(line[: launch.start()].lstrip("'"))
+        if how and "first line" not in how:
+            found.append((f"belt {command}", how))
+    for token in re.finditer(r"\S*\.py\b[\"']?", line):
+        name = token.group(0).rstrip("\"')").rsplit("/", 1)[-1]
+        if name not in tracked:
+            continue
+        how = started_how(line[: token.start()].lstrip("'"))
+        if how:
+            found.append((spelled(name), how))
+    return found
+
+
+def helper_starts(rel: str, job_id: str, job: Job, tracked: set[str]) -> list[str]:
+    """Name each step that starts a tracked helper but not under ORG_PYTHON.
 
     Returns:
         One line per such start, naming the file, job, step and helper.
@@ -1741,20 +1823,7 @@ def helper_starts(rel: str, job_id: str, job: Job, tracked: set[str]) -> list[st
         body = re.sub(r"\$\{\{.*?\}\}", "${{expr}}", field(step, "run"))
         body = code(body.replace("\\\n", " "))
         for line in body.splitlines():
-            for token in re.finditer(r"\S*\.py\b[\"']?", line):
-                name = token.group(0).rstrip("\"')").rsplit("/", 1)[-1]
-                if name not in tracked:
-                    continue
-                before = line[: token.start()].lstrip("'")
-                if ORG_PYTHON_START.search(before):
-                    continue
-                interpreter = INTERPRETER.search(before)
-                if interpreter:
-                    how = f"with the runner's {interpreter.group(1)}"
-                elif COMMAND_POSITION.search(before):
-                    how = "by its own first line"
-                else:
-                    continue
+            for name, how in line_starts(line, tracked):
                 out.append(
                     f"{rel} {job_id}: step '{field(step, 'name') or '?'}' starts"
                     f' {name} {how}; run it as "${{ORG_PYTHON}}" {name} (#1543)'
