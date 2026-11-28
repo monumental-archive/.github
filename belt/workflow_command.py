@@ -15,8 +15,8 @@ and `,` as `%3A` and `%2C`. One line, flushed. Nothing else in the
 canon's Python prints any workflow command;
 tests/test_workflow_command.py holds that law over the tracked helpers.
 
-A helper in another directory reaches this one the way #1643 set out:
-`sys.path.append` of the sibling root, then `import workflow_command`.
+Every belt module reaches it the one way, `from belt import
+workflow_command` (#2177).
 """
 
 import sys

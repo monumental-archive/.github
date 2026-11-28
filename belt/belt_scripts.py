@@ -13,8 +13,8 @@ runs nothing. So the gate's tool table (tests/test_gate_tools.py) and
 the release job installs (tests/release/test_job_installs.py) see exactly
 the scripts a helper runs, and charge their calls.
 
-Stdlib only; a release helper reaches it by appending the `mise` root
-to `sys.path`, as it reaches `findings`.
+Stdlib only; every belt module, the release helpers included, reaches
+it the one way, `from belt import belt_scripts` (#2177).
 """
 
 from __future__ import annotations

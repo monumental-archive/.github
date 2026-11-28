@@ -22,8 +22,8 @@ with no cast, so no helper writes its own reader.
 - `on_path(name, env)`: a tool's absolute path on the PATH the process
   is given, asked as it starts, so no process starts a bare name.
 
-stdlib only; a sibling root reaches it the way #1634 settled, by
-appending the `mise` root to `sys.path` from its own `__file__`.
+Stdlib only; a module of the belt package, imported as `from belt
+import typed_std` (#2177).
 """
 
 import io

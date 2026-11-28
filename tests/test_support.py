@@ -10,12 +10,12 @@ tracks instead of calling support.tracked (#1618).
 """
 
 import ast
+import contextlib
 import os
 import subprocess
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
-from unittest import mock
 
 import pytest
 
@@ -24,8 +24,7 @@ from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-    from contextlib import AbstractContextManager
+    from collections.abc import Callable, Generator
 
 HERE = support.MISE
 
@@ -864,15 +863,17 @@ def test_an_empty_listing_is_red_by_name(tracked_state: Tracked) -> None:
     )
 
 
-def on_path(path: str) -> AbstractContextManager[object]:
-    """Replace the suite's PATH for one block.
+@contextlib.contextmanager
+def on_path(path: str) -> Generator[None]:
+    """Replace the suite's PATH for one block, through pytest's monkeypatch.
 
-    Returns:
-        The patch, entered by the row.
+    Yields:
+        Nothing: the block runs with PATH set, restored after it.
 
     """
-    values: dict[str, str] = {"PATH": path}
-    return mock.patch.dict(os.environ, values)
+    with pytest.MonkeyPatch.context() as patched:
+        patched.setenv("PATH", path)
+        yield
 
 
 class Tool:
@@ -1362,8 +1363,10 @@ def test_every_spelling_of_a_lookup_is_found() -> None:
 def test_the_fixture_lookup_is_allowed() -> None:
     """The fixture's lookups, a patched `which`, and another `which` pass."""
     allowed = {
-        "tool": "import hermetic\nX = support.tool('git')\n",
-        "optional_tool": "import hermetic\nX = support.optional_tool('dash')\n",
+        "tool": "from tests import support\nX = support.tool('git')\n",
+        "optional_tool": (
+            "from tests import support\nX = support.optional_tool('dash')\n"
+        ),
         "patched, not called": (
             "import shutil\nfrom unittest import mock\n"
             "with mock.patch.object(shutil, 'which', return_value=None):\n"
@@ -1425,7 +1428,8 @@ def test_the_fixture_and_the_tests_own_files_are_allowed() -> None:
     """The fixture's planting, a file the row wrote, a fixture, a tool."""
     head = "import shutil\nfrom pathlib import Path\nBELT = support.MISE\n"
     allowed = {
-        "belt": head + "import hermetic\nhermetic.belt('x', stubs={})\n",
+        "belt": head
+        + "def test_x(belt: support.Belt) -> None:\n    belt('x', stubs={})\n",
         "a file the row wrote": (
             head + "def f(tmp):\n    src = tmp / 'a'\n    src.write_text('x')\n"
             "    shutil.copy(src, tmp / 'b')\n"
@@ -1433,7 +1437,8 @@ def test_the_fixture_and_the_tests_own_files_are_allowed() -> None:
         "a fixture": (
             head + "DATA = BELT / 'testdata' / 'x'\nshutil.copy(DATA / 'a', 'y')\n"
         ),
-        "a tool": head + "import hermetic\nPath('x').symlink_to(support.tool('git'))\n",
+        "a tool": head
+        + "from tests import support\nPath('x').symlink_to(support.tool('git'))\n",
         "a local of the same name": (
             head + "def f(tmp):\n    BELT = tmp\n    shutil.copy(BELT / 'a', 'x')\n"
         ),

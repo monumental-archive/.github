@@ -33,9 +33,8 @@ A record that cannot be appended is said in one more stderr line and
 raises nothing: the finding was printed, and the report falls back to
 the step's output. The task's status is the task's.
 
-A helper in another directory reaches this one as it reaches
-workflow_command: `sys.path.append` of the sibling root, then
-`import findings`.
+Every belt module reaches it the one way, `from belt import findings`
+(#2177).
 """
 
 import json

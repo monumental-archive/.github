@@ -17,8 +17,8 @@ readers here (`is_object`, `as_object`, ...) into its own dataclass, so
 a wrong shape is refused where it is read, by name. There is no reader
 for a helper's own record: each helper decodes its shape itself.
 
-stdlib only; a sibling root reaches it the way #1634 settled, by
-appending the `mise` root to `sys.path` from its own `__file__`.
+Stdlib only; a module of the belt package, imported as `from belt
+import decoded` (#2177).
 """
 
 import json

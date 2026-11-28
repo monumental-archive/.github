@@ -39,7 +39,7 @@ MEASURE = str(BELT / "coverage-measure.sh")
 # The host the stand-in rustc reports (support.rustc_verbose).
 HOST = "x86_64-unknown-linux-gnu"
 
-# rustc: hermetic's stand-in, which also answers `--print sysroot`.
+# rustc: support's stand-in, which also answers `--print sysroot`.
 RUSTC = support.RUSTC_STUB.replace(
     "#!/bin/sh\n",
     '#!/bin/sh\nif [ "$1" = --print ]; then echo "${STUB_SYSROOT}"; exit 0; fi\n',
