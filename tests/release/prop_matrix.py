@@ -22,7 +22,6 @@ the ordinary suite (`mise run test`) never imports this file.
 import contextlib
 import io
 import sys
-from contextlib import redirect_stderr, redirect_stdout
 
 import pytest
 from hypothesis import example
@@ -52,25 +51,6 @@ MAJOR = st.integers(10, 99).map(str)
 # A field nobody tabled: no comma, newline or space (those are the
 # splitter's), and not a known target.
 KNOWN = {t for runners, _ in matrix.TARGETS.values() for t in runners}
-
-
-def as_helper() -> contextlib.ExitStack:
-    """Run the helper as a run outside mise does, recording nothing (#1934).
-
-    The writer names it by its file, whatever task runs this suite.
-
-    Returns:
-        The patches, entered by the caller's `with`.
-
-    """
-    stack = contextlib.ExitStack()
-    named = stack.enter_context(pytest.MonkeyPatch.context())
-    named.setenv("MISE_TASK_NAME", "")
-    named.setenv("ORG_FINDINGS", "")
-    stack.enter_context(pytest.MonkeyPatch.context()).setattr(
-        sys, "argv", ["matrix.py"]
-    )
-    return stack
 
 
 def untabled(field: str) -> bool:
@@ -120,19 +100,6 @@ def spaced(data: st.DataObject, fields: list[str]) -> str:
     return text
 
 
-def run(argv: list[str]) -> tuple[int, str, str]:
-    """Run the derivation's command line.
-
-    Returns:
-        The exit status, stdout and stderr.
-
-    """
-    out, err = io.StringIO(), io.StringIO()
-    with as_helper(), redirect_stdout(out), redirect_stderr(err):
-        code = matrix.main(argv)
-    return code, out.getvalue(), err.getvalue()
-
-
 def expected(stdout: str) -> list[object]:
     """Read the `expected=` output.
 
@@ -154,7 +121,17 @@ def test_targets(cls: str, data: st.DataObject) -> None:
     fields = data.draw(st.permutations(runners)).copy()
     fields = fields[: data.draw(st.integers(1, len(fields)))]
     request = spaced(data, fields)
-    code, out, err = run(["targets", cls, request])
+    stdout, stderr = io.StringIO(), io.StringIO()
+    with (
+        pytest.MonkeyPatch.context() as patched,
+        contextlib.redirect_stdout(stdout),
+        contextlib.redirect_stderr(stderr),
+    ):
+        patched.setenv("MISE_TASK_NAME", "")
+        patched.setenv("ORG_FINDINGS", "")
+        patched.setattr(sys, "argv", ["matrix.py"])
+        code = matrix.main(["targets", cls, request])
+    out, err = stdout.getvalue(), stderr.getvalue()
     assert code == 0, err
     assert expected(out) == fields
 
@@ -162,7 +139,17 @@ def test_targets(cls: str, data: st.DataObject) -> None:
 @given(st.lists(MAJOR, min_size=1, max_size=5, unique=True), st.data())
 def test_majors(majors: list[str], data: st.DataObject) -> None:
     """Every requested major is a cell, in the order requested."""
-    code, out, err = run(["pgrx-images", spaced(data, majors)])
+    stdout, stderr = io.StringIO(), io.StringIO()
+    with (
+        pytest.MonkeyPatch.context() as patched,
+        contextlib.redirect_stdout(stdout),
+        contextlib.redirect_stderr(stderr),
+    ):
+        patched.setenv("MISE_TASK_NAME", "")
+        patched.setenv("ORG_FINDINGS", "")
+        patched.setattr(sys, "argv", ["matrix.py"])
+        code = matrix.main(["pgrx-images", spaced(data, majors)])
+    out, err = stdout.getvalue(), stderr.getvalue()
     assert code == 0, err
     assert expected(out) == majors
 
@@ -177,7 +164,17 @@ def test_unknown_target(cls: str, stranger: str, data: st.DataObject | None) -> 
     before = data.draw(st.lists(st.sampled_from(known), max_size=2)) if data else []
     after = data.draw(st.lists(st.sampled_from(known), max_size=2)) if data else []
     request = ",".join([*before, stranger, *after])
-    code, out, err = run(["targets", cls, request])
+    stdout, stderr = io.StringIO(), io.StringIO()
+    with (
+        pytest.MonkeyPatch.context() as patched,
+        contextlib.redirect_stdout(stdout),
+        contextlib.redirect_stderr(stderr),
+    ):
+        patched.setenv("MISE_TASK_NAME", "")
+        patched.setenv("ORG_FINDINGS", "")
+        patched.setattr(sys, "argv", ["matrix.py"])
+        code = matrix.main(["targets", cls, request])
+    out, err = stdout.getvalue(), stderr.getvalue()
     assert (code, out, err) == (
         1,
         "",
@@ -190,7 +187,17 @@ def test_a_major_that_is_not_a_number(stranger: str, data: st.DataObject) -> Non
     """A field that is not ASCII digits is refused by name."""
     before = data.draw(st.lists(MAJOR, max_size=2, unique=True))
     request = ",".join([*before, stranger])
-    code, out, err = run(["pgrx-images", request])
+    stdout, stderr = io.StringIO(), io.StringIO()
+    with (
+        pytest.MonkeyPatch.context() as patched,
+        contextlib.redirect_stdout(stdout),
+        contextlib.redirect_stderr(stderr),
+    ):
+        patched.setenv("MISE_TASK_NAME", "")
+        patched.setenv("ORG_FINDINGS", "")
+        patched.setattr(sys, "argv", ["matrix.py"])
+        code = matrix.main(["pgrx-images", request])
+    out, err = stdout.getvalue(), stderr.getvalue()
     assert (code, out, err) == (
         1,
         "",
@@ -203,7 +210,17 @@ def test_a_major_that_is_not_a_number(stranger: str, data: st.DataObject) -> Non
 def test_plans_or_refuses(cls: str | None, request: str) -> None:
     """Exit 0 with outputs, or 1 with one error line and no output."""
     argv = ["targets", cls, request] if cls else ["pgrx-images", request]
-    code, out, err = run(argv)
+    stdout, stderr = io.StringIO(), io.StringIO()
+    with (
+        pytest.MonkeyPatch.context() as patched,
+        contextlib.redirect_stdout(stdout),
+        contextlib.redirect_stderr(stderr),
+    ):
+        patched.setenv("MISE_TASK_NAME", "")
+        patched.setenv("ORG_FINDINGS", "")
+        patched.setattr(sys, "argv", ["matrix.py"])
+        code = matrix.main(argv)
+    out, err = stdout.getvalue(), stderr.getvalue()
     if code == 0:
         assert out.startswith("matrix="), out
     else:

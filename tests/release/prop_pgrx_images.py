@@ -90,19 +90,6 @@ def toml_value(value: object) -> str:
     return text
 
 
-def run(argv: list[str]) -> tuple[int, str, str]:
-    """Run one verb.
-
-    Returns:
-        The exit status, stdout and stderr.
-
-    """
-    out, err = io.StringIO(), io.StringIO()
-    with redirect_stdout(out), redirect_stderr(err):
-        code = images.main(argv)
-    return code, out.getvalue(), err.getvalue()
-
-
 def assert_answered(got: tuple[int, str, str]) -> None:
     """Hold a run to one printed line, or one refusal line."""
     code, out, err = got
@@ -156,7 +143,13 @@ def test_base_image(build: object, pg: str) -> None:
     with tempfile.TemporaryDirectory() as tmp:
         table = Path(tmp) / "pgrx-base-images.toml"
         table.write_text(f"build = {toml_value(build)}\n", "utf-8")
-        got = run(["base-image", "--pg", pg, "--table", str(table)])
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with (
+            redirect_stdout(stdout),
+            redirect_stderr(stderr),
+        ):
+            code = images.main(["base-image", "--pg", pg, "--table", str(table)])
+        got = code, stdout.getvalue(), stderr.getvalue()
     assert_answered(got)
 
 
@@ -177,7 +170,13 @@ def test_extension_name(files: list[str]) -> None:
     with tempfile.TemporaryDirectory() as tmp:
         for f in files:
             (Path(tmp) / f).write_text("", "utf-8")
-        got = run(["extension-name", "--tree", tmp])
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with (
+            redirect_stdout(stdout),
+            redirect_stderr(stderr),
+        ):
+            code = images.main(["extension-name", "--tree", tmp])
+        got = code, stdout.getvalue(), stderr.getvalue()
     assert_answered(got)
     controls = [f for f in files if f.endswith(".control")]
     assert (got[0] == 0) == (len(controls) == 1), files

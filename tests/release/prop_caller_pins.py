@@ -162,22 +162,6 @@ REST: st.SearchStrategy[dict[str, object]] = st.dictionaries(
 DOCUMENT: st.SearchStrategy[dict[str, object]] = st.builds(document, MAYBE_TOOLS, REST)
 
 
-def run(config: str, argv: list[str]) -> tuple[int, str, str]:
-    """Run the reader against a repository whose mise.toml is `config`.
-
-    Returns:
-        The exit status, stdout and stderr.
-
-    """
-    with tempfile.TemporaryDirectory() as tmp:
-        root = Path(tmp)
-        (root / "mise.toml").write_text(config, "utf-8")
-        out, err = io.StringIO(), io.StringIO()
-        with redirect_stdout(out), redirect_stderr(err):
-            code = caller_pins.main(argv, root=root)
-        return code, out.getvalue(), err.getvalue()
-
-
 # A tool written under some backend key, in some value form: the
 # tool name, the key written, the version on PATH, and the `[tools]`
 # value written for it.
@@ -250,12 +234,30 @@ def test_install_and_env_read_the_pin(pins: list[Pin]) -> None:
     tools: dict[str, object] = {key: value for _, key, _, value in pins}
     config = toml_document({"tools": tools})
     names = [name for name, _, _, _ in pins]
-    code, out, err = run(config, ["install", "--input-of", INPUT_OF, *names])
+    stdout, stderr = io.StringIO(), io.StringIO()
+    with (
+        tempfile.TemporaryDirectory() as tmp,
+        redirect_stdout(stdout),
+        redirect_stderr(stderr),
+    ):
+        (Path(tmp) / "mise.toml").write_text(config, "utf-8")
+        code = caller_pins.main(
+            ["install", "--input-of", INPUT_OF, *names], root=Path(tmp)
+        )
+    out, err = stdout.getvalue(), stderr.getvalue()
     assert (code, err) == (0, ""), config
     want = " ".join(f"{key}@{version}" for _, key, version, _ in pins)
     assert out == f"install={want}\n"
     pairs = [f"V{i}={name}" for i, name in enumerate(names)]
-    code, out, err = run(config, ["env", "--input-of", INPUT_OF, *pairs])
+    stdout, stderr = io.StringIO(), io.StringIO()
+    with (
+        tempfile.TemporaryDirectory() as tmp,
+        redirect_stdout(stdout),
+        redirect_stderr(stderr),
+    ):
+        (Path(tmp) / "mise.toml").write_text(config, "utf-8")
+        code = caller_pins.main(["env", "--input-of", INPUT_OF, *pairs], root=Path(tmp))
+    out, err = stdout.getvalue(), stderr.getvalue()
     assert (code, err) == (0, ""), config
     want = "".join(f"V{i}={version}\n" for i, (_, _, version, _) in enumerate(pins))
     assert out == want
@@ -276,7 +278,15 @@ def test_answers_or_refuses(
         argv += ["--if-pinned", name]
     if not needed and not optional:
         argv.append("rust")
-    code, out, err = run(config, argv)
+    stdout, stderr = io.StringIO(), io.StringIO()
+    with (
+        tempfile.TemporaryDirectory() as tmp,
+        redirect_stdout(stdout),
+        redirect_stderr(stderr),
+    ):
+        (Path(tmp) / "mise.toml").write_text(config, "utf-8")
+        code = caller_pins.main(argv, root=Path(tmp))
+    out, err = stdout.getvalue(), stderr.getvalue()
     if code == 0:
         assert out.startswith("install="), out
         assert err == ""

@@ -31,13 +31,15 @@ from belt.typed_hypothesis import given
 
 SIGNER = "Org/Signer"
 WORKFLOW = f"{SIGNER}/.github/workflows/sign.yml"
-REPO = st.sampled_from([
-    "Org/Signer",
-    "org/signer",
-    "ORG/SIGNER",
-    "org/other",
-    "else/signer",
-])
+REPO = st.sampled_from(
+    [
+        "Org/Signer",
+        "org/signer",
+        "ORG/SIGNER",
+        "org/other",
+        "else/signer",
+    ]
+)
 SHA = st.from_regex(r"[0-9a-f]{40}", fullmatch=True)
 IDENT = st.sampled_from([*zs.AUDITS, "unpinned-uses", "excessive-permissions"])
 
@@ -64,10 +66,12 @@ def draw_finding(draw: st.DrawFn) -> Drawn:
         locations.append({"symbolic": {"kind": kind}, "concrete": {"feature": feature}})
     if draw(st.booleans()):
         other = "Hidden" if kind == "Primary" else "Primary"
-        locations.append({
-            "symbolic": {"kind": other},
-            "concrete": {"feature": "else/where@main"},
-        })
+        locations.append(
+            {
+                "symbolic": {"kind": other},
+                "concrete": {"feature": "else/where@main"},
+            }
+        )
     on = ident in zs.AUDITS and all(r.lower() == SIGNER.lower() for r in repos)
     return {"ident": ident, "locations": locations}, on
 
@@ -89,31 +93,26 @@ def test_order_does_not_matter(data: st.DataObject, drawn: list[Drawn]) -> None:
     """The same findings in any order: same status, same counts."""
     findings = [f for f, _ in drawn]
     shuffled = data.draw(st.permutations(findings))
-    assert run(json.dumps(findings)) == run(json.dumps(shuffled))
-    status, _ = run(json.dumps(findings))
-    assert status == (0 if all(on for _, on in drawn) else 1)
+    answers = []
+    for each in (findings, shuffled):
+        out = io.StringIO()
+        ran = zs.Ran(14, json.dumps(each).encode(), b"")
+        with (
+            pytest.MonkeyPatch.context() as patched,
+            contextlib.redirect_stdout(out),
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            patched.setattr(zs, "run_zizmor", lambda *_args, ran=ran, **_kwargs: ran)
+            for name, value in ENV.items():
+                patched.setenv(name, value)
+            status = zs.main(["--signer-workflow", WORKFLOW])
+        answers.append((status, out.getvalue()))
+    assert answers[0] == answers[1]
+    assert answers[0][0] == (0 if all(on for _, on in drawn) else 1)
 
 
-def run(stdout: str) -> tuple[int, str]:
-    """Run main with zizmor answering `stdout` and its findings status, 14.
-
-    Returns:
-        The status and stdout.
-
-    """
-    out = io.StringIO()
-    ran = zs.Ran(14, stdout.encode(), b"")
-    env = {"GH_TOKEN": "a token", "MISE_TASK_NAME": "audit:actions", "ORG_FINDINGS": ""}
-    with (
-        pytest.MonkeyPatch.context() as patched,
-        contextlib.redirect_stdout(out),
-        contextlib.redirect_stderr(io.StringIO()),
-    ):
-        patched.setattr(zs, "run_zizmor", lambda *_args, **_kwargs: ran)
-        for name, value in env.items():
-            patched.setenv(name, value)
-        status = zs.main(["--signer-workflow", WORKFLOW])
-    return status, out.getvalue()
+# The leg's environment, a token present and no findings file.
+ENV = {"GH_TOKEN": "a token", "MISE_TASK_NAME": "audit:actions", "ORG_FINDINGS": ""}
 
 
 SCALAR: st.SearchStrategy[object] = (
@@ -171,5 +170,14 @@ SHAPED: st.SearchStrategy[list[dict[str, object]]] = st.lists(
 @example('[{"ident": []}]')
 def test_main_answers_any_output(stdout: str) -> None:
     """0, 1 or 14."""
-    status, _ = run(stdout)
+    ran = zs.Ran(14, stdout.encode(), b"")
+    with (
+        pytest.MonkeyPatch.context() as patched,
+        contextlib.redirect_stdout(io.StringIO()),
+        contextlib.redirect_stderr(io.StringIO()),
+    ):
+        patched.setattr(zs, "run_zizmor", lambda *_args, **_kwargs: ran)
+        for name, value in ENV.items():
+            patched.setenv(name, value)
+        status = zs.main(["--signer-workflow", WORKFLOW])
     assert status in {0, 1, 14}

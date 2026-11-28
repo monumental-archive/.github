@@ -21,6 +21,7 @@ import json
 import sys
 from typing import TYPE_CHECKING, TypedDict
 
+import pytest
 from hypothesis import example
 from hypothesis import strategies as st
 
@@ -110,31 +111,6 @@ def document(members: Sequence[object]) -> str:
     return json.dumps(doc)
 
 
-def printed(members: list[MemberDoc]) -> str:
-    """Run main over a document holding the members.
-
-    Returns:
-        What it printed.
-
-    Raises:
-        AssertionError: main refused the document.
-
-    """
-    doc = document(members)
-    out = io.StringIO()
-    old = sys.stdin
-    sys.stdin = io.StringIO(doc)
-    try:
-        with contextlib.redirect_stdout(out):
-            status = ap.main(["canon"])
-    finally:
-        sys.stdin = old
-    if status != 0:
-        msg = f"main refused a valid document: {status}"
-        raise AssertionError(msg)
-    return out.getvalue()
-
-
 # Membership derives the obligations.
 @given(st.tuples(MEMBER, st.booleans()))
 def test_what_a_member_owes(case: tuple[MemberDoc, bool]) -> None:
@@ -162,7 +138,14 @@ def test_member_order_does_not_matter(
 ) -> None:
     """The same members in any order print the same lines."""
     shuffled = data.draw(st.permutations(members))
-    assert printed(members) == printed(shuffled)
+    printed = []
+    for each in (members, shuffled):
+        out = io.StringIO()
+        with pytest.MonkeyPatch.context() as patched, contextlib.redirect_stdout(out):
+            patched.setattr(sys, "stdin", io.StringIO(document(each)))
+            assert ap.main(["canon"]) == 0, "main refused a valid document"
+        printed.append(out.getvalue())
+    assert printed[0] == printed[1]
 
 
 # Any document is read or refused by name.
