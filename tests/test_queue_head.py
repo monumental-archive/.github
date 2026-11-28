@@ -13,9 +13,8 @@ fixture would prove only what its author believed. It is kept gzipped,
 as release/testdata keeps its .crate: a bundle opens with a text
 header, so the text linters would read it as text.
 
-stdlib `unittest`, matching the other tests here. Every git call passes
-its own scrubbed environment (#1463).
-"""
+pytest, run by `mise run test`. passes its own scrubbed environment
+(#1463)."""
 
 from __future__ import annotations
 

@@ -7,8 +7,8 @@ call was given and what it returned without a Mac or a Postgres.
 `mise` is a stub on PATH and ORG_PYTHON a stub interpreter; both log
 what they were asked.
 
-GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom. stdlib
-`unittest`, run through the gate as `mise run test`.
+GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom. pytest, run by
+`mise run test`.
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ import pytest
 
 from belt import rust_task
 from tests import hermetic
+import contextlib
 
 ALL: list[str] = ["--all-features"]
 PREPARED: list[str] = ["prepare 17"]
@@ -80,9 +81,15 @@ exit "${PLANT_CARGO_STATUS:-0}"
 SHOW = 'echo "major=${PLANT_MAJOR-unset} sdk=${PLANT_SDK-unset}"; exit "${1:-0}"'
 
 
-@pytest.mark.usefixtures("_set_up_test_planted")
+@pytest.mark.usefixtures("_stack", "_set_up_test_planted")
 class TestPlanted:
     """A planted belt, the stubs, and the row's environment."""
+    
+    @pytest.fixture
+    def _stack(self, request: pytest.FixtureRequest) -> None:
+        """Hold the row's cleanups, undone last first after it ends."""
+        self.stack = contextlib.ExitStack()
+        request.addfinalizer(self.stack.close)
 
     @pytest.fixture
     def _set_up_test_planted(self, tmp_path: Path) -> None:
@@ -118,7 +125,7 @@ class TestPlanted:
             },
             clear=True,
         )
-        self.enterContext(patched)
+        self.stack.enter_context(patched)
 
     def logged(self) -> list[str]:
         """Read the stubs' log, the belt masked.

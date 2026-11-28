@@ -42,8 +42,7 @@ a pre-push hook, which is how three lanes lost their indexes on
 2026-08-24. Every subprocess below is handed an environment with the
 `GIT_*` family removed.
 
-stdlib `unittest`, matching the other mise/test_*.py — #364 refused a
-test framework as a fourth thing to port.
+pytest, run by `mise run test`.py —
 
 Run through the gate as `mise run test`, which `ci` collects.
 """

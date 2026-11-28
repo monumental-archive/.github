@@ -7,8 +7,7 @@ row's document and exits with the row's status. One row runs the
 belt's pinned stele itself on an SPDX document with one versionless
 PURL: the row that meets the real tool.
 
-stdlib `unittest`, matching the rest of mise/.
-"""
+pytest, run by `mise run test`."""
 
 import json
 import os

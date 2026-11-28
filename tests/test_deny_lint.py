@@ -20,9 +20,7 @@ prints a PASS report. The real rust_workspaces.py, deny_advisories.py,
 deny_skips.py and stele_findings.py run. Each refusing row asserts its
 message (#650).
 
-stdlib `unittest`, the belt's one test idiom. Run through the gate as
-`mise run test`, which `ci` collects.
-"""
+pytest, run by `mise run test`. Every git call"""
 
 import json
 import subprocess

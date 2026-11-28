@@ -14,9 +14,7 @@ unset name must each stop the body before its last line. The second
 runs mise for real, in a planted repository that pins its own shell
 and loads the belt through a clone's `conf.d` link.
 
-stdlib `unittest`, matching the other mise/test_*.py; run through the
-gate as `mise run test`.
-"""
+pytest, run by `mise run test`.py;"""
 
 import shlex
 import shutil
@@ -28,6 +26,7 @@ import pytest
 
 from belt import decoded
 from tests import hermetic
+import contextlib
 
 BELT = hermetic.MISE
 CONFIG = decoded.load_toml((BELT / "config.toml").read_text(encoding="utf-8"))
@@ -64,13 +63,20 @@ class TestTasksFailOnError:
         assert done.returncode != 0
 
 
+@pytest.mark.usefixtures("_stack")
 class TestALinkedCloneThatPinsItsShell:
     """A real mise, the belt as a clone's link, no global config (#1745)."""
+    
+    @pytest.fixture
+    def _stack(self, request: pytest.FixtureRequest) -> None:
+        """Hold the row's cleanups, undone last first after it ends."""
+        self.stack = contextlib.ExitStack()
+        request.addfinalizer(self.stack.close)
 
     def test_the_pin_holds_and_the_belt_sets_nothing_refused(self) -> None:
         """The failing pipeline reds the task, and mise warns of nothing."""
         tmp = Path(tempfile.mkdtemp()).resolve()
-        self.addCleanup(shutil.rmtree, tmp)
+        self.stack.callback(shutil.rmtree, tmp)
         repo = tmp / "repo"
         conf = repo / ".config" / "mise" / "conf.d"
         conf.mkdir(parents=True)

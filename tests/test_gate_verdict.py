@@ -7,8 +7,7 @@ other jobs computed), so these rows lift its `run:` block out of the
 YAML by step name and run it under bash. Reading it out of the YAML is
 what keeps the test on the code that ships.
 
-stdlib `unittest`, matching the other tests here.
-"""
+pytest, run by `mise run test`."""
 
 from __future__ import annotations
 

@@ -48,9 +48,7 @@ edtf-core` on a fresh checkout of the v1.3.3 tag reproduced the
 index's checksum exactly - the comparison the step makes is one a
 genuine resume passes.
 
-stdlib `unittest`, matching the rest of release/. Run through the gate
-as `mise run test`, which `ci` collects.
-"""
+pytest, run by `mise run test`. Every git call"""
 
 import hashlib
 import io

@@ -16,9 +16,7 @@ survives lefthook's own templating, and pre-commit, commit-msg and
 pre-push each relink a nested worktree to its own pin before mise runs,
 and stop when the link fails (#1988).
 
-stdlib `unittest`, matching the other mise/test_*.py. Run through the
-gate as `mise run test`, which `ci` collects.
-"""
+pytest, run by `mise run test`.py."""
 
 from __future__ import annotations
 

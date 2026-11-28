@@ -31,8 +31,7 @@ the contract `test_generate_pgrx_upgrade.py` states for #857: every
 `cwd=` is no defence, because `GIT_DIR` is an absolute override git
 obeys wherever it is standing.
 
-stdlib `unittest`, matching mise/test_*.py — #364 refused a test
-framework as a fourth thing to port.
+pytest, run by `mise run test`.py —
 
 Run through the gate as `mise run test`, which `ci` collects.
 """
@@ -47,6 +46,7 @@ import pytest
 
 from belt import decoded
 from tests import hermetic
+import contextlib
 
 CANON = hermetic.CANON
 RELEASE = CANON / "release"
@@ -1594,7 +1594,7 @@ TAG_REFUSED = (
 )
 
 
-@pytest.mark.usefixtures("_set_up_test_tag_release_push")
+@pytest.mark.usefixtures("_stack", "_set_up_test_tag_release_push")
 class TestTagReleasePush:
     """What `tag-release.sh` says when the tag push itself fails (#1322).
 
@@ -1602,6 +1602,12 @@ class TestTagReleasePush:
     a stand-in signer, and an `origin` whose pre-receive hook answers
     the way GitHub answered edtf's v1.3.5 push.
     """
+    
+    @pytest.fixture
+    def _stack(self, request: pytest.FixtureRequest) -> None:
+        """Hold the row's cleanups, undone last first after it ends."""
+        self.stack = contextlib.ExitStack()
+        request.addfinalizer(self.stack.close)
 
     @pytest.fixture
     def _set_up_test_tag_release_push(self) -> None:
@@ -1617,7 +1623,7 @@ class TestTagReleasePush:
             and the remote's tags after it.
 
         """
-        root = Path(self.enterContext(TemporaryDirectory()))
+        root = Path(self.stack.enter_context(TemporaryDirectory()))
         home = root / "home"
         home.mkdir()
         env = hermetic_env(home)
@@ -1751,7 +1757,7 @@ esac
 """
 
 
-@pytest.mark.usefixtures("_set_up_test_tag_release_upgrade_path")
+@pytest.mark.usefixtures("_stack", "_set_up_test_tag_release_upgrade_path")
 class TestTagReleaseUpgradePath:
     """The mint guard acts on previous_release.py's predecessor (#1592).
 
@@ -1761,6 +1767,12 @@ class TestTagReleaseUpgradePath:
     a maintenance release marked latest was checked in place of the
     newest. Each row reaches the push or stops before signing.
     """
+    
+    @pytest.fixture
+    def _stack(self, request: pytest.FixtureRequest) -> None:
+        """Hold the row's cleanups, undone last first after it ends."""
+        self.stack = contextlib.ExitStack()
+        request.addfinalizer(self.stack.close)
 
     @pytest.fixture
     def _set_up_test_tag_release_upgrade_path(self) -> None:
@@ -1779,7 +1791,7 @@ class TestTagReleaseUpgradePath:
             The completed process, and the remote's tags after it.
 
         """
-        root = Path(self.enterContext(TemporaryDirectory()))
+        root = Path(self.stack.enter_context(TemporaryDirectory()))
         home = root / "home"
         home.mkdir()
         env = hermetic_env(home)
@@ -1875,6 +1887,7 @@ class TestTagReleaseUpgradePath:
         assert pushed == ""
 
 
+@pytest.mark.usefixtures("_stack")
 class TestInventoryStepWiring:
     """publish.yml's inventory step: what it hands its one stele call.
 
@@ -1887,6 +1900,12 @@ class TestInventoryStepWiring:
     with `stele`, `git` and `date` stubbed — stele records its argv and
     prints a list, and GNU `date -d` is not the Mac's.
     """
+    
+    @pytest.fixture
+    def _stack(self, request: pytest.FixtureRequest) -> None:
+        """Hold the row's cleanups, undone last first after it ends."""
+        self.stack = contextlib.ExitStack()
+        request.addfinalizer(self.stack.close)
 
     STEP = "Derive the per-artifact inventories and the release view"
 
@@ -1914,7 +1933,7 @@ class TestInventoryStepWiring:
     def _run(
         self, *, binaries: bool, plans: int, variants: str, refuse: bool = False
     ) -> tuple[subprocess.CompletedProcess[str], list[str], Path]:
-        root = Path(self.enterContext(TemporaryDirectory()))
+        root = Path(self.stack.enter_context(TemporaryDirectory()))
         stubs = root / ".stubs"
         stubs.mkdir()
         calls = root / ".stele-argv"

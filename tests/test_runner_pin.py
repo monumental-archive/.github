@@ -12,8 +12,8 @@ body, read from mise/config.toml: the skip with nothing tracked, an
 untracked workflow (still a skip), and offenders in both lists end to
 end; the rest call the helper's `main` in this process.
 
-GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom. stdlib
-`unittest`, run through the gate as `mise run test`.
+GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom. pytest, run by
+`mise run test`.
 """
 
 import subprocess

@@ -6,9 +6,7 @@ REUSE.toml naming a licence whose text is not tracked is the half of
 that defect a machine can hold. Every red row asserts its message, so
 a row cannot pass on a different failure.
 
-stdlib `unittest`, matching the other mise/test_*.py; run through the
-gate as `mise run test`.
-"""
+pytest, run by `mise run test`.py;"""
 
 import contextlib
 import io

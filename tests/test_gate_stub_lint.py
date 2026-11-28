@@ -10,8 +10,7 @@ three unmet at once across two callers, what is not a gate caller (no
 canon itself (`./`), a file that is not UTF-8, a missing file, a call
 with no canon or no workflow, and the skip through the task's body.
 
-stdlib `unittest`, run through the gate as `mise run test`.
-"""
+pytest, run by `mise run test`."""
 
 import subprocess
 import sys

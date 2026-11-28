@@ -3,9 +3,7 @@
 The runner line a tree's package.json and lockfile answer, and the
 vitest run `measured` reads off its own command line (`--measured-run`).
 
-stdlib `unittest`, matching the other mise/test_*.py; run through the
-gate as `mise run test`.
-"""
+pytest, run by `mise run test`.py;"""
 
 import contextlib
 import io
@@ -138,8 +136,15 @@ class TestLocked:
                 cj.locked("Cargo.lock", lock, "a")
 
 
+@pytest.mark.usefixtures("_stack")
 class TestMain:
     """The runner line for a planted tree's package.json (#1659)."""
+    
+    @pytest.fixture
+    def _stack(self, request: pytest.FixtureRequest) -> None:
+        """Hold the row's cleanups, undone last first after it ends."""
+        self.stack = contextlib.ExitStack()
+        request.addfinalizer(self.stack.close)
 
     def main(self, tracked: list[str], files: dict[str, str]) -> tuple[int, str, str]:
         """Run main from a scratch tree holding `files`.
@@ -149,7 +154,7 @@ class TestMain:
 
         """
         tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(tmp.cleanup)
+        self.stack.callback(tmp.cleanup)
         for name, text in files.items():
             (Path(tmp.name) / name).write_text(text, encoding="utf-8")
         out, err = io.StringIO(), io.StringIO()
@@ -205,8 +210,15 @@ FLAGS = [
 ]
 
 
+@pytest.mark.usefixtures("_stack")
 class TestMeasuredRun:
     """`--measured-run`: the vitest run on `measured`'s line (#2105)."""
+    
+    @pytest.fixture
+    def _stack(self, request: pytest.FixtureRequest) -> None:
+        """Hold the row's cleanups, undone last first after it ends."""
+        self.stack = contextlib.ExitStack()
+        request.addfinalizer(self.stack.close)
 
     def call(
         self, *command: str, files: dict[str, str] | None = None
@@ -223,7 +235,7 @@ class TestMeasuredRun:
         )
         planted = {"package.json": "{}", "pnpm-lock.yaml": lock} | (files or {})
         tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(tmp.cleanup)
+        self.stack.callback(tmp.cleanup)
         for name, text in planted.items():
             (Path(tmp.name) / name).write_text(text, encoding="utf-8")
         argv = ["--measured-run", "/run/typescript", *planted, "--", *command]

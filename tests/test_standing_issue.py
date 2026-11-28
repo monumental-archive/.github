@@ -10,8 +10,7 @@ Authorization header. Each row calls `main` in this process with the
 report job's arguments and asserts the exact calls gh received and the
 message.
 
-stdlib `unittest`, run through the gate as `mise run test`.
-"""
+pytest, run by `mise run test`."""
 
 from __future__ import annotations
 

@@ -17,9 +17,7 @@ offline: the registry is the tree's own aqua-registry.yaml by `file://`,
 so the gate stays deterministic. A resolved tool reads
 `would install`; a refused one names the lockfile.
 
-stdlib `unittest`, matching the other mise/test_*.py. Run through the
-gate as `mise run test`, which `ci` collects.
-"""
+pytest, run by `mise run test`.py."""
 
 from __future__ import annotations
 

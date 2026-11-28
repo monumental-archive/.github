@@ -12,9 +12,7 @@ response moved the block into a canon script the step runs:
 
 Each row runs the script itself, by its path, in a scratch tree.
 
-stdlib `unittest`, matching the rest of mise/; run through the gate as
-`mise run test`.
-"""
+pytest, run by `mise run test`. Every git call"""
 
 import os
 import subprocess
@@ -23,6 +21,7 @@ from pathlib import Path
 import pytest
 
 from tests import hermetic
+import contextlib
 
 HERE = hermetic.MISE
 CANON = HERE.parent
@@ -52,9 +51,15 @@ def run(
     )
 
 
-@pytest.mark.usefixtures("_set_up_test_vex_decisions")
+@pytest.mark.usefixtures("_stack", "_set_up_test_vex_decisions")
 class TestVexDecisions:
     """mise/vex-decisions.sh, in a planted git tree."""
+    
+    @pytest.fixture
+    def _stack(self, request: pytest.FixtureRequest) -> None:
+        """Hold the row's cleanups, undone last first after it ends."""
+        self.stack = contextlib.ExitStack()
+        request.addfinalizer(self.stack.close)
 
     SCRIPT = HERE / "vex-decisions.sh"
 
@@ -98,7 +103,7 @@ class TestVexDecisions:
 
         """
         self.out = self.tree.parent / f"{self.tree.name}-args"
-        self.addCleanup(self.out.unlink, missing_ok=True)
+        self.stack.callback(self.out.unlink, missing_ok=True)
         return run(
             self.SCRIPT,
             self.tree,
@@ -145,7 +150,7 @@ class TestVexDecisions:
         lines = "".join(f"echo {p}\n" for p in paths)
         path.write_text(f"#!/usr/bin/env bash\n{lines}", "utf-8")
         path.chmod(0o755)
-        self.addCleanup(path.unlink)
+        self.stack.callback(path.unlink)
         return str(path)
 
     def test_a_push_of_one_decision_signs_it(self) -> None:

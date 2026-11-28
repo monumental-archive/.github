@@ -12,9 +12,7 @@ WHAT RUNS. The helper as shipped, under bash, with a stub `cargo` first
 on PATH answering `metadata` with a document shaped like cargo's. `jq`
 is the real one.
 
-stdlib `unittest`, matching the rest of release/. Run through the gate
-as `mise run test`, which `ci` collects.
-"""
+pytest, run by `mise run test`. Every git call"""
 
 import json
 import os

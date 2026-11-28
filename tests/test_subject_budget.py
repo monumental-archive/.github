@@ -7,9 +7,9 @@ not a table test and does not catch the next regression, so every guard
 in `subject_budget.py` is driven here — both directions where there are
 two, and the hard-error paths asserted as errors rather than fallbacks.
 
-stdlib `unittest`, deliberately. #364 refused a test framework on the
-grounds that adopting one is a fourth thing to port; that reasoning bites
-a new dependency, not the batteries already inside the pinned
+pytest, run by `mise run test`. #364 refused a test framework on the
+grounds that adopting one is a fourth thing to port; that reasoning
+bites a new dependency, not the batteries already inside the pinned
 interpreter. Nothing is added to the belt to run this.
 
 Run through the gate as `mise run test`, which `ci` collects.

@@ -9,9 +9,8 @@ a reusable-workflow caller with no steps, and `defaults: run:`, which
 holds a mapping and is no command. Each row reads one of them; the
 refusals are asserted by message.
 
-stdlib `unittest`, matching the other mise/test_*.py; run through the
-gate as `mise run test`, with the belt's yq on PATH.
-"""
+pytest, run by `mise run test`.py; run through the gate as `mise run
+test`, with the belt's yq on PATH."""
 
 from pathlib import Path
 

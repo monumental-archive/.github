@@ -25,9 +25,7 @@ Mutation, recorded on #1281's pull request: with the job put back to a
 plain `run:` line, the delete-only, add-then-delete, HEAD-elsewhere and
 already-merged rows go red with no marker.
 
-stdlib `unittest`, matching the other mise/test_*.py. Run through the
-gate as `mise run test`, which `ci` collects.
-"""
+pytest, run by `mise run test`.py."""
 
 import os
 import subprocess

@@ -18,8 +18,8 @@ is not satisfied by an untracked workflow.
 lint:actions runs the belt's real actionlint, so this file runs under
 the belt's tools (`mise run test`, or `mise x --`).
 
-GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom. stdlib
-`unittest`, run through the gate as `mise run test`.
+GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom. pytest, run by
+`mise run test`.
 """
 
 import subprocess

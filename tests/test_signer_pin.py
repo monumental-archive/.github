@@ -14,9 +14,7 @@ repository as ORG_CANON_DIR, so the identity it reads is the real one.
 The `Branches` rows call mise/signer_pin.py's `main` in this process,
 one per branch, each message asserted whole (#1911).
 
-stdlib `unittest`, matching the other mise/test_*.py; run through the
-gate as `mise run test`.
-"""
+pytest, run by `mise run test`.py;"""
 
 import subprocess
 import sys

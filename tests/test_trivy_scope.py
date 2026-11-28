@@ -12,9 +12,7 @@ beside it. trivy is a stub that records every file in the tree it was
 given: the row is about what reaches the scanner, and trivy's verdict on
 a file is trivy's to prove.
 
-stdlib `unittest`, matching the other mise/test_*.py; run through the
-gate as `mise run test`.
-"""
+pytest, run by `mise run test`.py;"""
 
 import os
 import subprocess

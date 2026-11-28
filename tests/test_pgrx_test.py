@@ -21,9 +21,7 @@ LLVM_PROFILE_FILE points, unless the row plants none, and the stub
 Each row asserts the message, not just the exit status: a planted row
 scored on exit alone can pass for the wrong reason.
 
-stdlib `unittest`, the belt's one test idiom. Run through the gate as
-`mise run test`, which `ci` collects.
-"""
+pytest, run by `mise run test`. Every git call"""
 
 import json
 import os

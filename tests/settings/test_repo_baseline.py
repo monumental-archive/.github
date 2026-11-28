@@ -16,9 +16,7 @@ the script's own words about it.
 Each row carries the issue or pull request of the fix it holds, and
 fails on its assertion with that fix's code reverted (#1360).
 
-stdlib `unittest`, matching mise/test_*.py. Run through the gate as
-`mise run test`, which `ci` collects.
-"""
+pytest, run by `mise run test`.py."""
 
 import base64
 import json

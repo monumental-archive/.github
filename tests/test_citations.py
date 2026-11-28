@@ -6,9 +6,7 @@ stand-in (`Org`): the rows read no network. Each row plants a canon-
 shaped repository whose docs/ git tracks, because the helper reads
 docs/ from git (#2013): an untracked docs/ is a missing one.
 
-stdlib `unittest`, matching the other mise/test_*.py; run through the
-gate as `mise run test`.
-"""
+pytest, run by `mise run test`.py;"""
 
 import contextlib
 import io

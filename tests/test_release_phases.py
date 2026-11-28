@@ -21,9 +21,7 @@ rule tripping instead). The green rows plant the canon's real
 publish.yml and continuous.yml, so the orchestrators and the lint
 cannot drift apart.
 
-stdlib `unittest`, matching the other mise/test_*.py. Run through the
-gate as `mise run test`, which `ci` collects.
-"""
+pytest, run by `mise run test`.py."""
 
 import re
 import subprocess

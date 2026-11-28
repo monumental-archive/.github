@@ -39,8 +39,7 @@ because this harness shells out to `git` and the thing it drives shells
 out to `git` again. #857 records what inheriting the caller's git
 environment cost.
 
-stdlib `unittest`, matching mise/test_*.py - #364 refused a test
-framework as a fourth thing to port.
+pytest, run by `mise run test`.py -
 
 Run through the gate as `mise run test`, which `ci` collects.
 """

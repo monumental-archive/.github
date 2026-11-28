@@ -25,8 +25,7 @@ says disabled. The agreement case states that record's value for the
 field explicitly, so it proves agreement; the live disagreement is its
 own case, because it is a real finding and not a fixture artefact.
 
-stdlib `unittest`, the belt's one test idiom.
-"""
+pytest, run by `mise run test`."""
 
 import copy
 import io

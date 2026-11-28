@@ -15,6 +15,7 @@ import pytest
 
 from belt import gate_cache_key
 from tests import hermetic
+import contextlib
 
 BELT = hermetic.MISE
 MEASURED = BELT / "measured"
@@ -747,8 +748,15 @@ LOCK = (
 )
 
 
+@pytest.mark.usefixtures("_stack")
 class TestVitestMeasured:
     """In a vitest tree the run itself carries the coverage flags (#2105)."""
+    
+    @pytest.fixture
+    def _stack(self, request: pytest.FixtureRequest) -> None:
+        """Hold the row's cleanups, undone last first after it ends."""
+        self.stack = contextlib.ExitStack()
+        request.addfinalizer(self.stack.close)
 
     def vitest_run(
         self, argv: list[str], *, floor: bool = True, calls: int = 1
@@ -760,7 +768,7 @@ class TestVitestMeasured:
 
         """
         tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(tmp.cleanup)
+        self.stack.callback(tmp.cleanup)
         base = Path(tmp.name)
         tree = plant(base, floor=floor)
         (tree / "package.json").write_text("{}", encoding="utf-8")

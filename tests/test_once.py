@@ -4,9 +4,7 @@ Each row runs the helper as `measured` does, as a process, with a
 command that appends a line to the row's log, and asserts what the log
 and the marker hold afterwards.
 
-stdlib `unittest`, matching the other mise/test_*.py; run through the
-gate as `mise run test`.
-"""
+pytest, run by `mise run test`.py;"""
 
 import subprocess
 import sys

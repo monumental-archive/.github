@@ -16,8 +16,8 @@ process, in the planted tree. Two more call it with no workflow and
 with a missing one. Every row asserts the whole of each stream: a red
 row scored on exit alone can pass for the wrong reason.
 
-GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom. stdlib
-`unittest`, run through the gate as `mise run test`.
+GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom. pytest, run by
+`mise run test`.
 """
 
 import subprocess

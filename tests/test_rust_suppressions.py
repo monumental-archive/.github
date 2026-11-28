@@ -6,9 +6,7 @@ attribute (a comment, a doc comment, a string, a raw string, a char),
 where an attribute's own literal holds `allow(`, and each manifest
 shape that is or is not a lint table.
 
-stdlib `unittest`, matching the other mise/test_*.py; run through the
-gate as `mise run test`.
-"""
+pytest, run by `mise run test`.py;"""
 
 import contextlib
 import io

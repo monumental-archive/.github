@@ -13,9 +13,7 @@ there. The POSIX rows run the printed guard in a `#!/bin/sh` script
 under `/bin/sh` and under `dash`, each against its own measured table,
 and skip by name where that shell is absent or is neither.
 
-stdlib `unittest`, the belt's one test idiom. Run through the gate as
-`mise run test`, which `ci` collects.
-"""
+pytest, run by `mise run test`. Every git call"""
 
 import io
 import re

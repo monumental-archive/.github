@@ -11,8 +11,7 @@ Then the other half of the contract: every tracked shell script that
 starts a helper as `"${ORG_PYTHON}"` refuses an unset or empty one by
 name, never falling back to the runner's python3.
 
-stdlib `unittest`, matching the other tests here.
-"""
+pytest, run by `mise run test`."""
 
 from __future__ import annotations
 

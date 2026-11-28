@@ -8,9 +8,7 @@ The body under test is the task's own `run` string, read out of
 mise/config.toml through decoded.py and run by bash in a planted git tree, not
 a copy of it. Red rows assert the whole message.
 
-stdlib `unittest`, matching the other mise/test_*.py. Run through the
-gate as `mise run test`, which `ci` collects.
-"""
+pytest, run by `mise run test`.py."""
 
 from __future__ import annotations
 

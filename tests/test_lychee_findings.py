@@ -12,8 +12,7 @@ quoted record and lychee's 2, a sound one no record and 0. Run against
 `origin/main`'s config, the record row fails: that body ran lychee in
 its human mode and recorded nothing.
 
-stdlib `unittest`, matching the rest of mise/.
-"""
+pytest, run by `mise run test`."""
 
 import json
 import os

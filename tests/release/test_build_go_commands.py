@@ -14,9 +14,7 @@ packages, one per line, and `build -o OUT PKG` by writing OUT. One row
 starts the helper by its path in this tree instead: the script
 contract (it starts, and exits with go's own status and message).
 
-stdlib `unittest`, matching the rest of release/. Run through the gate
-as `mise run test`, which `ci` collects.
-"""
+pytest, run by `mise run test`. Every git call"""
 
 import os
 import subprocess

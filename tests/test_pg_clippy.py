@@ -10,9 +10,7 @@ read by the belt's real gate_surface.py, and its extension's major
 derived by the real pgrx-env.sh. Every row asserts the whole log, so a
 row cannot pass by stopping early.
 
-stdlib `unittest`, matching the other mise/test_*.py; run through the
-gate as `mise run test`.
-"""
+pytest, run by `mise run test`.py;"""
 
 import os
 import subprocess

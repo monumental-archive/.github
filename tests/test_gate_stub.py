@@ -25,9 +25,7 @@ reason (one of the other two requirements tripping instead). The green
 rows plant the canon's real stub and its real gate.yml, so the template
 and the lint cannot drift apart.
 
-stdlib `unittest`, matching the other mise/test_*.py. Run through the
-gate as `mise run test`, which `ci` collects.
-"""
+pytest, run by `mise run test`.py."""
 
 import subprocess
 import sys

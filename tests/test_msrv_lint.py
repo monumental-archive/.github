@@ -13,8 +13,8 @@ read from mise/config.toml, for the guard and the script contract.
 `PLANT_FAIL` names the one step that fails: `cargo-<subcommand>`,
 `mise-<what>`, a helper's file name, or `prepare`.
 
-GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom. stdlib
-`unittest`, run through the gate as `mise run test`.
+GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom. pytest, run by
+`mise run test`.
 """
 
 from __future__ import annotations
@@ -569,8 +569,15 @@ class TestHelpers:
         assert want == got
 
 
+@pytest.mark.usefixtures("_stack")
 class TestTask:
     """The task's own body: its guard, and the call that starts the helper."""
+    
+    @pytest.fixture
+    def _stack(self, request: pytest.FixtureRequest) -> None:
+        """Hold the row's cleanups, undone last first after it ends."""
+        self.stack = contextlib.ExitStack()
+        request.addfinalizer(self.stack.close)
 
     @staticmethod
     def run_body(
@@ -615,7 +622,7 @@ class TestTask:
             )
             bins = tree.parent / f"{tree.name}-bin"
             bins.mkdir()
-            self.addCleanup(shutil.rmtree, bins)
+            self.stack.callback(shutil.rmtree, bins)
             for tool in ("git", "bash", "dirname", "cat", "mktemp", "rm"):
                 (bins / tool).symlink_to(hermetic.tool(tool))
             overrides = {

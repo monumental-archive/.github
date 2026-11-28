@@ -16,9 +16,8 @@ Before #2011 the body read `cargo metadata` at the root alone, so the
 fuzz crate was held to nothing: each row fails there.
 
 GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom; every child
-environment is built from hermetic.env (#1542). stdlib `unittest`, run
-through the gate as `mise run test`.
-"""
+environment is built from hermetic.env (#1542). pytest, run by `mise run
+test`."""
 
 from __future__ import annotations
 

@@ -25,9 +25,7 @@ steps and jobs the rows hold to.
 Each row asserts the message, not just the exit status: a planted row
 scored on exit alone can pass for the wrong reason.
 
-stdlib `unittest`, the belt's one test idiom. Run through the gate as
-`mise run test`, which `ci` collects.
-"""
+pytest, run by `mise run test`. Every git call"""
 
 import os
 import re
@@ -41,6 +39,7 @@ import pytest
 
 from belt import decoded, workflow_yaml
 from tests import hermetic
+import contextlib
 
 BELT = hermetic.MISE
 CANON = BELT.parent
@@ -779,8 +778,15 @@ class TestQuietSteps(TestSearchCase):
         ) in err
 
 
+@pytest.mark.usefixtures("_stack")
 class TestFailureLines:
     """What a crash's finding quotes from the log (#2120)."""
+    
+    @pytest.fixture
+    def _stack(self, request: pytest.FixtureRequest) -> None:
+        """Hold the row's cleanups, undone last first after it ends."""
+        self.stack = contextlib.ExitStack()
+        request.addfinalizer(self.stack.close)
 
     def lines(self, kind: str, log: str) -> str:
         """Run org_fuzz_failure_lines over a planted log.
@@ -793,7 +799,7 @@ class TestFailureLines:
             "w", encoding="utf-8", suffix=".log", delete=False
         ) as f:
             f.write(log)
-        self.addCleanup(os.unlink, f.name)
+        self.stack.callback(os.unlink, f.name)
         return lib('org_fuzz_failure_lines "$1" "$2"', kind, f.name)
 
     def test_at_most_40_lines_are_quoted(self) -> None:
@@ -815,7 +821,7 @@ class TestFailureLines:
             "w", encoding="utf-8", suffix=".log", delete=False
         ) as f:
             f.write("1 #2 NEW cov: 1\n")
-        self.addCleanup(os.unlink, f.name)
+        self.stack.callback(os.unlink, f.name)
         script = f'. "{SEARCH_LIB}"; org_fuzz_crash rust "$1" s m'
         err = subprocess.run(
             [BASH, "-c", script, "lib", f.name],
@@ -950,8 +956,15 @@ class TestSelection(TestSearchCase):
             assert "-fuzztime 900s" in call
 
 
+@pytest.mark.usefixtures("_stack")
 class TestRunLength:
     """The summary says when a run was still finding new code (item 5)."""
+    
+    @pytest.fixture
+    def _stack(self, request: pytest.FixtureRequest) -> None:
+        """Hold the row's cleanups, undone last first after it ends."""
+        self.stack = contextlib.ExitStack()
+        request.addfinalizer(self.stack.close)
 
     def timing(self, kind: str, log: str, budget: int) -> str:
         """Read a planted log through the library's reader and timing line.
@@ -964,7 +977,7 @@ class TestRunLength:
             "w", encoding="utf-8", suffix=".log", delete=False
         ) as handle:
             handle.write(log)
-        self.addCleanup(Path(handle.name).unlink)
+        self.stack.callback(Path(handle.name).unlink)
         return lib(
             'org_fuzz_timing "$(org_fuzz_last_new "$1" "$2")" "$3"',
             kind,
@@ -1028,8 +1041,15 @@ def step(name: str) -> dict[str, object]:
     return next(s for s in fuzz_steps() if s.get("name") == name)
 
 
+@pytest.mark.usefixtures("_stack")
 class TestHandover:
     """What a fuzz runner hands the propose job, and when (items 3, 4; #1899)."""
+    
+    @pytest.fixture
+    def _stack(self, request: pytest.FixtureRequest) -> None:
+        """Hold the row's cleanups, undone last first after it ends."""
+        self.stack = contextlib.ExitStack()
+        request.addfinalizer(self.stack.close)
 
     KEPT = "Hand what the search kept to the propose job"
     UPLOAD = "Upload what the search kept"
@@ -1070,7 +1090,7 @@ class TestHandover:
 
         """
         tmp = Path(tempfile.mkdtemp())
-        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        self.stack.callback(shutil.rmtree, tmp, ignore_errors=True)
         stage = tmp / "stage"
         stage.mkdir()
         for name, text in files.items():

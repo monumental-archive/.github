@@ -13,8 +13,8 @@ refuses a reusable workflow. Its `report` job needs the canon action
 for the belt's Python, so that one pin is allowed (owner's ruling,
 2026-11-21) and held to the same released SHA as every other.
 
-GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom. stdlib
-`unittest`, run through the gate as `mise run test`.
+GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom. pytest, run by
+`mise run test`.
 """
 
 import shutil

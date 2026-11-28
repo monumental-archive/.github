@@ -23,8 +23,7 @@ function file excepted:
    command if it looks like one. Text written to a file, a pipe, a
    command substitution or a `{ … } >> file` group is not the log.
 
-stdlib `unittest`, matching the rest of mise/.
-"""
+pytest, run by `mise run test`."""
 
 import re
 import subprocess

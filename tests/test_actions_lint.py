@@ -12,8 +12,7 @@ mise/test_workflow_files.py.
 The rows that run actionlint use the belt's, so this file runs under the
 belt's tools (`mise run test`, or `mise x --`).
 
-stdlib `unittest`, run through the gate as `mise run test`.
-"""
+pytest, run by `mise run test`."""
 
 import subprocess
 import sys

@@ -17,9 +17,8 @@ collected by repo-own-audits.yml and by nothing else. A tree whose only
 caller is that workflow passes; a tree whose only caller is the retired
 single audit workflow is red, by name.
 
-GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom. stdlib `unittest`,
-run through the gate as `mise run test`, which `ci` collects.
-"""
+GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom. pytest, run by
+`mise run test`."""
 
 import subprocess
 import sys

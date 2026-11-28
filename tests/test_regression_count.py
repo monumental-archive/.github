@@ -124,16 +124,22 @@ class Repo:
         }
 
 
-@pytest.mark.usefixtures("_set_up_test_repo_case")
+@pytest.mark.usefixtures("_stack", "_set_up_test_repo_case")
 class TestRepoCase:
     """A row with a fresh repository and an isolated git."""
+    
+    @pytest.fixture
+    def _stack(self, request: pytest.FixtureRequest) -> None:
+        """Hold the row's cleanups, undone last first after it ends."""
+        self.stack = contextlib.ExitStack()
+        request.addfinalizer(self.stack.close)
 
     @pytest.fixture
     def _set_up_test_repo_case(self, tmp_path: Path) -> None:
         """Isolate git's config, then build the repository."""
         clean = hermetic.env(MISE_TASK_NAME=TASK)
         isolated: dict[str, str] = {**clean, **_GIT_ENV}
-        self.enterContext(mock.patch.dict(os.environ, isolated, clear=True))
+        self.stack.enter_context(mock.patch.dict(os.environ, isolated, clear=True))
         self.repo = Repo(pathlib.Path(str(tmp_path)))
 
     def assert_class(self, subject: str, want: str) -> None:

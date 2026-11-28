@@ -14,9 +14,7 @@ teardown is the plpgsql leg's answer. So the clause is written whole
 here, and the rows plant it where a search would have switched the leg
 on.
 
-stdlib `unittest`, matching the other mise/test_*.py. Run through the
-gate as `mise run test`, which `ci` collects.
-"""
+pytest, run by `mise run test`.py."""
 
 import base64
 import contextlib
@@ -335,8 +333,15 @@ def measured_run(  # ruff: ignore[too-many-arguments] -- one keyword per part of
             raise AssertionError(done.stderr)
 
 
+@pytest.mark.usefixtures("_stack")
 class TestCollecting:
     """Collects from a planted database and reads the report."""
+    
+    @pytest.fixture
+    def _stack(self, request: pytest.FixtureRequest) -> None:
+        """Hold the row's cleanups, undone last first after it ends."""
+        self.stack = contextlib.ExitStack()
+        request.addfinalizer(self.stack.close)
 
     # The words the call names after `--`; None names none (#2114).
     client: list[str] | None = None
@@ -363,7 +368,7 @@ class TestCollecting:
 
         """
         tmp = Path(tempfile.mkdtemp())
-        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        self.stack.callback(shutil.rmtree, tmp, ignore_errors=True)
         stubs, answers = plant_stubs(tmp, functions, unreadable)
         if listing is not None:
             (answers / "functions").write_text(listing, encoding="utf-8")
@@ -383,8 +388,15 @@ class TestCollecting:
         return collected, read
 
 
+@pytest.mark.usefixtures("_stack")
 class TestHelperRows(TestCollecting):
     """`collect` against a stub psql, then `totals` over its report."""
+    
+    @pytest.fixture
+    def _stack(self, request: pytest.FixtureRequest) -> None:
+        """Hold the row's cleanups, undone last first after it ends."""
+        self.stack = contextlib.ExitStack()
+        request.addfinalizer(self.stack.close)
 
     def test_two_functions_weighted_into_the_totals(self) -> None:
         """Each figure is weighted by its function's statement count."""
@@ -490,7 +502,7 @@ class TestHelperRows(TestCollecting):
     def test_a_missing_report_names_the_teardown(self) -> None:
         """A suite whose teardown never called collect is refused."""
         tmp = Path(tempfile.mkdtemp())
-        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        self.stack.callback(shutil.rmtree, tmp, ignore_errors=True)
         read = call(
             ["totals", "leg", str(tmp / "none.json")],
             hermetic.env(MISE_TASK_NAME=TASK),
@@ -505,7 +517,7 @@ class TestHelperRows(TestCollecting):
     def test_a_file_that_is_not_a_report_is_refused_by_what(self) -> None:
         """The one decoder names what about the file is wrong."""
         tmp = Path(tempfile.mkdtemp())
-        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        self.stack.callback(shutil.rmtree, tmp, ignore_errors=True)
         planted = tmp / "report.json"
         entry = {
             "function": "public.guard()",
@@ -534,7 +546,7 @@ class TestHelperRows(TestCollecting):
     def test_collect_without_a_report_path_is_refused(self) -> None:
         """The teardown calls collect only when the leg set the path."""
         tmp = Path(tempfile.mkdtemp())
-        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        self.stack.callback(shutil.rmtree, tmp, ignore_errors=True)
         stubs, answers = plant_stubs(tmp, TWO)
         done = call(
             ["collect", "postgres://stub"],
@@ -566,8 +578,15 @@ LINT_RED = (
 )
 
 
+@pytest.mark.usefixtures("_stack")
 class TestLintRows(TestCollecting):
     """plpgsql_check's static check, in the same report (#1605)."""
+    
+    @pytest.fixture
+    def _stack(self, request: pytest.FixtureRequest) -> None:
+        """Hold the row's cleanups, undone last first after it ends."""
+        self.stack = contextlib.ExitStack()
+        request.addfinalizer(self.stack.close)
 
     def test_a_report_with_no_findings_is_green(self) -> None:
         """Every function asked, none reported: the totals print."""
@@ -669,7 +688,7 @@ class TestLintRows(TestCollecting):
     def test_a_reading_without_its_lint_answer_is_refused(self) -> None:
         """A report from a helper that did not ask is not a clean result."""
         tmp = Path(tempfile.mkdtemp())
-        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        self.stack.callback(shutil.rmtree, tmp, ignore_errors=True)
         entry = {
             "function": "public.guard()",
             "statements": "0.8",
@@ -772,8 +791,15 @@ REMEDY = (
 )
 
 
+@pytest.mark.usefixtures("_stack")
 class TestClientRows(TestCollecting):
     """The client is psql on PATH unless the call names another."""
+    
+    @pytest.fixture
+    def _stack(self, request: pytest.FixtureRequest) -> None:
+        """Hold the row's cleanups, undone last first after it ends."""
+        self.stack = contextlib.ExitStack()
+        request.addfinalizer(self.stack.close)
 
     def named_client(self) -> list[str]:
         """Plant CLIENT outside PATH; the stub psql is out of PATH too.
@@ -783,7 +809,7 @@ class TestClientRows(TestCollecting):
 
         """
         tmp = Path(tempfile.mkdtemp())
-        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        self.stack.callback(shutil.rmtree, tmp, ignore_errors=True)
         client = tmp / "client"
         client.write_text(CLIENT, encoding="utf-8")
         client.chmod(0o755)
@@ -806,7 +832,7 @@ class TestClientRows(TestCollecting):
     def test_a_named_client_is_run_with_its_words_first(self) -> None:
         """The words run as an argv, unjoined, then the helper's own."""
         empty = Path(tempfile.mkdtemp())
-        self.addCleanup(shutil.rmtree, empty, ignore_errors=True)
+        self.stack.callback(shutil.rmtree, empty, ignore_errors=True)
         self.client = [*self.named_client(), "a b", "c"]
         collected, read = self.measure(
             TWO,
@@ -834,8 +860,15 @@ class TestClientRows(TestCollecting):
         ) == read.stderr
 
 
+@pytest.mark.usefixtures("_stack")
 class TestRefusalRows(TestCollecting):
     """Every way a collection or a report file is refused, by name."""
+    
+    @pytest.fixture
+    def _stack(self, request: pytest.FixtureRequest) -> None:
+        """Hold the row's cleanups, undone last first after it ends."""
+        self.stack = contextlib.ExitStack()
+        request.addfinalizer(self.stack.close)
 
     def collection_failed(self, read: Done, why: str) -> None:
         """Assert the leg refuses a failed collection, naming why."""
@@ -846,7 +879,7 @@ class TestRefusalRows(TestCollecting):
     def test_no_psql_on_path_fails_the_collection_by_name(self) -> None:
         """The client is the repository's; without it nothing is read."""
         empty = Path(tempfile.mkdtemp())
-        self.addCleanup(shutil.rmtree, empty, ignore_errors=True)
+        self.stack.callback(shutil.rmtree, empty, ignore_errors=True)
         collected, read = self.measure(TWO, PATH=str(empty))
         assert collected.returncode == 0, collected.stderr
         self.collection_failed(read, f"psql is not on PATH {OWN}; {REMEDY}")
@@ -895,7 +928,7 @@ class TestRefusalRows(TestCollecting):
 
         """
         tmp = Path(tempfile.mkdtemp())
-        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        self.stack.callback(shutil.rmtree, tmp, ignore_errors=True)
         planted = tmp / "report.json"
         text = document if isinstance(document, str) else json.dumps(document)
         planted.write_text(text, encoding="utf-8")
@@ -1039,8 +1072,15 @@ HELD = {
 STRONG = {"101": ("public.guard()", "0.95\t0.88\t20\t19\t1")}
 
 
+@pytest.mark.usefixtures("_stack")
 class TestLegRows:
     """`coverage:check` over the plpgsql leg, decided by the floor's record."""
+    
+    @pytest.fixture
+    def _stack(self, request: pytest.FixtureRequest) -> None:
+        """Hold the row's cleanups, undone last first after it ends."""
+        self.stack = contextlib.ExitStack()
+        request.addfinalizer(self.stack.close)
 
     def check(  # ruff: ignore[too-many-arguments] -- one keyword per part of a run
         self,
@@ -1067,7 +1107,7 @@ class TestLegRows:
 
         """
         tmp = Path(tempfile.mkdtemp())
-        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        self.stack.callback(shutil.rmtree, tmp, ignore_errors=True)
         stubs, answers = plant_stubs(tmp, functions)
         (stubs / "coverage").write_text(COVERAGE, encoding="utf-8")
         (stubs / "coverage").chmod(0o755)
@@ -1288,8 +1328,15 @@ def counter(tree: Path) -> int:
     return len((tree.parent / "counter").read_text("utf-8").splitlines())
 
 
+@pytest.mark.usefixtures("_stack")
 class TestReadsTheRunRows:
     """Both legs read the one run `measured` left, and run no suite (#1667)."""
+    
+    @pytest.fixture
+    def _stack(self, request: pytest.FixtureRequest) -> None:
+        """Hold the row's cleanups, undone last first after it ends."""
+        self.stack = contextlib.ExitStack()
+        request.addfinalizer(self.stack.close)
 
     def measure(
         self,
@@ -1308,7 +1355,7 @@ class TestReadsTheRunRows:
 
         """
         tmp = Path(tempfile.mkdtemp())
-        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        self.stack.callback(shutil.rmtree, tmp, ignore_errors=True)
         stubs, answers = plant_stubs(tmp, TWO)
         for name, text in (("coverage", COVERAGE), ("mise", MISE_TASKS)):
             (stubs / name).write_text(text, encoding="utf-8")
@@ -1636,6 +1683,7 @@ def pinned_image() -> str:
     return as_str(pin["image"], "the pin's image")
 
 
+@pytest.mark.usefixtures("_stack")
 class TestRealDatabaseRows:
     """The leg on a real Postgres with plpgsql_check (#2163).
 
@@ -1643,6 +1691,12 @@ class TestRealDatabaseRows:
     each row makes databases of its own, so no row reads another's
     profile (plpgsql_check keys its profile by database).
     """
+    
+    @pytest.fixture
+    def _stack(self, request: pytest.FixtureRequest) -> None:
+        """Hold the row's cleanups, undone last first after it ends."""
+        self.stack = contextlib.ExitStack()
+        request.addfinalizer(self.stack.close)
 
     container = ""
     docker = ""
@@ -1789,7 +1843,7 @@ class TestRealDatabaseRows:
 
         """
         tmp = Path(tempfile.mkdtemp())
-        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        self.stack.callback(shutil.rmtree, tmp, ignore_errors=True)
         return tmp
 
     def two_databases(self) -> Path:

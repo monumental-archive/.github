@@ -10,9 +10,7 @@ THE STUB IS NPM PACK'S SHAPE: `npm pack <dir> --silent` writes
 alone. A row can make it write an empty file, write nothing and print
 nothing, or fail.
 
-stdlib `unittest`, matching the rest of release/. Run through the gate
-as `mise run test`, which `ci` collects.
-"""
+pytest, run by `mise run test`. Every git call"""
 
 import hashlib
 import json

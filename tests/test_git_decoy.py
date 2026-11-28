@@ -28,6 +28,7 @@ import pytest
 from belt import decoded, typed_std
 from belt import git_decoy as gd
 from tests import hermetic
+import contextlib
 
 _HERE = hermetic.MISE
 
@@ -148,8 +149,15 @@ def snapshot(repo: pathlib.Path) -> tuple[bytes, str]:
     return (repo / ".git" / "index").read_bytes(), refs
 
 
+@pytest.mark.usefixtures("_stack")
 class TestTask:
     """The `test` task's body, run over a planted tree."""
+    
+    @pytest.fixture
+    def _stack(self, request: pytest.FixtureRequest) -> None:
+        """Hold the row's cleanups, undone last first after it ends."""
+        self.stack = contextlib.ExitStack()
+        request.addfinalizer(self.stack.close)
 
     def plant(self, *, scrubbed: bool) -> tuple[pathlib.Path, pathlib.Path]:
         """Build a tree holding one test per root and the git-running one.
@@ -159,7 +167,7 @@ class TestTask:
 
         """
         tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(tmp.cleanup)
+        self.stack.callback(tmp.cleanup)
         base = pathlib.Path(tmp.name)
         tree = base / "tree"
         # The runner and all it reads, as the tree's mise/: the whole

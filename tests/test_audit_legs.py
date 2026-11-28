@@ -29,8 +29,7 @@ The scheduled workflows that run a repository's own code
 the same name on every step that runs `mise run`. A secret added to the
 gate and not to them is named here.
 
-stdlib `unittest`, matching the other mise/test_*.py.
-"""
+pytest, run by `mise run test`.py."""
 
 import contextlib
 import copy
@@ -1008,8 +1007,15 @@ class TestFuzzTargets:
         assert want_targets == targets
 
 
+@pytest.mark.usefixtures("_stack")
 class TestRefusals:
     """A table of the wrong shape, or a workflow it lacks, is refused by name."""
+    
+    @pytest.fixture
+    def _stack(self, request: pytest.FixtureRequest) -> None:
+        """Hold the row's cleanups, undone last first after it ends."""
+        self.stack = contextlib.ExitStack()
+        request.addfinalizer(self.stack.close)
 
     def run_main(self, table_text: str, workflow: str = "w") -> tuple[int, str, Path]:
         """Run the helper in-process over a table written here.
@@ -1019,7 +1025,7 @@ class TestRefusals:
 
         """
         tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(tmp.cleanup)
+        self.stack.callback(tmp.cleanup)
         table = Path(tmp.name) / "audit-legs.toml"
         table.write_text(table_text, encoding="utf-8")
         err = io.StringIO()

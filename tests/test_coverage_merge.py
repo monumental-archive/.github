@@ -9,8 +9,7 @@ and hold the figure to one runner's over the same suite; then the lcov
 merge (the TypeScript and Rust legs) to its union, its totals to
 istanbul's own rounding, and each refusal to its message.
 
-stdlib `unittest`, run by `mise run test`.
-"""
+pytest, run by `mise run test`."""
 
 import contextlib
 import io

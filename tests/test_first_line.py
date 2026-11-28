@@ -12,9 +12,7 @@ The row runs lint:licence's own `run` body, read from mise/config.toml,
 under the belt's task shell, in a planted git tree whose `git ls-files`
 listing is several times a pipe buffer.
 
-stdlib `unittest`, matching the other mise/test_*.py; run through the
-gate as `mise run test`.
-"""
+pytest, run by `mise run test`.py;"""
 
 import subprocess
 import tempfile

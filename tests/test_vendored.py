@@ -11,9 +11,7 @@ GIT ENVIRONMENT IS SCRUBBED, deliberately — see #857. `git` reads
 and git exports `GIT_DIR` to hooks run in a linked worktree, so a harness
 that inherits it writes its fixture into the caller's real index.
 
-stdlib `unittest`, matching the other mise/test_*.py. Run through the
-gate as `mise run test`, which `ci` collects.
-"""
+pytest, run by `mise run test`.py."""
 
 import hashlib
 import subprocess

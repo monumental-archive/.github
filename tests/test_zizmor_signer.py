@@ -27,9 +27,7 @@ two messages. `Task` runs `audit:actions`' own body over a stub zizmor:
 one run, the record, zizmor's 11; a clean run, 0. Against
 `origin/main` the `Records` and `Task` record rows fail.
 
-stdlib `unittest`, matching the other mise/test_*.py. Run through the
-gate as `mise run test`, which `ci` collects.
-"""
+pytest, run by `mise run test`.py."""
 
 import copy
 import io
@@ -48,6 +46,7 @@ import pytest
 from belt import decoded
 from belt import zizmor_signer as signer
 from tests import hermetic
+import contextlib
 
 HERE = hermetic.MISE
 
@@ -596,8 +595,15 @@ jobs:
 """
 
 
+@pytest.mark.usefixtures("_stack")
 class TestPinnedZizmor:
     """The belt's pinned zizmor, `--offline`, on a planted workflow."""
+    
+    @pytest.fixture
+    def _stack(self, request: pytest.FixtureRequest) -> None:
+        """Hold the row's cleanups, undone last first after it ends."""
+        self.stack = contextlib.ExitStack()
+        request.addfinalizer(self.stack.close)
 
     def judged(self, workflow: str) -> tuple[int, list[object], str]:
         """Run the CLI over the belt's zizmor on one planted workflow.
@@ -609,7 +615,7 @@ class TestPinnedZizmor:
         if hermetic.optional_tool("zizmor") is None:
             pytest.skip("the belt's zizmor is not on PATH")
         tmp = Path(tempfile.mkdtemp()).resolve()
-        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        self.stack.callback(shutil.rmtree, tmp, ignore_errors=True)
         (tmp / ".github" / "workflows").mkdir(parents=True)
         (tmp / ".github" / "workflows" / "a.yml").write_text(workflow, encoding="utf-8")
         file = tmp / "findings.jsonl"
@@ -685,8 +691,15 @@ sys.exit(int(os.environ["STUB_RC"]))
 """
 
 
+@pytest.mark.usefixtures("_stack")
 class TestTask:
     """audit:actions' own body over a stub zizmor, in a planted tree."""
+    
+    @pytest.fixture
+    def _stack(self, request: pytest.FixtureRequest) -> None:
+        """Hold the row's cleanups, undone last first after it ends."""
+        self.stack = contextlib.ExitStack()
+        request.addfinalizer(self.stack.close)
 
     def run_task(
         self, document: object, status: int
@@ -698,7 +711,7 @@ class TestTask:
 
         """
         tmp = Path(tempfile.mkdtemp()).resolve()
-        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        self.stack.callback(shutil.rmtree, tmp, ignore_errors=True)
         root = tmp / "tree"
         (root / ".github" / "workflows").mkdir(parents=True)
         (root / ".github" / "workflows" / "a.yml").write_text("on: push\n")

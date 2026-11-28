@@ -17,9 +17,7 @@ asserts what the gate does with it.
 Each row asserts the message, not just the exit status: a planted row
 scored on exit alone can pass for the wrong reason.
 
-stdlib `unittest`, matching the other mise/test_*.py. Run through the
-gate as `mise run test`, which `ci` collects.
-"""
+pytest, run by `mise run test`.py."""
 
 import json
 import os
@@ -33,6 +31,8 @@ from typing import TypedDict, Unpack, override
 
 from belt import coverage_floor, decoded, workflow_yaml
 from tests import hermetic
+import contextlib
+import pytest
 
 CANON = hermetic.CANON
 BELT = CANON / "mise"
@@ -460,8 +460,15 @@ class Plant(TypedDict, total=False):
     run_test: bool
 
 
+@pytest.mark.usefixtures("_stack")
 class TestCoverageTaskCase:
     """Runs a task and removes the planted tree afterwards."""
+    
+    @pytest.fixture
+    def _stack(self, request: pytest.FixtureRequest) -> None:
+        """Hold the row's cleanups, undone last first after it ends."""
+        self.stack = contextlib.ExitStack()
+        request.addfinalizer(self.stack.close)
 
     def run_task(
         self, task: str, **plant: Unpack[Plant]
@@ -473,7 +480,7 @@ class TestCoverageTaskCase:
 
         """
         done, tmp = run_task(task, **plant)
-        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        self.stack.callback(shutil.rmtree, tmp, ignore_errors=True)
         return done, tmp / "tree"
 
 

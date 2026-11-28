@@ -15,9 +15,7 @@ The table is held to the legs: each mutation leg's guard
 file that adopts it, and the table must name the same one. A planted copy of the
 legs' texts, in memory, with one name changed is red by name.
 
-stdlib `unittest`, matching the other mise/test_*.py; run through the
-gate as `mise run test`.
-"""
+pytest, run by `mise run test`.py;"""
 
 import re
 import subprocess

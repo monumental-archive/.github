@@ -11,9 +11,7 @@ answers the row's version, then runs the shipped script with
 ORG_CANON_DIR at the planted tree. The red row asserts the whole
 message.
 
-stdlib `unittest`, matching the other mise/test_*.py. Run through the
-gate as `mise run test`, which `ci` collects.
-"""
+pytest, run by `mise run test`.py."""
 
 from __future__ import annotations
 

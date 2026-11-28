@@ -9,9 +9,7 @@ Every row asserts the exact message, not only the exit status (a red
 scored on status alone can pass for the wrong reason), and no message
 may tell the reader to edit a number.
 
-stdlib `unittest`, matching the other mise/test_*.py. Run through the
-gate as `mise run test`, which `ci` collects.
-"""
+pytest, run by `mise run test`.py."""
 
 import json
 import subprocess

@@ -11,9 +11,7 @@ Every refusal's message is asserted whole. The masking rows plant a
 token-shaped string and a credential header in the debug log, and assert
 neither reaches the job log while the lines naming the failing step do.
 
-stdlib `unittest`, matching the rest of release/. Run through the gate
-as `mise run test`, which `ci` collects.
-"""
+pytest, run by `mise run test`. Every git call"""
 
 import io
 import os

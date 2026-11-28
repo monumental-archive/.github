@@ -18,8 +18,7 @@ nothing unless the workflow hands it on, so in every workflow whose
 The set is computed from the files, never listed. A planted workflow
 missing either half is red by message, naming the workflow and the job.
 
-stdlib `unittest`, run through the gate as `mise run test`.
-"""
+pytest, run by `mise run test`."""
 
 from __future__ import annotations
 

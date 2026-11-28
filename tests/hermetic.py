@@ -92,6 +92,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -229,9 +230,11 @@ def env(
         "GIT_COMMITTER_NAME": IDENTITY_NAME,
         "GIT_COMMITTER_EMAIL": IDENTITY_EMAIL,
     }
-    out |= overrides
     # The package sits beside the belt directory, as the belt's [env]
-    # derives it (#2177): a row that names a belt names its root too.
+    # derives it (#2177): the canon's own, unless the row names a belt,
+    # which brings its root with it.
+    out["ORG_BELT_ROOT"] = str(CANON)
+    out |= overrides
     belt_dir = overrides.get("ORG_BELT_DIR")
     if belt_dir and "ORG_BELT_ROOT" not in overrides:
         out["ORG_BELT_ROOT"] = os.path.dirname(belt_dir.rstrip("/"))
@@ -347,15 +350,16 @@ class Called:
     stderr: str
 
 
-def _stream(raw: io.BytesIO) -> io.TextIOWrapper:
-    """Make a text stream over bytes, as a process's standard streams are.
+def _stream(fd: int, mode: str) -> io.TextIOWrapper:
+    """Open a standard stream over a descriptor, as a process's are.
 
     Returns:
-        A UTF-8 stream with a `.buffer`, writing through, newlines as given.
+        A UTF-8 stream with a `.buffer` and a `fileno`, newlines as given,
+        that leaves the descriptor open when it is closed.
 
     """
     return io.TextIOWrapper(
-        raw,
+        open(fd, mode + "b", buffering=0, closefd=False),  # ruff: ignore[open-file-with-context-handler] - the call's own stream, closed by its wrapper
         encoding="utf-8",
         errors="backslashreplace",
         newline="",
@@ -377,44 +381,64 @@ def call(
     helper.main([...])`). `env`, when given, IS the process environment
     for the call; `cwd` the working directory; `stdin` what it reads;
     `command` is `sys.argv[0]`, the name a finding falls back to. Each
-    is restored afterwards.
+    is restored afterwards. The streams are the process's descriptors 0,
+    1 and 2, pointed at scratch files for the call, so a tool the
+    command starts with the inherited streams is read too, as it was
+    when the command ran as a child.
 
     Returns:
         The status and what was written to each stream.
 
     """
-    out_raw, err_raw = io.BytesIO(), io.BytesIO()
-    out, err = _stream(out_raw), _stream(err_raw)
     data = stdin.encode("utf-8") if isinstance(stdin, str) else stdin
     saved_env = dict(os.environ)
     saved = (sys.stdin, sys.stdout, sys.stderr, list(sys.argv), os.getcwd())
-    try:
-        if env is not None:
-            os.environ.clear()
-            os.environ.update(env)
-        if cwd is not None:
-            os.chdir(cwd)
-        sys.stdin, sys.stdout, sys.stderr = _stream(io.BytesIO(data)), out, err
-        sys.argv = [command or "belt"]
+    held = [os.dup(fd) for fd in (0, 1, 2)]
+    with (
+        tempfile.TemporaryFile() as inp,
+        tempfile.TemporaryFile() as out,
+        tempfile.TemporaryFile() as err,
+    ):
+        inp.write(data)
+        inp.seek(0)
         try:
-            status = run()
-        except SystemExit as exc:
-            code = exc.code
-            status = code if isinstance(code, int) else (0 if code is None else 1)
-            if isinstance(code, str):
-                print(code, file=sys.stderr)
-    finally:
-        sys.stdin, sys.stdout, sys.stderr, sys.argv, here = saved
-        os.chdir(here)
-        os.environ.clear()
-        os.environ.update(saved_env)
-    out.flush()
-    err.flush()
-    return Called(
-        status,
-        out_raw.getvalue().decode("utf-8", "backslashreplace"),
-        err_raw.getvalue().decode("utf-8", "backslashreplace"),
-    )
+            for fd, scratch in ((0, inp), (1, out), (2, err)):
+                os.dup2(scratch.fileno(), fd)
+            if env is not None:
+                os.environ.clear()
+                os.environ.update(env)
+            if cwd is not None:
+                os.chdir(cwd)
+            sys.stdin, sys.stdout, sys.stderr = (
+                _stream(0, "r"),
+                _stream(1, "w"),
+                _stream(2, "w"),
+            )
+            sys.argv = [command or "belt"]
+            try:
+                status = run()
+            except SystemExit as exc:
+                code = exc.code
+                status = code if isinstance(code, int) else (0 if code is None else 1)
+                if isinstance(code, str):
+                    print(code, file=sys.stderr)
+            sys.stdout.flush()
+            sys.stderr.flush()
+        finally:
+            for fd, kept in zip((0, 1, 2), held, strict=True):
+                os.dup2(kept, fd)
+                os.close(kept)
+            sys.stdin, sys.stdout, sys.stderr, sys.argv, here = saved
+            os.chdir(here)
+            os.environ.clear()
+            os.environ.update(saved_env)
+        out.seek(0)
+        err.seek(0)
+        return Called(
+            status,
+            out.read().decode("utf-8", "backslashreplace"),
+            err.read().decode("utf-8", "backslashreplace"),
+        )
 
 
 def patch_env(

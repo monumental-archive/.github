@@ -16,9 +16,7 @@ Each red row asserts the message, not just the exit status: a planted
 row scored on exit alone can pass for the wrong reason. The green rows
 plant the canon's real stub, so the stub and the lint cannot drift.
 
-stdlib `unittest`, matching the other mise/test_*.py. Run through the
-gate as `mise run test`, which `ci` collects.
-"""
+pytest, run by `mise run test`.py."""
 
 import json
 import re

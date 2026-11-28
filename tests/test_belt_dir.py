@@ -18,9 +18,7 @@ it, in a planted git tree. It must stay total: a template that exits
 nonzero aborts every mise invocation of the belt (#569), so the rows
 with no carrier, and with no git, assert exit 0 and no output.
 
-stdlib `unittest`, matching the other mise/test_*.py. Run through the
-gate as `mise run test`, which `ci` collects.
-"""
+pytest, run by `mise run test`.py."""
 
 from __future__ import annotations
 

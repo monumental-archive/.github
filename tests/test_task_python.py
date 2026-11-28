@@ -14,8 +14,7 @@ belt task's helper under the belt's and its own task under its own; and
 with the belt's interpreter absent, the task refuses with the one
 command that installs it.
 
-stdlib `unittest`, matching the other tests here.
-"""
+pytest, run by `mise run test`."""
 
 from __future__ import annotations
 

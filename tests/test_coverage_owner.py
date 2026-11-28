@@ -7,9 +7,7 @@ tag (#2070): a new directory, a restored untagged one, a valid tag
 kept. And `clean`: a cargo-llvm-cov that reports a refused `cargo
 clean` as a warning is red, one that cleaned is not.
 
-stdlib `unittest`, the belt's one test idiom. Run through the gate as
-`mise run test`, which `ci` collects.
-"""
+pytest, run by `mise run test`. Every git call"""
 
 import os
 import subprocess

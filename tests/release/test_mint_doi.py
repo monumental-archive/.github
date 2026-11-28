@@ -88,9 +88,7 @@ captured 2026-11-15 in run 43729983384 (#1246: a draft, read back and
 deleted, never published). It is the read-back AFTER a legacy metadata
 PUT, so its `rights` holds one id - the state the helper must repair.
 
-stdlib `unittest`, matching the rest of release/. Run through the gate
-as `mise run test`, which `ci` collects.
-"""
+pytest, run by `mise run test`. Every git call"""
 
 from __future__ import annotations
 

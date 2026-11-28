@@ -14,9 +14,7 @@ a merge-group run read from monumental-archive/.github on 2026-11-20
 (`gh api .../actions/artifacts?name=coverage-reports`, `.../runs`), with
 the ids, commits and outcomes each row needs.
 
-stdlib `unittest`, matching the other release/test_*.py; run through
-the gate as `mise run test`.
-"""
+pytest, run by `mise run test`.py;"""
 
 import contextlib
 import io

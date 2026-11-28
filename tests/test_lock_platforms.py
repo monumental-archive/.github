@@ -15,9 +15,7 @@ its exact message, and removing the guard's input turns that same tree
 into the guard's skip line. Red rows assert the message, not just the
 exit status (#650).
 
-stdlib `unittest`, matching the other mise/test_*.py. Run through the
-gate as `mise run test`, which `ci` collects.
-"""
+pytest, run by `mise run test`.py."""
 
 import contextlib
 import io

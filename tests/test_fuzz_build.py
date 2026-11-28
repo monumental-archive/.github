@@ -40,9 +40,7 @@ guard as a grep for a bare `[workspace]` line in place of the TOML read
 reds 2, a parse error read as a missing table reds 1, and the probe's
 stderr discarded again (the defect) reds 4.
 
-stdlib `unittest`, the belt's one test idiom. Run through the gate as
-`mise run test`, which `ci` collects.
-"""
+pytest, run by `mise run test`. Every git call"""
 
 import functools
 import os

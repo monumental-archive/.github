@@ -46,8 +46,7 @@ three-line guard (#792, #801). Without a server, the rows below red on
 that shape too: planting the v1.58.2 guard in the generator fails five
 of them, the byte-for-byte reproduction among them (#1807).
 
-stdlib `unittest`, matching mise/test_*.py — #364 refused a test
-framework as a fourth thing to port.
+pytest, run by `mise run test`.py —
 
 Run through the gate as `mise run test`, which `ci` collects.
 """

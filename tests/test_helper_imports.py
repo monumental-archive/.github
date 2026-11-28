@@ -14,9 +14,7 @@ tree, so a fixture's text naming one is not a load.
 
 One file is excepted, with why. Nothing else is.
 
-stdlib `unittest`, matching the other mise/test_*.py; run through the
-gate as `mise run test`.
-"""
+pytest, run by `mise run test`.py;"""
 
 import ast
 import subprocess

@@ -19,9 +19,7 @@ rows from `Planted` on call its `main` in this process, one row per
 branch of lint:rust and of fix:rust with its message asserted, against
 a planted belt whose ladder and pgrx provisioning are stubs.
 
-stdlib `unittest`, matching the other mise/test_*.py; run through the
-gate as `mise run test`.
-"""
+pytest, run by `mise run test`.py;"""
 
 import itertools
 import json

@@ -20,9 +20,7 @@ for a finding; stele prints the row's report and exits the row's
 status. The real mise/stele_findings.py reads it. So a row asserts
 that cargo-deny's status is not the verdict and stele's is.
 
-stdlib `unittest`, the belt's one test idiom. Run through the gate as
-`mise run test`, which `ci` collects.
-"""
+pytest, run by `mise run test`. Every git call"""
 
 import json
 import subprocess

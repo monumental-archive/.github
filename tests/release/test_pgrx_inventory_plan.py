@@ -11,9 +11,7 @@ output for crate `pg_edtf` and major 16, recorded byte for byte when the
 step was still shell (the same bytes stele#396 holds as its producer
 golden), so a passing row is the helper writing what the leg wrote.
 
-stdlib `unittest`, matching the rest of release/. Run through the gate
-as `mise run test`, which `ci` collects.
-"""
+pytest, run by `mise run test`. Every git call"""
 
 import subprocess
 import sys

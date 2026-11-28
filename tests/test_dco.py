@@ -10,9 +10,7 @@ against the captured text.
 The rows run the task's own `run` body, read from mise/config.toml, in
 a planted git tree whose `origin/main` is its first commit.
 
-stdlib `unittest`, matching the other mise/test_*.py; run through the
-gate as `mise run test`.
-"""
+pytest, run by `mise run test`.py;"""
 
 import re
 import subprocess

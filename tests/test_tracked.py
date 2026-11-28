@@ -16,9 +16,7 @@ Each row plants one repository, runs the task body as mise does
 (#650). The misspellings are assembled at runtime: written out here,
 they would red this repository's own `lint:typos`.
 
-stdlib `unittest`, matching the other mise/test_*.py. Run through the
-gate as `mise run test`, which `ci` collects.
-"""
+pytest, run by `mise run test`.py."""
 
 import contextlib
 import subprocess
@@ -156,8 +154,15 @@ def run_task(
         )
 
 
+@pytest.mark.usefixtures("_stack")
 class TestProducers:
     """org_tracked and tracked.tracked list exactly what git tracks."""
+    
+    @pytest.fixture
+    def _stack(self, request: pytest.FixtureRequest) -> None:
+        """Hold the row's cleanups, undone last first after it ends."""
+        self.stack = contextlib.ExitStack()
+        request.addfinalizer(self.stack.close)
 
     def planted(self) -> Path:
         """Plant the three names and the untracked log in a fresh tree.
@@ -167,7 +172,7 @@ class TestProducers:
 
         """
         scratch = tempfile.TemporaryDirectory()
-        self.addCleanup(scratch.cleanup)
+        self.stack.callback(scratch.cleanup)
         tree = Path(scratch.name) / "repo"
         tree.mkdir()
         plant(tree, dict.fromkeys(NAMES, "x\n"), {UNTRACKED: "x\n"})
@@ -421,8 +426,15 @@ def has_status(
     )
 
 
+@pytest.mark.usefixtures("_stack")
 class TestHas:
     """org_tracked_has and tracked.has answer from the index (#2013)."""
+    
+    @pytest.fixture
+    def _stack(self, request: pytest.FixtureRequest) -> None:
+        """Hold the row's cleanups, undone last first after it ends."""
+        self.stack = contextlib.ExitStack()
+        request.addfinalizer(self.stack.close)
 
     def planted(self) -> Path:
         """Track `kept` and `gone`, delete `gone`, leave `loose` untracked.
@@ -432,7 +444,7 @@ class TestHas:
 
         """
         scratch = tempfile.TemporaryDirectory()
-        self.addCleanup(scratch.cleanup)
+        self.stack.callback(scratch.cleanup)
         tree = Path(scratch.name) / "repo"
         tree.mkdir()
         plant(tree, {"kept": "x\n", "gone": "x\n"}, {"loose": "x\n"})

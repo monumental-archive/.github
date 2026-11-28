@@ -10,8 +10,7 @@ runs the belt's pinned `stele` over a scratch repository, one commit per
 body, and asserts the rule refuses exactly the bodies whose rendered
 "Breaking" entry carries text from after a blank line.
 
-stdlib `unittest`, matching the other tests here.
-"""
+pytest, run by `mise run test`."""
 
 from __future__ import annotations
 

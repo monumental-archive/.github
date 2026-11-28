@@ -11,8 +11,7 @@ wording the inline shell had). The proof rows put a recording `docker`
 first on PATH and run the real script: what it builds, with which
 arguments, and the Postgres-major branch (below 18, no path proof).
 
-stdlib `unittest`, matching the other release/test_*.py.
-"""
+pytest, run by `mise run test`.py."""
 
 import io
 import os

@@ -35,8 +35,7 @@ GIT ENVIRONMENT IS SCRUBBED (#857): git exports `GIT_DIR` to hooks in a
 linked worktree, and a harness that inherits it writes its fixture into
 the caller's real index when the suite runs from pre-push.
 
-stdlib `unittest`, matching the other mise/test_*.py.
-"""
+pytest, run by `mise run test`.py."""
 
 import functools
 import io
@@ -56,6 +55,7 @@ import pytest
 
 from belt import decoded, pg_schema
 from tests import hermetic
+import contextlib
 
 normalise = pg_schema.normalise
 
@@ -285,9 +285,15 @@ def git(root: Path, *args: str) -> None:
     )
 
 
-@pytest.mark.usefixtures("_set_up_test_in_repo")
+@pytest.mark.usefixtures("_stack", "_set_up_test_in_repo")
 class TestInRepo:
     """A fresh git repository as the working directory for each row."""
+    
+    @pytest.fixture
+    def _stack(self, request: pytest.FixtureRequest) -> None:
+        """Hold the row's cleanups, undone last first after it ends."""
+        self.stack = contextlib.ExitStack()
+        request.addfinalizer(self.stack.close)
 
     @pytest.fixture
     def _set_up_test_in_repo(
@@ -297,7 +303,7 @@ class TestInRepo:
         self.root = tmp_path
         git(self.root, "init", "-q")
         (self.root / "crates" / "ext").mkdir(parents=True)
-        self.enterContext(mock.patch.dict(os.environ, scrubbed(), clear=True))
+        self.stack.enter_context(mock.patch.dict(os.environ, scrubbed(), clear=True))
         request.addfinalizer(functools.partial(os.chdir, Path.cwd()))
         os.chdir(self.root)
 

@@ -3,7 +3,7 @@
 The bodies under test are the tasks' own `run` strings, read out of
 mise/config.toml with tomllib and run by bash in a planted git tree,
 and they call the real `mise/python-properties.sh` and
-`mise/python_properties.py`. The rows that run a property use the
+`belt python-properties`. The rows that run a property use the
 belt's real Hypothesis tool venv, found on PATH as the gate finds it:
 a stub could not print Hypothesis's own falsifying example, which is
 what a failing row exists to assert. The rows about the shell's own
@@ -17,8 +17,7 @@ an interpreter with nothing installed.
 Each row asserts the message, not just the exit status: a planted row
 scored on exit alone can pass for the wrong reason.
 
-stdlib `unittest`, matching the other mise/test_*.py. Run through the
-gate as `mise run test`, which `ci` collects.
+pytest, run by `mise run test`, which `ci` collects.
 """
 
 import os
@@ -31,6 +30,7 @@ import pytest
 
 from belt import decoded, shard, workflow_yaml
 from tests import hermetic
+import contextlib
 
 CANON = hermetic.CANON
 BELT = CANON / "mise"
@@ -59,62 +59,50 @@ AUDIT = task_run("audit:python-properties")
 NAMES = {GATE: "test:python-properties", AUDIT: "audit:python-properties"}
 
 HOLDS = """\
-import unittest
 from hypothesis import strategies as st
 from belt.typed_hypothesis import given
 
 
-class Holds(unittest.TestCase):
-    @given(st.integers())
-    def test_double_is_even(self, n):
-        self.assertEqual((2 * n) % 2, 0)
+@given(st.integers())
+def test_double_is_even(n):
+    assert (2 * n) % 2 == 0
 """
 
 FAILS = """\
-import unittest
 from hypothesis import strategies as st
 from belt.typed_hypothesis import given
 
 
-class Fails(unittest.TestCase):
-    @given(st.integers(min_value=0))
-    def test_small(self, n):
-        self.assertLess(n, 10)
+@given(st.integers(min_value=0))
+def test_small(n):
+    assert n < 10
 """
 
 # A property taking Hypothesis's own `given`, which the belt's mypy reds
 # on every property (#1604): the gate names the file and the remedy.
 UNTYPED = """\
-import unittest
 from hypothesis import given, strategies as st
 
 
-class Untyped(unittest.TestCase):
-    @given(st.integers())
-    def test_double_is_even(self, n):
-        self.assertEqual((2 * n) % 2, 0)
+@given(st.integers())
+def test_double_is_even(n):
+    assert (2 * n) % 2 == 0
 """
 
 NO_PROPERTY = """\
-import unittest
-
-
-class Plain(unittest.TestCase):
-    def test_plain(self):
-        self.assertTrue(True)
+def test_plain():
+    assert True
 """
 
 OWN_BOUNDS = """\
-import unittest
 from hypothesis import settings, strategies as st
 from belt.typed_hypothesis import given
 
 
-class Bounded(unittest.TestCase):
-    @settings(max_examples=3)
-    @given(st.integers())
-    def test_few(self, n):
-        self.assertIsInstance(n, int)
+@settings(max_examples=3)
+@given(st.integers())
+def test_few(n):
+    assert isinstance(n, int)
 """
 
 # A Hypothesis venv built on some other interpreter: its python answers
@@ -519,8 +507,15 @@ def pids(stderr: str) -> set[str]:
     return {line for line in stderr.splitlines() if line.startswith("pid ")}
 
 
+@pytest.mark.usefixtures("_stack")
 class TestFanOut:
     """No shard named: the runner fans out over its own shards (#1741)."""
+    
+    @pytest.fixture
+    def _stack(self, request: pytest.FixtureRequest) -> None:
+        """Hold the row's cleanups, undone last first after it ends."""
+        self.stack = contextlib.ExitStack()
+        request.addfinalizer(self.stack.close)
 
     def meet(self, parties: int, **env: str) -> dict[str, str]:
         """Name a fresh rendezvous for `parties` files.
@@ -530,7 +525,7 @@ class TestFanOut:
 
         """
         scratch = tempfile.TemporaryDirectory()
-        self.addCleanup(scratch.cleanup)
+        self.stack.callback(scratch.cleanup)
         return {"PLANT_MEET": scratch.name, "PLANT_PARTIES": str(parties)} | env
 
     def test_four_files_run_side_by_side_in_shard_order(self) -> None:

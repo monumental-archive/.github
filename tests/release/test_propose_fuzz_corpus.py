@@ -14,8 +14,7 @@ row each for a signed and an unsigned answer.
 
 Each row asserts the message, not just the exit status.
 
-stdlib `unittest`, the belt's one test idiom.
-"""
+pytest, run by `mise run test`."""
 
 import base64
 import os

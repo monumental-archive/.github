@@ -9,8 +9,7 @@ table to the belt (every row a lint the belt defines), the deal to its
 two properties (each lint on exactly one shard; the costliest on
 different shards), and a cost to the tree.
 
-stdlib `unittest`, run by `mise run test`.
-"""
+pytest, run by `mise run test`."""
 
 from pathlib import Path
 

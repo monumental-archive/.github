@@ -15,9 +15,7 @@ interrupted in-place run would leave it), copies the planted report to
 Every row asserts the exact output, so a row cannot pass by stopping
 somewhere else.
 
-stdlib `unittest`, the belt's one test idiom. Run through the gate as
-`mise run test`, which `ci` collects.
-"""
+pytest, run by `mise run test`. Every git call"""
 
 import contextlib
 import io
@@ -380,9 +378,15 @@ class TestShards(TestPlanted):
         assert log == list[str]()
 
 
-@pytest.mark.usefixtures("_set_up_test_share_out")
+@pytest.mark.usefixtures("_stack", "_set_up_test_share_out")
 class TestShareOut:
     """`share`: the config's `mutate` list, expanded and cut round-robin."""
+    
+    @pytest.fixture
+    def _stack(self, request: pytest.FixtureRequest) -> None:
+        """Hold the row's cleanups, undone last first after it ends."""
+        self.stack = contextlib.ExitStack()
+        request.addfinalizer(self.stack.close)
 
     FILES = (
         "src/a.ts",
@@ -410,7 +414,7 @@ class TestShareOut:
             (self.tree / path).write_text(SOURCE, encoding="utf-8")
         (self.tree / "untracked.ts").write_text(SOURCE, encoding="utf-8")
         subprocess.run([*git, "add", "--", *self.FILES], env=hermetic.env(), check=True)
-        self.enterContext(contextlib.chdir(self.tree))
+        self.stack.enter_context(contextlib.chdir(self.tree))
 
     def share(self, mutate: list[str], shard: str) -> hermetic.Called:
         """Write a config naming `mutate` and share it out.
@@ -979,8 +983,15 @@ def call(argv: list[str]) -> hermetic.Called:
     return hermetic.call(lambda: mutants_typescript.main(["--label", LABEL, *argv]))
 
 
+@pytest.mark.usefixtures("_stack")
 class TestMain:
     """`config` and `verdict` through main, in this process (#1696)."""
+    
+    @pytest.fixture
+    def _stack(self, request: pytest.FixtureRequest) -> None:
+        """Hold the row's cleanups, undone last first after it ends."""
+        self.stack = contextlib.ExitStack()
+        request.addfinalizer(self.stack.close)
 
     def write(self, name: str, value: object) -> Path:
         """Write one JSON document into a scratch directory.
@@ -990,7 +1001,7 @@ class TestMain:
 
         """
         tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(tmp.cleanup)
+        self.stack.callback(tmp.cleanup)
         path = Path(tmp.name, name)
         path.write_text(json.dumps(value), encoding="utf-8")
         return path

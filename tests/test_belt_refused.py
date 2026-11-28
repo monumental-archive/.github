@@ -16,9 +16,7 @@ one task. A real mise renders the templates, as it does for every task
 value it renders is then handed to the task body as mise hands it,
 under hermetic.task_run, and one row runs the task through mise itself.
 
-stdlib `unittest`, matching the other mise/test_*.py. Run through the
-gate as `mise run test`, which `ci` collects.
-"""
+pytest, run by `mise run test`.py."""
 
 from __future__ import annotations
 

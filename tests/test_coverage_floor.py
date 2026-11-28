@@ -16,8 +16,7 @@ through the writer's own bookkeeping: a render that only the renderer can
 read is not a file the gate can enforce (the share-the-definition check
 law, #650).
 
-stdlib `unittest`, deliberately — #364 refused a test framework as a
-fourth thing to port, and nothing is added to the belt to run this.
+pytest, run by `mise run test`.
 
 Run through the gate as `mise run test`, which `ci` collects.
 """

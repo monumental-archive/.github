@@ -15,8 +15,7 @@ Mutation-checked: each planted row was run against a helper with the
 corresponding check removed and observed to pass, which is the failure it
 is written to catch.
 
-stdlib `unittest`, run through the gate as `mise run test`.
-"""
+pytest, run by `mise run test`."""
 
 import io
 import json

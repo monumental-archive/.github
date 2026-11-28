@@ -12,9 +12,7 @@ call in turn (the first build, then the check build) to the `-o` path,
 and `ls-files` with the row's count of tracked paths. The archives are
 real gzip tarballs, so the helper counts real entries.
 
-stdlib `unittest`, matching the rest of release/. Run through the gate
-as `mise run test`, which `ci` collects.
-"""
+pytest, run by `mise run test`. Every git call"""
 
 import gzip
 import hashlib

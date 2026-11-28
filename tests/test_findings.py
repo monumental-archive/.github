@@ -22,8 +22,7 @@ name otherwise. A character UTF-8 cannot carry, a lone surrogate in the
 message or the subject, is printed and recorded as its backslash
 escape, and the status is 0 (#1984).
 
-stdlib `unittest`, matching the rest of mise/.
-"""
+pytest, run by `mise run test`."""
 
 import re
 import subprocess

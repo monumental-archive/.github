@@ -22,9 +22,8 @@ Since #1633 the walk is the delivered `audit-badges.sh` and the task is
 its guard and call, so the behaviour rows run the task body as before
 and the class row reads the script, through belt-shell's scrub.
 
-GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom. stdlib `unittest`,
-run through the gate as `mise run test`, which `ci` collects.
-"""
+GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom. pytest, run by
+`mise run test`."""
 
 import json
 import os

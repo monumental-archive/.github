@@ -13,9 +13,7 @@ writing it as the binary; STUB_FAIL makes go fail instead. One row
 starts the helper by its path in this tree instead: the script
 contract (it starts, and exits with go's own status and message).
 
-stdlib `unittest`, matching the rest of release/. Run through the gate
-as `mise run test`, which `ci` collects.
-"""
+pytest, run by `mise run test`. Every git call"""
 
 import os
 import subprocess

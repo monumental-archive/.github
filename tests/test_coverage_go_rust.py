@@ -7,8 +7,7 @@ runner are that file's, imported from it.
 MeasureSelectors, RustLegGuards, GoOneRun and RustOneRun: the legs
 measured from the one test run, and the guards on the Rust leg.
 
-stdlib `unittest`, run by `mise run test`.
-"""
+pytest, run by `mise run test`."""
 
 import json
 import os

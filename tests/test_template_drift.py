@@ -11,8 +11,8 @@ task's own body, read from mise/config.toml: the skip when there are no
 templates, and a clean pin end to end; the rest call the helper's
 `main` in this process, in the planted tree, at a `now` of the row's.
 
-GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom. stdlib
-`unittest`, run through the gate as `mise run test`.
+GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom. pytest, run by
+`mise run test`.
 """
 
 import shutil

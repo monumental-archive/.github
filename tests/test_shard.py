@@ -7,8 +7,7 @@ drops an item, one that repeats one) and each of its other refusals, by
 message, then run the belt's test runner for real on a fixture tree at
 1/2 and 2/2 and hold what the two shards reported to the whole suite.
 
-stdlib `unittest`, run by `mise run test`.
-"""
+pytest, run by `mise run test`."""
 
 import subprocess
 import sys

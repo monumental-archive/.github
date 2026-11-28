@@ -27,9 +27,7 @@ floor measures nothing; coverage:check alone runs `test` once; a suite
 not run through `measured` is red by the floor's own record (#1666);
 and `measured` reaches a file task.
 
-stdlib `unittest`, the belt's one test idiom. Run through
-the gate as `mise run test`, which `ci` collects.
-"""
+pytest, run by `mise run test`. Every git call"""
 
 import re
 import subprocess

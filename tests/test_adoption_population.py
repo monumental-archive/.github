@@ -18,9 +18,7 @@ Every refusal is checked for the FIELD NAME in its message, not merely
 for a nonzero exit: a refusal nobody can act on sends the reader to the
 wrong file.
 
-stdlib `unittest`, the belt's one test idiom. Run through the gate as
-`mise run test`, which `ci` collects.
-"""
+pytest, run by `mise run test`. Every git call"""
 
 import json
 

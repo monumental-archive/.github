@@ -15,9 +15,7 @@ toolchain it ran under, so a row can assert which flags reached it.
 Each row asserts the message, not just the exit status: a planted row
 scored on exit alone can pass for the wrong reason.
 
-stdlib `unittest`, matching the other mise/test_*.py. Run through the
-gate as `mise run test`, which `ci` collects.
-"""
+pytest, run by `mise run test`.py."""
 
 import os
 import shutil
@@ -32,6 +30,7 @@ import pytest
 from belt import coverage_floor as cf
 from belt import decoded, gate_cache_key
 from tests import hermetic
+import contextlib
 
 CANON = hermetic.CANON
 BELT = CANON / "mise"
@@ -255,8 +254,15 @@ class Plant(TypedDict, total=False):
     plant_old: str
 
 
+@pytest.mark.usefixtures("_stack")
 class TestBranchCase:
     """Runs a task and removes the planted tree afterwards."""
+    
+    @pytest.fixture
+    def _stack(self, request: pytest.FixtureRequest) -> None:
+        """Hold the row's cleanups, undone last first after it ends."""
+        self.stack = contextlib.ExitStack()
+        request.addfinalizer(self.stack.close)
 
     def run_task(
         self, task: str, **plant: Unpack[Plant]
@@ -270,7 +276,7 @@ class TestBranchCase:
 
         """
         done, tmp = run_task(task, **plant)
-        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        self.stack.callback(shutil.rmtree, tmp, ignore_errors=True)
         log = (tmp / "llvm-cov.log").read_text(encoding="utf-8")
         calls = log.replace(str(tmp / "reports"), "<reports>").splitlines()
         return done, tmp / "tree", calls

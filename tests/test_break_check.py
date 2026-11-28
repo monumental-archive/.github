@@ -14,8 +14,7 @@ reader: a class runs the belt's pinned stele over scratch commits and
 asserts it files a commit under "Breaking" exactly when the reading says
 the pull request declares a break.
 
-stdlib `unittest`, the belt's one test idiom.
-"""
+pytest, run by `mise run test`."""
 
 from __future__ import annotations
 

@@ -13,8 +13,7 @@ refused too. Test and property files are exempt: they hold the commands
 they expect to read. The files are the tree's tracked ones, listed
 through hermetic.tracked (#1618).
 
-stdlib `unittest`, matching the rest of mise/.
-"""
+pytest, run by `mise run test`."""
 
 import ast
 import io

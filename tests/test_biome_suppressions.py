@@ -11,9 +11,7 @@ a one-line ignore that suppresses a finding, or the form inside a
 string, is clean. Those rows are the before/after test: before the
 helper, `lint:biome` was green on both red plants.
 
-stdlib `unittest`, matching the other mise/test_*.py; run through the
-gate as `mise run test`.
-"""
+pytest, run by `mise run test`.py;"""
 
 import contextlib
 import io

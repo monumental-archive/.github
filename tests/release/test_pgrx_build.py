@@ -15,8 +15,7 @@ shared library built here, so they need `cc`, `readelf`, `objcopy` and
 by name; on the gate's runner a missing tool is a failure, never a skip
 that reads like a pass (#364).
 
-stdlib `unittest`, matching the other tests here.
-"""
+pytest, run by `mise run test`."""
 
 import json
 import os

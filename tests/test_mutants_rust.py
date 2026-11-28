@@ -19,9 +19,7 @@ GIT ENVIRONMENT IS SCRUBBED (#857): git exports GIT_DIR to hooks run in
 a linked worktree, and a fixture that inherited it would write into the
 caller's index when this suite runs from the pre-push hook.
 
-stdlib `unittest`, the belt's one test idiom. Run through the gate as
-`mise run test`, which `ci` collects.
-"""
+pytest, run by `mise run test`. Every git call"""
 
 import contextlib
 import io

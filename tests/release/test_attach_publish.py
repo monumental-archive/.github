@@ -13,8 +13,7 @@ output, which only a child's stdout carries.
 The rehearsal row runs the real `release/record-draft.sh`, so the
 record it writes is the one a kept draft carries.
 
-stdlib `unittest`, matching the other tests here.
-"""
+pytest, run by `mise run test`."""
 
 from __future__ import annotations
 

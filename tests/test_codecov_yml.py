@@ -11,9 +11,7 @@ The body under test is the task's own `run` string, read out of
 mise/config.toml with decoded.load_toml and run by bash in a planted git
 tree, not a copy of it. Every red row asserts the exact message (#650).
 
-stdlib `unittest`, matching the other mise/test_*.py. Run through the
-gate as `mise run test`, which `ci` collects.
-"""
+pytest, run by `mise run test`.py."""
 
 import subprocess
 import tempfile

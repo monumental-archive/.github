@@ -22,6 +22,7 @@ import pytest
 from belt import coverage_exclusions as ce
 from belt import decoded
 from tests import hermetic
+import contextlib
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -92,8 +93,15 @@ def helper(root: Path, *paths: str) -> hermetic.Called:
     )
 
 
+@pytest.mark.usefixtures("_stack")
 class TestMarkers:
     """The helper over one planted file at a time."""
+    
+    @pytest.fixture
+    def _stack(self, request: pytest.FixtureRequest) -> None:
+        """Hold the row's cleanups, undone last first after it ends."""
+        self.stack = contextlib.ExitStack()
+        request.addfinalizer(self.stack.close)
 
     def plant(self, name: str, body: str) -> Path:
         """Write one file into a scratch directory.
@@ -103,7 +111,7 @@ class TestMarkers:
 
         """
         tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(tmp.cleanup)
+        self.stack.callback(tmp.cleanup)
         root = Path(tmp.name)
         (root / name).write_text(body, encoding="utf-8")
         return root
@@ -169,8 +177,15 @@ def task_body() -> str:
     return decoded.as_str(decoded.as_object(tasks[name], name)["run"], f"{name}'s run")
 
 
+@pytest.mark.usefixtures("_stack")
 class TestTask:
     """The task body, in a scratch repository."""
+    
+    @pytest.fixture
+    def _stack(self, request: pytest.FixtureRequest) -> None:
+        """Hold the row's cleanups, undone last first after it ends."""
+        self.stack = contextlib.ExitStack()
+        request.addfinalizer(self.stack.close)
 
     def repo(self, files: dict[str, str]) -> Path:
         """Make a repository tracking `files`.
@@ -180,7 +195,7 @@ class TestTask:
 
         """
         tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(tmp.cleanup)
+        self.stack.callback(tmp.cleanup)
         root = Path(tmp.name)
         for name, body in files.items():
             (root / name).parent.mkdir(parents=True, exist_ok=True)
@@ -236,12 +251,19 @@ class TestTask:
         assert "1 file(s), no coverage exclusions" in r.stdout
 
 
+@pytest.mark.usefixtures("_stack")
 class TestMissingSibling:
     """The two helpers' own message, where their dead guard used to be.
 
     Both rows fail before #1522: the `_SPEC is None` guard could never
     run, so a missing sibling gave a raw FileNotFoundError traceback.
     """
+    
+    @pytest.fixture
+    def _stack(self, request: pytest.FixtureRequest) -> None:
+        """Hold the row's cleanups, undone last first after it ends."""
+        self.stack = contextlib.ExitStack()
+        request.addfinalizer(self.stack.close)
 
     def alone(
         self, source: Path, relative: str, *beside: str
@@ -256,7 +278,7 @@ class TestMissingSibling:
 
         """
         tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(tmp.cleanup)
+        self.stack.callback(tmp.cleanup)
         target = Path(tmp.name) / relative
         target.parent.mkdir(parents=True)
         shutil.copy(source, target)
@@ -287,7 +309,7 @@ class TestMissingSibling:
     def test_publish_crates_without_crates_index(self) -> None:
         """publish_crates.py names mise/crates_index.py and exits non-zero."""
         tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(tmp.cleanup)
+        self.stack.callback(tmp.cleanup)
         helper = "release/publish_crates.py"
         # A stub of its own text, so the helper resolves its siblings in
         # this tree; the writer beside it, the missing sibling removed.

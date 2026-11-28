@@ -6,9 +6,7 @@ subdirectory per shard holding `<language>.tsv`, in the shape
 mise/mutants-rust.sh writes, and calls the helper with its language.
 Each row plants that tree and asserts the exact lines and exit status.
 
-stdlib `unittest`, the belt's one test idiom. Run through the gate as
-`mise run test`, which `ci` collects.
-"""
+pytest, run by `mise run test`. Every git call"""
 
 import shutil
 import subprocess

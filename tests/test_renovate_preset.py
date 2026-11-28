@@ -37,9 +37,7 @@ zero days: Renovate names an image with its registry, so the
 repositories' glob never reached one, and every first-party image
 bump sat seven days under Pending Status Checks.
 
-stdlib `unittest`, matching the other mise/test_*.py. Run through the
-gate as `mise run test`, which `ci` collects.
-"""
+pytest, run by `mise run test`.py."""
 
 import re
 

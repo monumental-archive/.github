@@ -11,9 +11,7 @@ answers by path through a symlink to the tree, so a root is compared
 physically. A refusing row asserts its message, not only its status
 (#650).
 
-stdlib `unittest`, matching the other mise/test_*.py; run through the
-gate as `mise run test`.
-"""
+pytest, run by `mise run test`.py;"""
 
 import functools
 import os
@@ -26,6 +24,7 @@ import pytest
 
 from belt import rust_workspaces
 from tests import hermetic
+import contextlib
 
 BELT = hermetic.MISE
 BASH = hermetic.tool("bash")
@@ -283,8 +282,15 @@ class TestReader:
         assert left == LEFT
 
 
+@pytest.mark.usefixtures("_stack")
 class TestFuzzing:
     """A cargo-fuzz root is built with `--cfg fuzzing`, by its marker (#2093)."""
+    
+    @pytest.fixture
+    def _stack(self, request: pytest.FixtureRequest) -> None:
+        """Hold the row's cleanups, undone last first after it ends."""
+        self.stack = contextlib.ExitStack()
+        request.addfinalizer(self.stack.close)
 
     def manifest(self, text: str) -> str:
         """Write a root manifest in a scratch directory.
@@ -297,7 +303,7 @@ class TestFuzzing:
             "w", suffix=".toml", delete=False, encoding="utf-8"
         ) as written:
             written.write(text)
-        self.addCleanup(Path(written.name).unlink)
+        self.stack.callback(Path(written.name).unlink)
         return written.name
 
     @pytest.mark.parametrize(

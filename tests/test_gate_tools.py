@@ -34,8 +34,7 @@ GIT ENVIRONMENT IS SCRUBBED (#857): git exports `GIT_DIR` and
 inherits them is staged into the caller's real index when the suite runs
 from pre-push. Every git here runs without any `GIT_*` variable.
 
-stdlib `unittest`, matching the other mise/test_*.py.
-"""
+pytest, run by `mise run test`.py."""
 
 import contextlib
 import dataclasses
@@ -1070,8 +1069,15 @@ class TestHelper:
         assert f"::error::{STEP}: aqua:hadolint/hadolint is in one of" in result.stderr
 
 
+@pytest.mark.usefixtures("_stack")
 class TestRefusals:
     """A table or belt config of the wrong shape is refused by name."""
+    
+    @pytest.fixture
+    def _stack(self, request: pytest.FixtureRequest) -> None:
+        """Hold the row's cleanups, undone last first after it ends."""
+        self.stack = contextlib.ExitStack()
+        request.addfinalizer(self.stack.close)
 
     def run_main(self, table_text: str, config_text: str) -> tuple[int, str, Path]:
         """Run the helper in-process over a table and config written here.
@@ -1081,7 +1087,7 @@ class TestRefusals:
 
         """
         tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(tmp.cleanup)
+        self.stack.callback(tmp.cleanup)
         table = Path(tmp.name) / "gate-tools.toml"
         table.write_text(table_text, encoding="utf-8")
         (Path(tmp.name) / "config.toml").write_text(config_text, encoding="utf-8")

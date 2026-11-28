@@ -27,6 +27,7 @@ import pytest
 
 from belt import biome_config, decoded
 from tests import hermetic
+import contextlib
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -264,8 +265,15 @@ class TestOmissionsTest:
         assert "qwik" in missing[0]
 
 
+@pytest.mark.usefixtures("_stack")
 class TestDeclaredPackagesTest:
     """Where a dependency may be declared, and what is not a manifest."""
+    
+    @pytest.fixture
+    def _stack(self, request: pytest.FixtureRequest) -> None:
+        """Hold the row's cleanups, undone last first after it ends."""
+        self.stack = contextlib.ExitStack()
+        request.addfinalizer(self.stack.close)
 
     def manifest(self, body: object) -> Path:
         """Write one manifest into a temporary tree.
@@ -275,7 +283,7 @@ class TestDeclaredPackagesTest:
 
         """
         directory = Path(tempfile.mkdtemp())
-        self.addCleanup(lambda: None)
+        self.stack.callback(lambda: None)
         path = directory / "package.json"
         path.write_text(json.dumps(body), encoding="utf-8")
         return path

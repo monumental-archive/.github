@@ -16,9 +16,7 @@ response moved the block into a canon script the step runs:
 Each row runs the script itself, by its path, with stub tools first on
 PATH that record what they were given.
 
-stdlib `unittest`, matching the rest of release/; run through the gate
-as `mise run test`.
-"""
+pytest, run by `mise run test`. Every git call"""
 
 import json
 import os

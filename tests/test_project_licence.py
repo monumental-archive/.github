@@ -4,9 +4,7 @@ The script rows live beside their scripts (`test_citation.py`,
 `test_derive_badges.py`), which run each derivation whole. These run
 the reader in process for the branches neither script row reaches.
 
-stdlib `unittest`, matching the other mise/test_*.py; run through the
-gate as `mise run test`.
-"""
+pytest, run by `mise run test`.py;"""
 
 import contextlib
 import io

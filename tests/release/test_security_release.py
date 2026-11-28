@@ -27,9 +27,7 @@ The whole path was also run once against the live forge (stele's main,
 its real Release PR, the real audits) before these rows were written;
 that run is what found the missing-toolchain row below.
 
-stdlib `unittest`, matching the other release tests. Run through the
-gate as `mise run test`, which `ci` collects.
-"""
+pytest, run by `mise run test`. Every git call"""
 
 import json
 import os

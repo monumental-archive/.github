@@ -21,9 +21,8 @@ pins, owner and zizmor rows fail because actions/x/action.yml is never
 read, and the gate-install row fails because mise/gate-tools.toml never
 installed pinact or zizmor for it.
 
-GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom. stdlib `unittest`,
-run through the gate as `mise run test`, which `ci` collects.
-"""
+GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom. pytest, run by
+`mise run test`."""
 
 import json
 import os

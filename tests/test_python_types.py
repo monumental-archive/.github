@@ -10,9 +10,7 @@ files, for what the delivered config makes mypy refuse; they run where
 that mypy is installed and skip where the gate disables it: a tree
 with no tracked `.py` or `.pyi`, by its gate-tools row.
 
-stdlib `unittest`, matching the other mise/test_*.py; run through the
-gate as `mise run test`.
-"""
+pytest, run by `mise run test`.py;"""
 
 import os
 import re

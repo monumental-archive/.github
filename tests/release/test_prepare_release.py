@@ -48,8 +48,7 @@ this harness shells out to `git`, and the script it drives shells out to
 `git` and `stele` again under whatever it is handed. #857 records what
 inheriting the caller's git environment cost three lanes in one batch.
 
-stdlib `unittest`, matching mise/test_*.py — #364 refused a test
-framework as a fourth thing to port.
+pytest, run by `mise run test`.py —
 
 Run through the gate as `mise run test`, which `ci` collects.
 """

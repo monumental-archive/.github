@@ -21,8 +21,8 @@ Postgres replaced: the prepare and the init log, and a major's ICU
 headers are a mark the stub cargo prints. Every row asserts the whole
 log and the whole output, so a row cannot pass by stopping early.
 
-GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom. stdlib
-`unittest`, run through the gate as `mise run test`.
+GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom. pytest, run by
+`mise run test`.
 """
 
 import re

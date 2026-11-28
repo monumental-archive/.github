@@ -13,8 +13,8 @@ that fails (its own message and status); the rest call the helper's
 The sources are this repository's own REUSE.toml, .badge-states and
 CITATION.cff, so the agreeing row is the canon's real render.
 
-GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom. stdlib
-`unittest`, run through the gate as `mise run test`.
+GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom. pytest, run by
+`mise run test`.
 """
 
 import subprocess

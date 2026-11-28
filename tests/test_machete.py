@@ -16,9 +16,8 @@ Mutation-checked: run against `main`'s mise/config.toml, the
 untracked-crate row fails (cargo-machete exits 1 naming
 scratch/Cargo.toml).
 
-GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom. stdlib `unittest`,
-run through the gate as `mise run test`, which `ci` collects.
-"""
+GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom. pytest, run by
+`mise run test`."""
 
 import subprocess
 from pathlib import Path

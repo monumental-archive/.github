@@ -22,8 +22,7 @@ A script run outside `mise run` states its task with `org_task`
 (#1979), and a Python child it starts records under that name, not
 its own file's: the export is the function's, so no site can forget it.
 
-stdlib `unittest`, matching the rest of mise/.
-"""
+pytest, run by `mise run test`."""
 
 import socket
 import subprocess
@@ -35,6 +34,7 @@ import pytest
 
 from belt import decoded
 from tests import hermetic
+import contextlib
 
 MISE = hermetic.MISE
 WRITER = MISE / "findings.sh"
@@ -103,9 +103,15 @@ def bashes() -> list[tuple[str, str]]:
     return out
 
 
-@pytest.mark.usefixtures("_set_up_test_bash_env_rows")
+@pytest.mark.usefixtures("_stack", "_set_up_test_bash_env_rows")
 class TestBashEnvRows:
     """A body under the belt's shell and BASH_ENV has the writer."""
+    
+    @pytest.fixture
+    def _stack(self, request: pytest.FixtureRequest) -> None:
+        """Hold the row's cleanups, undone last first after it ends."""
+        self.stack = contextlib.ExitStack()
+        request.addfinalizer(self.stack.close)
 
     @pytest.fixture
     def _set_up_test_bash_env_rows(self, tmp_path: Path) -> None:
@@ -154,8 +160,8 @@ class TestBashEnvRows:
             )
         else:
             near, far = socket.socketpair()
-            self.addCleanup(near.close)
-            self.addCleanup(far.close)
+            self.stack.callback(near.close)
+            self.stack.callback(far.close)
             done = subprocess.run(
                 argv,
                 env=env,

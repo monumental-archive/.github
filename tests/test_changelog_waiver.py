@@ -15,9 +15,7 @@ because rumdl already passes a long line whose overflow is the pull
 request link: its entry for #353 runs 148 columns with the subject
 alone past 80, which is the shape the waiver exists for.
 
-stdlib `unittest`, matching the other mise/test_*.py; run through the
-gate as `mise run test`.
-"""
+pytest, run by `mise run test`.py;"""
 
 import re
 import subprocess

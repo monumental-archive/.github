@@ -7,8 +7,7 @@ back what it wrote to `GITHUB_OUTPUT`. Every refusal row asserts the
 step's message. One row starts the helper as the step does instead:
 the script contract (it starts, and exits with gh's message).
 
-stdlib `unittest`, matching the other tests here.
-"""
+pytest, run by `mise run test`."""
 
 from __future__ import annotations
 

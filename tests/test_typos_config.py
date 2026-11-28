@@ -16,9 +16,7 @@ rows assert the exact message, not just the exit status (#650). The
 misspellings are assembled at runtime — written out here, they would
 red this repository's own `lint:typos`.
 
-stdlib `unittest`, matching the other mise/test_*.py. Run through the
-gate as `mise run test`, which `ci` collects.
-"""
+pytest, run by `mise run test`.py."""
 
 import subprocess
 import tempfile

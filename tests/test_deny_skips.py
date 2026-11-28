@@ -6,9 +6,7 @@ Two skips of one crate at two versions each lost both, so a needless
 one of the pair was never caught; and a `deny` entry for the crate was
 dropped beside its skip.
 
-stdlib `unittest`, matching the other mise/test_*.py; run through the
-gate as `mise run test`.
-"""
+pytest, run by `mise run test`.py;"""
 
 import contextlib
 import io

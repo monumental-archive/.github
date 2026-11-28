@@ -20,9 +20,7 @@ build it. Timings are kept as measured: they are not parsed.
 Fails before #1413 (the run was `./...`, whatever the listing said)
 and passes after: `test_runs_only_the_packages_that_declare_a_target`.
 
-stdlib `unittest`, the belt's one test idiom. Run through the gate as
-`mise run test`, which `ci` collects.
-"""
+pytest, run by `mise run test`. Every git call"""
 
 import functools
 import os

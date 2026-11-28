@@ -16,8 +16,7 @@ uploads the parent, and each consumer downloads with
 each staging step's own body to see the layout it makes, and plant the
 two defects to see each named.
 
-stdlib `unittest`, run by `mise run test`.
-"""
+pytest, run by `mise run test`."""
 
 import copy
 import re
@@ -30,6 +29,7 @@ import pytest
 
 from belt import workflow_yaml
 from tests import hermetic
+import contextlib
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -253,8 +253,15 @@ def plant(base: Path, *, directory: bool) -> tuple[Path, list[str]]:
     return source, ["plan.json"]
 
 
+@pytest.mark.usefixtures("_stack")
 class TestStaged:
     """Each staging step's own body makes the layout the consumer reads."""
+    
+    @pytest.fixture
+    def _stack(self, request: pytest.FixtureRequest) -> None:
+        """Hold the row's cleanups, undone last first after it ends."""
+        self.stack = contextlib.ExitStack()
+        request.addfinalizer(self.stack.close)
 
     def stage(self, step: Step, source: Path, stage: Path, artifact: str) -> None:
         """Run one staging step's body against planted paths."""
@@ -277,7 +284,7 @@ class TestStaged:
             env = _env(step)
             family = _family(env.get("ARTIFACT"))
             scratch = tempfile.TemporaryDirectory()
-            self.addCleanup(scratch.cleanup)
+            self.stack.callback(scratch.cleanup)
             base = Path(scratch.name)
             stage = base / "up"
             artifact = f"{family}7"
@@ -303,7 +310,7 @@ class TestStaged:
         assert steps
         for step in steps:
             scratch = tempfile.TemporaryDirectory()
-            self.addCleanup(scratch.cleanup)
+            self.stack.callback(scratch.cleanup)
             base = Path(scratch.name)
             self.stage(step, base / "coverage-run", base / "up", "coverage-run-1")
             assert not (base / "up").exists()

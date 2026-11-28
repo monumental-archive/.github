@@ -12,9 +12,7 @@ tree and the root.
 The rows run `one_tree()` over the shipped Dockerfile and over planted
 fixtures, one per refusal branch, each asserting the exact message.
 
-stdlib `unittest`, matching the other tests here. Run through the gate
-as `mise run test`, which `ci` collects.
-"""
+pytest, run by `mise run test`. Every git call"""
 
 import shlex
 

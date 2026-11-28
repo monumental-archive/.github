@@ -15,9 +15,7 @@ row exercises every key shape the file carries, Baseline display names
 included, and the entry is the same answers under the names the site
 serves them by.
 
-stdlib `unittest`, matching the other mise/test_*.py. Run through the
-gate as `mise run test`, which `ci` collects.
-"""
+pytest, run by `mise run test`.py."""
 
 import contextlib
 import io
@@ -397,14 +395,20 @@ class TestRed:
         )
 
 
-@pytest.mark.usefixtures("_set_up_test_helper")
+@pytest.mark.usefixtures("_stack", "_set_up_test_helper")
 class TestHelper:
     """The helper's pieces, in process."""
+    
+    @pytest.fixture
+    def _stack(self, request: pytest.FixtureRequest) -> None:
+        """Hold the row's cleanups, undone last first after it ends."""
+        self.stack = contextlib.ExitStack()
+        request.addfinalizer(self.stack.close)
 
     @pytest.fixture
     def _set_up_test_helper(self) -> None:
         """Run as the task does, recording no finding (#1934)."""
-        self.enterContext(hermetic.as_task("audit:bestpractices"))
+        self.stack.enter_context(hermetic.as_task("audit:bestpractices"))
 
     def test_site_key_maps_baseline_and_keeps_the_rest(self) -> None:
         """Only Baseline input names are renamed."""

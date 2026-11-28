@@ -18,9 +18,7 @@ canon uses none, so nothing in a live sweep would ever have exercised
 it — and the writer would have spliced a `'''` block over the `run = [`
 line and eaten the array in the first adopter that had one.
 
-stdlib `unittest`, the belt's one test idiom. Run through the gate as
-`mise run test`, which `ci` collects.
-"""
+pytest, run by `mise run test`. Every git call"""
 
 import io
 from contextlib import redirect_stderr, redirect_stdout

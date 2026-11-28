@@ -6,9 +6,7 @@ removes it, a `python3`, then calls `main` in this process. A refusal
 row asserts the whole line, so the wording the four sites share is
 pinned here once.
 
-stdlib `unittest`, matching the other mise/test_*.py; run through the
-gate as `mise run test`.
-"""
+pytest, run by `mise run test`.py;"""
 
 import os
 from pathlib import Path

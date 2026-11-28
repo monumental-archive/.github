@@ -19,9 +19,7 @@ headers its own build names, in a subshell with its one cargo call, so
 pinned Postgres builds that name two ICU majors are a supported state.
 
 The function under test is the belt's own, sourced by bash exactly as a
-task sources it. stdlib `unittest`, matching the other mise/test_*.py;
-run through the gate as `mise run test`.
-"""
+task sources it. pytest, run by `mise run test`.py;"""
 
 import hashlib
 import json

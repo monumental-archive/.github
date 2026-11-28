@@ -50,9 +50,7 @@ the uncompilable member, writes every member not `--exclude`d, and on
 different bytes there, which is the one way the equality check can be
 reached at all.
 
-stdlib `unittest`, matching the rest of release/. Run through the gate
-as `mise run test`, which `ci` collects.
-"""
+pytest, run by `mise run test`. Every git call"""
 
 import hashlib
 import json

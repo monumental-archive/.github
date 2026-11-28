@@ -7,9 +7,7 @@ descriptor 0 is closed. `urlopen` (#1682): urllib's answer and an
 opener's, read through `Response`; an answer that is not one, refused
 by name; and the law that no other tracked file opens a URL itself.
 
-stdlib `unittest`, matching the other mise/test_*.py; run through the
-gate as `mise run test`.
-"""
+pytest, run by `mise run test`.py;"""
 
 import ast
 import io

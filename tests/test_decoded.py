@@ -13,9 +13,7 @@ writes and is free. A parse anywhere else is red by file and line. The
 list of files not yet moved (#1544's shape) was emptied by #1604's
 slices and deleted by its last step, so no file is excused.
 
-stdlib `unittest`, matching the other mise/test_*.py; run through the
-gate as `mise run test`.
-"""
+pytest, run by `mise run test`.py;"""
 
 import ast
 import json

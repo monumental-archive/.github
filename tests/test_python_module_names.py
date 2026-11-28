@@ -9,9 +9,8 @@ message: each planted defect is red by name, a tree of module names is
 green, a tree with no Python skips. The canon's own tree is the last
 row.
 
-stdlib `unittest`, matching the other mise/test_*.py; run through the
-gate as `mise run test`. Every git call passes a scrubbed environment.
-"""
+pytest, run by `mise run test`.py; Every git call passes a scrubbed
+environment."""
 
 import subprocess
 import tempfile

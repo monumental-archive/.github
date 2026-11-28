@@ -15,9 +15,7 @@ its arguments. The three rows below were written against the step's
 now call the helper's `main` in this process (#1698). One row starts
 the helper as the step does instead: the script contract.
 
-stdlib `unittest`, matching the other tests here. Run through the gate
-as `mise run test`, which `ci` collects.
-"""
+pytest, run by `mise run test`. Every git call"""
 
 import os
 import subprocess

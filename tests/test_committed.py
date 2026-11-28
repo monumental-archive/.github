@@ -12,9 +12,7 @@ real. The types are read from the `groups` convention in
 release/prepare-release.sh, the one statement of what the notes map, so
 a type added there and not here goes red by name.
 
-stdlib `unittest`, matching the other mise/test_*.py; run through the
-gate as `mise run test`.
-"""
+pytest, run by `mise run test`.py;"""
 
 import re
 import subprocess

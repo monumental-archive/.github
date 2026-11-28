@@ -9,8 +9,7 @@ each run by a workflow, collected by the canon itself (`./`), a
 scheduler in a file the selection does not name (through the body), own tasks with no
 canon, a file that is not UTF-8, and no `--own`.
 
-stdlib `unittest`, run through the gate as `mise run test`.
-"""
+pytest, run by `mise run test`."""
 
 import subprocess
 import sys

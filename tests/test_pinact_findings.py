@@ -28,8 +28,7 @@ its two records and pinact's 3, an empty one no record and 0. Run
 against `origin/main`'s config, the record row fails: that body ran
 pinact in its human mode and recorded nothing.
 
-stdlib `unittest`, matching the rest of mise/.
-"""
+pytest, run by `mise run test`."""
 
 import json
 import os

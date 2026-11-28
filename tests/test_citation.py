@@ -9,9 +9,7 @@ so a maintainer filling in a stub got a mute exit 1 from
 asserts the guard's own sentence, not only the exit status.
 
 The script under test is the belt's own, run by bash in a temporary
-directory. stdlib `unittest`, matching the other mise/test_*.py; run
-through the gate as `mise run test`.
-"""
+directory. pytest, run by `mise run test`.py;"""
 
 import subprocess
 import tempfile

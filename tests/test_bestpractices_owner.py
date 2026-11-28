@@ -11,9 +11,7 @@ answer, which is how canon v1.24.0 burned.
 The normalisation rows build on 14058's real URL, varying one thing at a
 time, so each ignored difference and each kept one is planted alone.
 
-stdlib `unittest`, matching the other mise/test_*.py. Run through the
-gate as `mise run test`, which `ci` collects.
-"""
+pytest, run by `mise run test`.py."""
 
 import io
 import json

@@ -17,8 +17,7 @@ stub grants the same two at its calling job: in a reusable workflow
 the caller's grant is the ceiling. A planted workflow with no `report`
 job, and one whose `needs:` misses a job, are each red by message.
 
-stdlib `unittest`, run through the gate as `mise run test`.
-"""
+pytest, run by `mise run test`."""
 
 from __future__ import annotations
 

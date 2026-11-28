@@ -6,8 +6,7 @@ names the resolved ref. It finds that tree from its own location, so
 each row plants a tree, copies the shipped script into the tree's
 `.github/actions/canon/`, and runs it there under bash.
 
-stdlib `unittest`, matching the other tests here.
-"""
+pytest, run by `mise run test`."""
 
 from __future__ import annotations
 

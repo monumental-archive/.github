@@ -27,6 +27,7 @@ import pytest
 
 from belt.release import matrix
 from tests import hermetic
+import contextlib
 
 TESTDATA = Path(__file__).resolve().parent / "testdata" / "matrix"
 MAPPING = str(TESTDATA / "pgrx-base-images.toml")
@@ -80,8 +81,15 @@ def recorded(name: str) -> tuple[str, str]:
     )
 
 
+@pytest.mark.usefixtures("_stack")
 class TestRows:
     """Shared assertions and fixtures."""
+    
+    @pytest.fixture
+    def _stack(self, request: pytest.FixtureRequest) -> None:
+        """Hold the row's cleanups, undone last first after it ends."""
+        self.stack = contextlib.ExitStack()
+        request.addfinalizer(self.stack.close)
 
     def refused(self, argv: tuple[str, ...], message: str) -> None:
         """Assert a run refuses with exactly `message` and no outputs."""
@@ -95,7 +103,7 @@ class TestRows:
 
         """
         tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(tmp.cleanup)
+        self.stack.callback(tmp.cleanup)
         path = Path(tmp.name) / "pgrx-base-images.toml"
         path.write_text(text, "utf-8")
         return str(path)

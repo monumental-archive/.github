@@ -14,9 +14,7 @@ a copy of it. Every red row plants into the canon's REAL hook file and
 asserts the exact message, line number included (#650): the delivered
 config is green, and the job as it shipped before #1426 is red.
 
-stdlib `unittest`, matching the other mise/test_*.py. Run through the
-gate as `mise run test`, which `ci` collects.
-"""
+pytest, run by `mise run test`.py."""
 
 import subprocess
 import tempfile

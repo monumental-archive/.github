@@ -32,9 +32,7 @@ NOT CAPTURED: the `--metadata-file` a push writes. The daemon was not
 running and a push needs a registry; the rows use the one key the
 helper reads, `containerimage.digest`.
 
-stdlib `unittest`, matching the rest of release/. Run through the gate
-as `mise run test`, which `ci` collects.
-"""
+pytest, run by `mise run test`. Every git call"""
 
 from __future__ import annotations
 

@@ -20,9 +20,7 @@ package.
 Each row asserts the message, not just the exit status: a planted row
 scored on exit alone can pass for the wrong reason.
 
-stdlib `unittest`, matching the other mise/test_*.py. Run through the
-gate as `mise run test`, which `ci` collects.
-"""
+pytest, run by `mise run test`.py."""
 
 import os
 import shutil
@@ -37,6 +35,7 @@ import pytest
 from belt import coverage_floor as cf
 from belt import decoded
 from tests import hermetic
+import contextlib
 
 CANON = hermetic.CANON
 BELT = CANON / "mise"
@@ -291,8 +290,15 @@ class Plant(TypedDict, total=False):
     silent: bool
 
 
+@pytest.mark.usefixtures("_stack")
 class TestGoBranchCase:
     """Runs a task and removes the planted tree afterwards."""
+    
+    @pytest.fixture
+    def _stack(self, request: pytest.FixtureRequest) -> None:
+        """Hold the row's cleanups, undone last first after it ends."""
+        self.stack = contextlib.ExitStack()
+        request.addfinalizer(self.stack.close)
 
     def run_task(
         self, task: str = TASK, **plant: Unpack[Plant]
@@ -305,7 +311,7 @@ class TestGoBranchCase:
 
         """
         done, tmp = run_task(task, **plant)
-        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        self.stack.callback(shutil.rmtree, tmp, ignore_errors=True)
         calls = (tmp / "gobco.log").read_text(encoding="utf-8").splitlines()
         return done, tmp, calls
 

@@ -15,9 +15,7 @@ and real artifacts (release-lab v0.28.5, edtf v1.3.5, the canon's
 v1.69.3), and the pull request quotes them; these rows need no network
 and no binary.
 
-stdlib `unittest`, matching the rest of release/. Run through the gate
-as `mise run test`, which `ci` collects.
-"""
+pytest, run by `mise run test`. Every git call"""
 
 import os
 import subprocess
