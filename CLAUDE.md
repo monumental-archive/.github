@@ -133,6 +133,15 @@ shared lives here and nowhere else. Five layers:
   absent (#2013).
 - Belt linters guard for applicability and skip clean: a linter that
   cannot skip cannot be universal.
+- Idiomatic code is the default: every tool is used the way it is
+  designed to be used, never wrapped or re-implemented — pytest's
+  fixtures, hooks, `capfd` and `monkeypatch`, not a helper that
+  renames or copies them. One way to do each thing, so nothing drifts.
+  Idiom is the tool's designed mechanism, not habit: where a canon rule
+  measured against it says otherwise (a lint at maximum, a recorded
+  trap such as `set -e` in task bodies), the rule wins.
+  Guard only against drift that happens without a bad decision; a
+  check that polices config the org writes itself guards nothing.
 - Tasks are written in bash; `[task_config] shell` pins it (Ubuntu's `sh`
   is dash).
 - Commits: conventional, **imperative**, lowercase subjects, 72-column
