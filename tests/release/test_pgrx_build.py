@@ -330,48 +330,29 @@ class PreviousRelease:
         for name in files:
             (self.sql / name).write_text("")
 
-    def helper(
-        self,
-        args: list[str],
-        env: dict[str, str],
-        *,
-        capfd: pytest.CaptureFixture[str],
-    ) -> Done:
-        """Call the helper on `args` in the row's directory.
+    def enter(self, monkeypatch: pytest.MonkeyPatch, **stubs: str) -> None:
+        """Stand in the row's directory as a step meets the helper.
 
-        The helper resolves `gh` on PATH once, at import, so the call is
-        given the stub a step would have found first on its PATH.
-
-        Returns:
-            The status and both streams.
+        The helper resolves `gh` on PATH once, at import, so the step is
+        given the stub it would have found first on its PATH. `stubs`
+        set what the stub answers, beside the row's own.
 
         """
-        with pytest.MonkeyPatch.context() as patched:
-            patched.setattr(previous_release, "GH", str(self.gh))
-            for name, value in self.make_env(**env).items():
-                patched.setenv(name, value)
-            patched.chdir(self.root)
-            status = previous_release.main(args)
-        out, err = capfd.readouterr()
-        return status, out, err
+        monkeypatch.setattr(previous_release, "GH", str(self.gh))
+        answers = {f"STUB_{k.upper()}": v for k, v in stubs.items()}
+        for name, value in self.make_env(**(self.env | answers)).items():
+            monkeypatch.setenv(name, value)
+        monkeypatch.chdir(self.root)
 
-    def previous(
-        self,
-        mode: str,
-        *extra: str,
-        version: str = "1.2.0",
-        capfd: pytest.CaptureFixture[str],
-        **stubs: str,
-    ) -> Done:
-        """Run the helper at `version` for CRATE.
+    def previous(self, mode: str, *extra: str, version: str = "1.2.0") -> list[str]:
+        """Ask in `mode` at `version` for CRATE.
 
         Returns:
-            What the run answered.
+            The helper's arguments.
 
         """
-        env = {**self.env, **{f"STUB_{k.upper()}": v for k, v in stubs.items()}}
         args = [mode, "--repo", "acme/demo", "--version", version]
-        return self.helper([*args, "--crate-dir", self.CRATE, *extra], env, capfd=capfd)
+        return [*args, "--crate-dir", self.CRATE, *extra]
 
     def gh_calls(self) -> list[str]:
         """Each gh invocation, its arguments joined by spaces.
@@ -397,11 +378,14 @@ def test_no_previous_release(
     releases: object,
     latest: object,
     capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """No release at all, or none carrying this extension's tarballs."""
     previous_release_state.forge(releases, latest)
     previous_release_state.graph("demo_ext--1.0.0--1.1.0.sql")
-    status, out, err = previous_release_state.previous("guard", capfd=capfd)
+    previous_release_state.enter(monkeypatch)
+    status = previous_release.main(previous_release_state.previous("guard"))
+    out, err = capfd.readouterr()
     assert status == 0, err
     assert out == (
         "::notice::no previous release; first publish needs no upgrade path\n"
@@ -409,20 +393,26 @@ def test_no_previous_release(
 
 
 def test_a_rerun(
-    previous_release_state: PreviousRelease, capfd: pytest.CaptureFixture[str]
+    previous_release_state: PreviousRelease,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A release already carries THIS version: nothing to upgrade from."""
     previous_release_state.forge([
         release("v1.2.0", "demo_ext-1.2.0-pg18-linux-arm64.tar.gz")
     ])
-    status, out, err = previous_release_state.previous("guard", capfd=capfd)
+    previous_release_state.enter(monkeypatch)
+    status = previous_release.main(previous_release_state.previous("guard"))
+    out, err = capfd.readouterr()
     assert status == 0, err
     assert out == "::notice::re-run of 1.2.0; upgrade path not applicable\n"
     assert len(previous_release_state.gh_calls()) == 1
 
 
 def test_the_extensions_first_publish(
-    previous_release_state: PreviousRelease, capfd: pytest.CaptureFixture[str]
+    previous_release_state: PreviousRelease,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A previous release that shipped no tarball of this extension (#87).
 
@@ -432,7 +422,9 @@ def test_the_extensions_first_publish(
     """
     previous_release_state.forge([release("v1.1.0", "demo-cli.tar.gz")], "v1.1.0")
     previous_release_state.graph("demo_ext--1.0.0--1.1.0.sql")
-    status, out, err = previous_release_state.previous("guard", capfd=capfd)
+    previous_release_state.enter(monkeypatch)
+    status = previous_release.main(previous_release_state.previous("guard"))
+    out, err = capfd.readouterr()
     assert status == 0, err
     assert out == "::notice::no previous release; first publish needs no upgrade path\n"
     assert previous_release_state.gh_calls()[0] == (
@@ -443,12 +435,16 @@ def test_the_extensions_first_publish(
 
 
 def test_a_missing_upgrade_path_is_refused(
-    previous_release_state: PreviousRelease, capfd: pytest.CaptureFixture[str]
+    previous_release_state: PreviousRelease,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Shipped before, no sql/<ext>--prev--new.sql: stranded, refused."""
     previous_release_state.forge([release("v1.1.0", DEMO_CELL)], "v1.1.0")
     previous_release_state.graph("demo_ext--1.0.0--1.1.0.sql")
-    status, _out, err = previous_release_state.previous("guard", capfd=capfd)
+    previous_release_state.enter(monkeypatch)
+    status = previous_release.main(previous_release_state.previous("guard"))
+    err = capfd.readouterr().err
     assert status == 1
     assert err == (
         "::error::previous-release: no upgrade path"
@@ -459,28 +455,32 @@ def test_a_missing_upgrade_path_is_refused(
 
 
 def test_a_present_upgrade_path_passes(
-    previous_release_state: PreviousRelease, capfd: pytest.CaptureFixture[str]
+    previous_release_state: PreviousRelease,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The derived script is there: the release may proceed."""
     previous_release_state.forge([release("v1.1.0", DEMO_CELL)], "v1.1.0")
     previous_release_state.graph(
         "demo_ext--1.0.0--1.1.0.sql", "demo_ext--1.1.0--1.2.0.sql"
     )
-    status, out, err = previous_release_state.previous("guard", capfd=capfd)
+    previous_release_state.enter(monkeypatch)
+    status = previous_release.main(previous_release_state.previous("guard"))
+    out, err = capfd.readouterr()
     assert status == 0, err
     assert out == "::notice::upgrade path 1.1.0 -> 1.2.0 present\n"
 
 
 def test_a_failed_listing_read_is_red(
-    previous_release_state: PreviousRelease, capfd: pytest.CaptureFixture[str]
+    previous_release_state: PreviousRelease,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Gh failing on the listing is a red with gh's own words, never a pass."""
     args = ["guard", "--repo", "acme/demo", "--version", "1.2.0"]
-    status, out, err = previous_release_state.helper(
-        [*args, "--crate-dir", previous_release_state.CRATE],
-        previous_release_state.env,
-        capfd=capfd,
-    )
+    previous_release_state.enter(monkeypatch)
+    status = previous_release.main([*args, "--crate-dir", previous_release_state.CRATE])
+    out, err = capfd.readouterr()
     assert status == 1
     assert out == ""
     assert err == "HTTP 502\n"
@@ -492,11 +492,11 @@ CELL = ("--pg", "18", "--arch", "arm64")
 class PreviousTarball(PreviousRelease):
     """`fetch`: the predecessor's tarball of this cell, or a skip."""
 
-    def fetch(self, *, capfd: pytest.CaptureFixture[str], **stubs: str) -> Done:
+    def fetch(self) -> list[str]:
         """Fetch for pg18/arm64 into the row's directory.
 
         Returns:
-            What the run answered.
+            The helper's arguments.
 
         """
         dest = (
@@ -505,7 +505,7 @@ class PreviousTarball(PreviousRelease):
             "--dest",
             str(self.root / "prevroot"),
         )
-        return self.previous("fetch", *CELL, *dest, **stubs, capfd=capfd)
+        return self.previous("fetch", *CELL, *dest)
 
     def tarball(self) -> Path:
         """Pack a one-file pkgroot archive beside the crate.
@@ -531,28 +531,36 @@ def previous_tarball(tmp_path: Path, env: support.Env) -> PreviousTarball:
 
 
 def test_no_previous_release_or_a_rerun_skips(
-    previous_tarball: PreviousTarball, capfd: pytest.CaptureFixture[str]
+    previous_tarball: PreviousTarball,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """No release, none of this extension, or this version: said why."""
     rerun = release("v1.2.0", "demo_ext-1.2.0-pg18-linux-arm64.tar.gz")
     for releases in ([], [release("release-1")], [rerun]):
         previous_tarball.forge(releases)
         previous_tarball.graph("demo_ext--1.0.0--1.1.0.sql")
-        status, out, err = previous_tarball.fetch(capfd=capfd)
+        previous_tarball.enter(monkeypatch)
+        status = previous_release.main(previous_tarball.fetch())
+        out, err = capfd.readouterr()
         assert status == 0
         assert out == ""
         assert err == "::notice::no previous release; upgrade execution skipped\n"
 
 
 def test_no_tarball_for_this_cell_skips(
-    previous_tarball: PreviousTarball, capfd: pytest.CaptureFixture[str]
+    previous_tarball: PreviousTarball,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The predecessor shipped no tarball of this pg and arch."""
     previous_tarball.forge([
         release("v1.1.0", "demo_ext-1.1.0-pg17-linux-arm64.tar.gz")
     ])
     previous_tarball.graph("demo_ext--1.0.0--1.1.0.sql")
-    status, out, err = previous_tarball.fetch(capfd=capfd)
+    previous_tarball.enter(monkeypatch)
+    status = previous_release.main(previous_tarball.fetch())
+    out, err = capfd.readouterr()
     assert status == 0
     assert out == ""
     assert err == (
@@ -566,14 +574,16 @@ def test_no_tarball_for_this_cell_skips(
 
 
 def test_the_tarball_is_extracted_and_the_version_printed(
-    previous_tarball: PreviousTarball, capfd: pytest.CaptureFixture[str]
+    previous_tarball: PreviousTarball,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The cell's tarball lands under DEST, and stdout is the version."""
     previous_tarball.forge([release("v1.1.0", DEMO_CELL)])
     previous_tarball.graph("demo_ext--1.0.0--1.1.0.sql")
-    status, out, err = previous_tarball.fetch(
-        tarball=str(previous_tarball.tarball()), capfd=capfd
-    )
+    previous_tarball.enter(monkeypatch, tarball=str(previous_tarball.tarball()))
+    status = previous_release.main(previous_tarball.fetch())
+    out, err = capfd.readouterr()
     assert status == 0, err
     assert out == "1.1.0\n"
     extracted = (
@@ -583,14 +593,18 @@ def test_the_tarball_is_extracted_and_the_version_printed(
 
 
 def test_a_corrupt_tarball_is_red(
-    previous_tarball: PreviousTarball, capfd: pytest.CaptureFixture[str]
+    previous_tarball: PreviousTarball,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Tar failing is tar's own red, and no version is printed."""
     previous_tarball.forge([release("v1.1.0", DEMO_CELL)])
     previous_tarball.graph("demo_ext--1.0.0--1.1.0.sql")
     tarball = previous_tarball.root / "asset.tar.gz"
     tarball.write_bytes(b"not a tarball")
-    status, out, _err = previous_tarball.fetch(tarball=str(tarball), capfd=capfd)
+    previous_tarball.enter(monkeypatch, tarball=str(tarball))
+    status = previous_release.main(previous_tarball.fetch())
+    out = capfd.readouterr().out
     assert status != 0
     assert out == ""
 
@@ -607,16 +621,16 @@ class OnePredecessor(PreviousRelease):
         names = (TESTDATA / f"edtf-sql-{sql_at}.txt").read_text().split()
         self.graph(*names, *extra)
 
-    def predecessor(self, version: str, *, capfd: pytest.CaptureFixture[str]) -> Done:
-        """Ask the helper for edtf_postgres's predecessor of `version`.
+    def predecessor(self, version: str) -> list[str]:
+        """Ask for edtf_postgres's predecessor of `version`.
 
         Returns:
-            What the run answered.
+            The helper's arguments.
 
         """
         control = f"{self.CRATE}/edtf_postgres.control"
         args = ["predecessor", "--repo", "acme/demo", "--version", version]
-        return self.helper([*args, "--control", control], self.env, capfd=capfd)
+        return [*args, "--control", control]
 
 
 @fixture
@@ -626,52 +640,72 @@ def one_predecessor(tmp_path: Path, env: support.Env) -> OnePredecessor:
 
 
 def test_an_imported_tag_scheme_yields_the_published_predecessor(
-    one_predecessor: OnePredecessor, capfd: pytest.CaptureFixture[str]
+    one_predecessor: OnePredecessor,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """At import, 1.2.3 sits on `edtf-postgres-v1.2.3` (main: none)."""
     one_predecessor.edtf("edtf-releases.json", "v1.2.3", "edtf-postgres-v1.2.3")
-    status, out, err = one_predecessor.predecessor("1.3.0", capfd=capfd)
+    one_predecessor.enter(monkeypatch)
+    status = previous_release.main(one_predecessor.predecessor("1.3.0"))
+    out, err = capfd.readouterr()
     assert status == 0, err
     assert out == "1.2.3\tedtf-postgres-v1.2.3\n"
 
 
 def test_a_burned_head_yields_the_next_installable_version(
-    one_predecessor: OnePredecessor, capfd: pytest.CaptureFixture[str]
+    one_predecessor: OnePredecessor,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """At v1.3.1 the graph's next head, 1.3.0, burned: 1.2.3 it is."""
     one_predecessor.edtf("edtf-releases.json", "v1.3.1", "edtf-postgres-v1.2.3")
-    status, out, err = one_predecessor.predecessor("1.3.1", capfd=capfd)
+    one_predecessor.enter(monkeypatch)
+    status = previous_release.main(one_predecessor.predecessor("1.3.1"))
+    out, err = capfd.readouterr()
     assert status == 0, err
     assert out == "1.2.3\tedtf-postgres-v1.2.3\n"
 
 
 def test_an_older_release_marked_latest_yields_the_newest(
-    one_predecessor: OnePredecessor, capfd: pytest.CaptureFixture[str]
+    one_predecessor: OnePredecessor,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A maintenance release v1.3.4 published last: 1.3.5 is still newest."""
     one_predecessor.edtf("edtf-releases-v1.3.5.json", "v1.3.5", "v1.3.4")
-    status, out, err = one_predecessor.predecessor("1.3.6", capfd=capfd)
+    one_predecessor.enter(monkeypatch)
+    status = previous_release.main(one_predecessor.predecessor("1.3.6"))
+    out, err = capfd.readouterr()
     assert status == 0, err
     assert out == "1.3.5\tv1.3.5\n"
 
 
 def test_an_empty_graph_yields_nothing(
-    one_predecessor: OnePredecessor, capfd: pytest.CaptureFixture[str]
+    one_predecessor: OnePredecessor,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """No upgrade script at all: first publish, whatever is published."""
     one_predecessor.env["STUB_LISTING"] = str(TESTDATA / "edtf-releases-v1.3.5.json")
     one_predecessor.graph("README.md")
-    status, out, err = one_predecessor.predecessor("1.3.6", capfd=capfd)
+    one_predecessor.enter(monkeypatch)
+    status = previous_release.main(one_predecessor.predecessor("1.3.6"))
+    out, err = capfd.readouterr()
     assert status == 0, err
     assert out == ""
 
 
 def test_the_guard_refuses_from_the_imported_predecessor(
-    one_predecessor: OnePredecessor, capfd: pytest.CaptureFixture[str]
+    one_predecessor: OnePredecessor,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """No 1.2.3--1.3.0 path: refused, naming the release that carries 1.2.3."""
     one_predecessor.edtf("edtf-releases.json", "v1.2.3", "edtf-postgres-v1.2.3")
-    status, _out, err = one_predecessor.previous("guard", version="1.3.0", capfd=capfd)
+    one_predecessor.enter(monkeypatch)
+    status = previous_release.main(one_predecessor.previous("guard", version="1.3.0"))
+    err = capfd.readouterr().err
     assert status == 1, err
     assert err == (
         "::error::previous-release: no upgrade path"
@@ -682,17 +716,23 @@ def test_the_guard_refuses_from_the_imported_predecessor(
 
 
 def test_the_guard_checks_past_a_burned_head(
-    one_predecessor: OnePredecessor, capfd: pytest.CaptureFixture[str]
+    one_predecessor: OnePredecessor,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """At v1.3.1 the path is from 1.2.3, and it is there."""
     one_predecessor.edtf("edtf-releases.json", "v1.3.1", "edtf-postgres-v1.2.3")
-    status, out, err = one_predecessor.previous("guard", version="1.3.1", capfd=capfd)
+    one_predecessor.enter(monkeypatch)
+    status = previous_release.main(one_predecessor.previous("guard", version="1.3.1"))
+    out, err = capfd.readouterr()
     assert status == 0, err
     assert out == "::notice::upgrade path 1.2.3 -> 1.3.1 present\n"
 
 
 def test_the_guard_checks_from_the_newest_not_the_latest(
-    one_predecessor: OnePredecessor, capfd: pytest.CaptureFixture[str]
+    one_predecessor: OnePredecessor,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Latest is v1.3.4; the path owed is from 1.3.5, and it is there."""
     one_predecessor.edtf(
@@ -701,13 +741,17 @@ def test_the_guard_checks_from_the_newest_not_the_latest(
         "v1.3.4",
         "edtf_postgres--1.3.5--1.3.6.sql",
     )
-    status, out, err = one_predecessor.previous("guard", version="1.3.6", capfd=capfd)
+    one_predecessor.enter(monkeypatch)
+    status = previous_release.main(one_predecessor.previous("guard", version="1.3.6"))
+    out, err = capfd.readouterr()
     assert status == 0, err
     assert out == "::notice::upgrade path 1.3.5 -> 1.3.6 present\n"
 
 
 def test_the_fetch_downloads_the_imported_predecessor(
-    one_predecessor: OnePredecessor, capfd: pytest.CaptureFixture[str]
+    one_predecessor: OnePredecessor,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The upgrade execution starts from 1.2.3, off its own release."""
     one_predecessor.edtf("edtf-releases.json", "v1.3.1", "edtf-postgres-v1.2.3")
@@ -717,9 +761,11 @@ def test_the_fetch_downloads_the_imported_predecessor(
     dest: tuple[str, ...] = ("--tarball", str(one_predecessor.root / "prev.tar.gz"))
     dest += ("--dest", str(one_predecessor.root / "prevroot"))
     cell = ("--pg", "18", "--arch", "arm64", *dest)
-    status, out, err = one_predecessor.previous(
-        "fetch", *cell, version="1.3.1", tarball=str(tarball), capfd=capfd
+    one_predecessor.enter(monkeypatch, tarball=str(tarball))
+    status = previous_release.main(
+        one_predecessor.previous("fetch", *cell, version="1.3.1")
     )
+    out, err = capfd.readouterr()
     assert status == 0, err
     assert out == "1.2.3\n"
     assert (
@@ -749,16 +795,16 @@ class OlderLine(PreviousRelease):
         )
         self.graph("demo_ext--1.2.3--1.2.4.sql", "demo_ext--1.2.4--1.3.0.sql")
 
-    def predecessor(self, version: str, *, capfd: pytest.CaptureFixture[str]) -> Done:
-        """Ask the helper for demo_ext's predecessor of `version`.
+    def predecessor(self, version: str) -> list[str]:
+        """Ask for demo_ext's predecessor of `version`.
 
         Returns:
-            What the run answered.
+            The helper's arguments.
 
         """
         control = f"{self.CRATE}/demo_ext.control"
         args = ["predecessor", "--repo", "acme/demo", "--version", version]
-        return self.helper([*args, "--control", control], self.env, capfd=capfd)
+        return [*args, "--control", control]
 
 
 @fixture
@@ -779,15 +825,20 @@ def test_each_line_yields_its_own_predecessor(
     version: object,
     want: object,
     capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """1.2.5 comes from 1.2.4 on v1.2.4; 1.3.1 from 1.3.0 on v1.3.0."""
-    status, out, err = older_line.predecessor(version, capfd=capfd)
+    older_line.enter(monkeypatch)
+    status = previous_release.main(older_line.predecessor(version))
+    out, err = capfd.readouterr()
     assert status == 0, err
     assert want == out
 
 
 def test_the_record_names_what_the_forge_carries(
-    older_line: OlderLine, capfd: pytest.CaptureFixture[str]
+    older_line: OlderLine,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """`record`: the carried versions written, the predecessor printed.
 
@@ -797,9 +848,9 @@ def test_the_record_names_what_the_forge_carries(
     record = older_line.root / ".pgrx-installable"
     control = f"{older_line.CRATE}/demo_ext.control"
     args = ["record", "--repo", "acme/demo", "--version", "1.3.1"]
-    status, out, err = older_line.helper(
-        [*args, "--out", str(record), control], older_line.env, capfd=capfd
-    )
+    older_line.enter(monkeypatch)
+    status = previous_release.main([*args, "--out", str(record), control])
+    out, err = capfd.readouterr()
     assert status == 0, err
     assert out == "demo_ext\t1.3.0\tv1.3.0\n"
     written = record.read_text(encoding="utf-8")
@@ -808,11 +859,15 @@ def test_the_record_names_what_the_forge_carries(
 
 
 def test_the_guard_owes_no_downgrade_path(
-    older_line: OlderLine, capfd: pytest.CaptureFixture[str]
+    older_line: OlderLine,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Releasing 1.2.5 with 1.2.4--1.2.5 present passes; 1.3.0 is not asked."""
     older_line.graph("demo_ext--1.2.4--1.2.5.sql")
-    status, out, _err = older_line.previous("guard", version="1.2.5", capfd=capfd)
+    older_line.enter(monkeypatch)
+    status = previous_release.main(older_line.previous("guard", version="1.2.5"))
+    out = capfd.readouterr().out
     assert status == 0, out
     assert out == "::notice::upgrade path 1.2.4 -> 1.2.5 present\n"
 

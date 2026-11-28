@@ -249,23 +249,11 @@ class ColdAttested:
             names.append(rel)
         return names
 
-    def helper(
-        self, *files: str, capfd: pytest.CaptureFixture[str]
-    ) -> tuple[int, str, str]:
-        """Call the helper's main in the planted tree.
-
-        Returns:
-            The status and what it printed.
-
-        """
-        argv = list(files)
-        with pytest.MonkeyPatch.context() as patched:
-            for name, value in self.env.items():
-                patched.setenv(name, value)
-            patched.chdir(self.tree)
-            status = cold_attested.main(argv)
-        out, err = capfd.readouterr()
-        return status, out, err
+    def enter(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Stand in the planted tree as the task's main meets it."""
+        for name, value in self.env.items():
+            monkeypatch.setenv(name, value)
+        monkeypatch.chdir(self.tree)
 
     def task(self) -> subprocess.CompletedProcess[str]:
         """Run the task body in the planted tree.
@@ -343,25 +331,31 @@ def test_an_unmarked_cache_is_red_through_the_task(
 
 
 def test_cases(
-    cold_attested_state: ColdAttested, capfd: pytest.CaptureFixture[str]
+    cold_attested_state: ColdAttested,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Every row of CASES, through the helper's main."""
     for files, status, out, err in CASES.values():
         for old in (cold_attested_state.tree / WF).iterdir():
             old.unlink()
-        status, out, err = cold_attested_state.helper(
-            *cold_attested_state.plant(files), capfd=capfd
-        )
+        cold_attested_state.enter(monkeypatch)
+        status = cold_attested.main([*cold_attested_state.plant(files)])
+        out, err = capfd.readouterr()
         same(status, status, err)
         same(out.splitlines(), out)
         same(err.splitlines(), err)
 
 
 def test_no_workflow_is_a_usage_error(
-    cold_attested_state: ColdAttested, capfd: pytest.CaptureFixture[str]
+    cold_attested_state: ColdAttested,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Called with nothing to read: exit 2, saying how to call it."""
-    status, _out, err = cold_attested_state.helper(capfd=capfd)
+    cold_attested_state.enter(monkeypatch)
+    status = cold_attested.main([])
+    _out, err = capfd.readouterr()
     same(status, cold_attested.EXIT_ERROR)
     same(
         err.splitlines(),
@@ -370,21 +364,29 @@ def test_no_workflow_is_a_usage_error(
 
 
 def test_a_missing_workflow_is_a_read_error(
-    cold_attested_state: ColdAttested, capfd: pytest.CaptureFixture[str]
+    cold_attested_state: ColdAttested,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A named file that is not there: exit 2, naming it."""
-    status, out, err = cold_attested_state.helper(f"{WF}/gone.yml", capfd=capfd)
+    cold_attested_state.enter(monkeypatch)
+    status = cold_attested.main([f"{WF}/gone.yml"])
+    out, err = capfd.readouterr()
     same(status, cold_attested.EXIT_ERROR)
     same(out, "")
     assert err.startswith(f"{TASK}: {WF}/gone.yml: cannot be read as UTF-8: "), err
 
 
 def test_a_workflow_not_utf8_is_a_read_error(
-    cold_attested_state: ColdAttested, capfd: pytest.CaptureFixture[str]
+    cold_attested_state: ColdAttested,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Bytes that are not UTF-8: exit 2, naming the file."""
     (cold_attested_state.tree / WF / "a.yml").write_bytes(b"on: push\n# \xe9\n")
-    status, out, err = cold_attested_state.helper(f"{WF}/a.yml", capfd=capfd)
+    cold_attested_state.enter(monkeypatch)
+    status = cold_attested.main([f"{WF}/a.yml"])
+    out, err = capfd.readouterr()
     same(status, cold_attested.EXIT_ERROR)
     same(out, "")
     assert err.startswith(f"{TASK}: {WF}/a.yml: cannot be read as UTF-8: "), err

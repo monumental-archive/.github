@@ -117,31 +117,16 @@ class Citation:
         self.plant(".badge-states", source(".badge-states"))
         self.plant("CITATION.cff", citation)
 
-    def helper(
-        self,
-        *files: str,
-        untracked: tuple[str, ...] = (),
-        capfd: pytest.CaptureFixture[str],
-    ) -> tuple[int, str, str]:
-        """Call the helper's main in the planted tree, tracking what is in it.
-
-        `untracked` are planted files git is not to track.
-
-        Returns:
-            The status and what it printed.
-
-        """
+    def enter(
+        self, monkeypatch: pytest.MonkeyPatch, untracked: tuple[str, ...] = ()
+    ) -> None:
+        """Track what is planted, but `untracked`, and stand in the tree."""
         self.git("add", "-A")
         if untracked:
             self.git("rm", "-q", "--cached", "--", *untracked)
-        argv = list(files)
-        with pytest.MonkeyPatch.context() as patched:
-            for name, value in self.env.items():
-                patched.setenv(name, value)
-            patched.chdir(self.tree)
-            status = citation_check.main(argv)
-        out, err = capfd.readouterr()
-        return status, out, err
+        for name, value in self.env.items():
+            monkeypatch.setenv(name, value)
+        monkeypatch.chdir(self.tree)
 
     def task(self, *tracked: str) -> subprocess.CompletedProcess[str]:
         """Run the task body in the planted tree, git tracking some files.
@@ -215,22 +200,30 @@ def test_a_failed_render_is_its_own_status(citation_state: Citation) -> None:
 
 
 def test_agreeing_citation_is_ok(
-    citation_state: Citation, capfd: pytest.CaptureFixture[str]
+    citation_state: Citation,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The canon's own citation against its own sources: ok."""
     citation_state.sources(source("CITATION.cff"))
-    status, out, err = citation_state.helper(capfd=capfd)
+    citation_state.enter(monkeypatch)
+    status = citation_check.main([])
+    out, err = capfd.readouterr()
     same(status, 0, err)
     want = ["lint:citation: CITATION.cff agrees with REUSE.toml"]
     same(out.splitlines(), want)
 
 
 def test_no_reuse_is_red(
-    citation_state: Citation, capfd: pytest.CaptureFixture[str]
+    citation_state: Citation,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A citation with no source: red, by name."""
     citation_state.plant("CITATION.cff", source("CITATION.cff"))
-    status, _out, err = citation_state.helper(capfd=capfd)
+    citation_state.enter(monkeypatch)
+    status = citation_check.main([])
+    err = capfd.readouterr().err
     same(status, citation_check.EXIT_RED)
     want = [
         (
@@ -242,24 +235,30 @@ def test_no_reuse_is_red(
 
 
 def test_an_untracked_citation_is_no_citation(
-    citation_state: Citation, capfd: pytest.CaptureFixture[str]
+    citation_state: Citation,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """CITATION.cff on disk and not in git: the tree has none (#2013)."""
     citation_state.sources(source("CITATION.cff"))
     rel = citation_state.plant(".github/workflows/wf.yml", "on: push\n")
-    status, out, err = citation_state.helper(
-        rel, untracked=("CITATION.cff",), capfd=capfd
-    )
+    citation_state.enter(monkeypatch, untracked=("CITATION.cff",))
+    status = citation_check.main([rel])
+    out, err = capfd.readouterr()
     same(status, 0, err)
     same(out.splitlines(), SKIPPED)
 
 
 def test_an_untracked_reuse_is_no_source(
-    citation_state: Citation, capfd: pytest.CaptureFixture[str]
+    citation_state: Citation,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """REUSE.toml on disk and not in git: the citation has no source."""
     citation_state.sources(source("CITATION.cff"))
-    status, _out, err = citation_state.helper(untracked=("REUSE.toml",), capfd=capfd)
+    citation_state.enter(monkeypatch, untracked=("REUSE.toml",))
+    status = citation_check.main([])
+    err = capfd.readouterr().err
     same(status, citation_check.EXIT_RED)
     want = [
         (
@@ -271,7 +270,9 @@ def test_an_untracked_reuse_is_no_source(
 
 
 def test_no_minting_request_is_skipped(
-    citation_state: Citation, capfd: pytest.CaptureFixture[str]
+    citation_state: Citation,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """No request, or one only in a comment: skipped by name."""
     rows = {
@@ -281,20 +282,26 @@ def test_no_minting_request_is_skipped(
     }
     for text in rows.values():
         rel = citation_state.plant(".github/workflows/wf.yml", text)
-        status, out, err = citation_state.helper(rel, capfd=capfd)
+        citation_state.enter(monkeypatch)
+        status = citation_check.main([rel])
+        out, err = capfd.readouterr()
         same(status, 0, err)
         same(out.splitlines(), SKIPPED)
         same(err, "")
 
 
 def test_minting_without_a_citation_is_red(
-    citation_state: Citation, capfd: pytest.CaptureFixture[str]
+    citation_state: Citation,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Each workflow requesting a DOI named, in order, then the remedy."""
     one = citation_state.plant(".github/workflows/a.yml", MINT)
     clean = citation_state.plant(".github/workflows/b.yml", "on: push\n")
     two = citation_state.plant(".github/workflows/c.yaml", "mint-doi:\ttrue")
-    status, out, err = citation_state.helper(one, clean, two, capfd=capfd)
+    citation_state.enter(monkeypatch)
+    status = citation_check.main([one, clean, two])
+    out, err = capfd.readouterr()
     same(status, citation_check.EXIT_RED)
     want = [
         (
@@ -310,10 +317,14 @@ def test_minting_without_a_citation_is_red(
 
 
 def test_not_utf8_is_an_error(
-    citation_state: Citation, capfd: pytest.CaptureFixture[str]
+    citation_state: Citation,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A workflow that is not UTF-8 is refused by name, exit 2."""
     rel = citation_state.plant(".github/workflows/bad.yml", b"on: \xff\n")
-    status, _out, err = citation_state.helper(rel, capfd=capfd)
+    citation_state.enter(monkeypatch)
+    status = citation_check.main([rel])
+    err = capfd.readouterr().err
     same(status, citation_check.EXIT_ERROR)
     assert err.startswith(f"{TASK}: {rel}: cannot be read as UTF-8:"), err

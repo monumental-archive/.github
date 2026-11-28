@@ -169,23 +169,11 @@ class Planted:
             return []
         return self.log.read_text(encoding="utf-8").splitlines()
 
-    def helper(
-        self, *argv: str, capfd: pytest.CaptureFixture[str]
-    ) -> tuple[int, str, str]:
-        """Call the helper's main in the planted tree.
-
-        Returns:
-            The status and what it printed.
-
-        """
-        args = list(argv)
-        with pytest.MonkeyPatch.context() as patched:
-            for name, value in self.env.items():
-                patched.setenv(name, value)
-            patched.chdir(self.tree)
-            status = caller_permissions.main(args)
-        out, err = capfd.readouterr()
-        return status, out, err
+    def enter(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Stand in the planted tree as the task's main meets it."""
+        for name, value in self.env.items():
+            monkeypatch.setenv(name, value)
+        monkeypatch.chdir(self.tree)
 
     def task(self) -> subprocess.CompletedProcess[str]:
         """Run the task body in the planted tree.
@@ -254,12 +242,14 @@ def test_a_pass_through_the_task(planted: Planted) -> None:
 
 
 def test_stele_missing_is_red(
-    planted: Planted, capfd: pytest.CaptureFixture[str]
+    planted: Planted, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """No stele on PATH: red by name, nothing run."""
     rel = planted.plant("ci.yml")
     planted.env["PATH"] = str(planted.tree)
-    status, out, err = planted.helper(CANON, rel, capfd=capfd)
+    planted.enter(monkeypatch)
+    status = caller_permissions.main([CANON, rel])
+    out, err = capfd.readouterr()
     same(status, caller_permissions.EXIT_RED)
     same(out, "")
     expected = ["lint:caller-permissions: stele missing from the belt"]
@@ -268,12 +258,14 @@ def test_stele_missing_is_red(
 
 
 def test_a_short_grant_is_red_with_the_fix(
-    planted: Planted, capfd: pytest.CaptureFixture[str]
+    planted: Planted, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A FAIL from stele: its findings, its verdict, then the fix."""
     rel = planted.plant("ci.yml")
     planted.answer(FAIL, 1)
-    status, out, err = planted.helper(CANON, rel, capfd=capfd)
+    planted.enter(monkeypatch)
+    status = caller_permissions.main([CANON, rel])
+    out, err = capfd.readouterr()
     same(status, caller_permissions.EXIT_RED)
     same(out.splitlines(), ["lint:caller-permissions: stele: FAIL"])
     expected = [
@@ -287,22 +279,28 @@ def test_a_short_grant_is_red_with_the_fix(
     same(planted.logged(), [CALL])
 
 
-def test_a_pass_is_quiet(planted: Planted, capfd: pytest.CaptureFixture[str]) -> None:
+def test_a_pass_is_quiet(
+    planted: Planted, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A PASS from stele: its report alone, exit 0."""
     rel = planted.plant("ci.yml")
-    status, out, err = planted.helper(CANON, rel, capfd=capfd)
+    planted.enter(monkeypatch)
+    status = caller_permissions.main([CANON, rel])
+    out, err = capfd.readouterr()
     same(status, 0, err)
     same(out.splitlines(), ["lint:caller-permissions: stele: PASS"])
 
 
 def test_a_bad_call_is_a_usage_error(
-    planted: Planted, capfd: pytest.CaptureFixture[str]
+    planted: Planted, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """No canon, an empty canon, or no workflow: exit 2 with the usage line."""
     usage = f"{TASK}: {caller_permissions.USAGE}"
     calls: list[list[str]] = [[], [CANON], ["", "ci.yml"]]
     for argv in calls:
-        status, _out, err = planted.helper(*argv, capfd=capfd)
+        planted.enter(monkeypatch)
+        status = caller_permissions.main([*argv])
+        _out, err = capfd.readouterr()
         same(status, caller_permissions.EXIT_ERROR)
         same(err.splitlines(), [usage])
     same(planted.logged(), [])

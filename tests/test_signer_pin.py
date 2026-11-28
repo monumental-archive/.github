@@ -212,34 +212,20 @@ class Branches:
             self.git("add", "--", name)
         return name
 
-    def helper(
-        self, *argv: str, capfd: pytest.CaptureFixture[str]
-    ) -> tuple[int, str, str]:
-        """Call the helper's main in the planted tree.
+    def enter(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Stand in the planted tree as the task's main meets it."""
+        for name, value in self.env.items():
+            monkeypatch.setenv(name, value)
+        monkeypatch.chdir(self.tree)
+
+    def signed(self, *files: str) -> list[str]:
+        """Name these workflows with the real signer.
 
         Returns:
-            The status and what it printed.
+            The arguments that check them.
 
         """
-        args = list(argv)
-        with pytest.MonkeyPatch.context() as patched:
-            for name, value in self.env.items():
-                patched.setenv(name, value)
-            patched.chdir(self.tree)
-            status = signer_pin.main(args)
-        out, err = capfd.readouterr()
-        return status, out, err
-
-    def check(
-        self, *files: str, capfd: pytest.CaptureFixture[str]
-    ) -> tuple[int, str, str]:
-        """Call the helper on these workflows with the real signer.
-
-        Returns:
-            The status and what it printed.
-
-        """
-        return self.helper(CANON_NAME, signer(), *files, capfd=capfd)
+        return [CANON_NAME, signer(), *files]
 
 
 @fixture
@@ -249,12 +235,16 @@ def branches(tmp_path: Path, env: support.Env) -> Branches:
 
 
 def test_agreeing_references_pass(
-    branches: Branches, capfd: pytest.CaptureFixture[str]
+    branches: Branches,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Every reference at one digest, across files: ok, the digest named."""
     one = branches.plant("a.yml", workflow())
     two = branches.plant("b.yaml", workflow(f"  x:\n    uses: {signer()}@{SHA}\n"))
-    status, out, err = branches.check(one, two, capfd=capfd)
+    branches.enter(monkeypatch)
+    status = signer_pin.main(branches.signed(one, two))
+    out, err = capfd.readouterr()
     assert status == 0, err
     want = [f"lint:signer-pin: all signer references agree on {SHA}"]
     assert want == out.splitlines()
@@ -262,24 +252,32 @@ def test_agreeing_references_pass(
 
 
 def test_no_reference_is_skipped_by_name(
-    branches: Branches, capfd: pytest.CaptureFixture[str]
+    branches: Branches,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """No signer reference, and its dots are literal: skipped."""
     near = signer().replace(".github", "xgithub", 1)
     rel = branches.plant("a.yml", f"x: {near}@{SHA}\n")
-    status, out, err = branches.check(rel, capfd=capfd)
+    branches.enter(monkeypatch)
+    status = signer_pin.main(branches.signed(rel))
+    out, err = capfd.readouterr()
     assert status == 0, err
     want = ["lint:signer-pin: no signer references, skipped"]
     assert want == out.splitlines()
 
 
 def test_two_digests_are_red(
-    branches: Branches, capfd: pytest.CaptureFixture[str]
+    branches: Branches,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Two digests, even on one line: each named once, sorted."""
     line = f"x: {signer()}@{SHA} {signer()}@{OTHER} {signer()}@{SHA}\n"
     rel = branches.plant("a.yml", line)
-    status, _out, err = branches.check(rel, capfd=capfd)
+    branches.enter(monkeypatch)
+    status = signer_pin.main(branches.signed(rel))
+    _out, err = capfd.readouterr()
     assert status == signer_pin.EXIT_RED
     want = [
         (
@@ -297,36 +295,48 @@ def test_two_digests_are_red(
 
 
 def test_a_literal_in_one_file_is_red_without_its_name(
-    branches: Branches, capfd: pytest.CaptureFixture[str]
+    branches: Branches,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """One file searched: grep -n's `line:text`, no file name."""
     rel = branches.plant("a.yml", f"a\n  run: v --signer-digest  {SHA}")
-    status, _out, err = branches.check(rel, capfd=capfd)
+    branches.enter(monkeypatch)
+    status = signer_pin.main(branches.signed(rel))
+    _out, err = capfd.readouterr()
     assert status == signer_pin.EXIT_RED
     found = f"2:  run: v --signer-digest  {SHA}"
     assert literal_message(found) == err.splitlines()
 
 
 def test_literals_in_two_files_are_red_with_their_names(
-    branches: Branches, capfd: pytest.CaptureFixture[str]
+    branches: Branches,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Two files searched: `file:line:text`, ahead of the pin file."""
     one = branches.plant("a.yml", workflow())
     two = branches.plant("b.yml", f"x: --signer-digest\t{OTHER}\n")
     branches.plant(signer_pin.PIN_FILE, f"{SHA}\n")
-    status, _out, err = branches.check(one, two, capfd=capfd)
+    branches.enter(monkeypatch)
+    status = signer_pin.main(branches.signed(one, two))
+    _out, err = capfd.readouterr()
     assert status == signer_pin.EXIT_RED
     found = f"{two}:1:x: --signer-digest\t{OTHER}"
     assert literal_message(found) == err.splitlines()
 
 
 def test_the_pin_file_is_red(
-    branches: Branches, capfd: pytest.CaptureFixture[str]
+    branches: Branches,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The pin file back, agreeing or not: red, the split explained."""
     rel = branches.plant("a.yml", workflow())
     branches.plant(signer_pin.PIN_FILE, f"{SHA}\n")
-    status, _out, err = branches.check(rel, capfd=capfd)
+    branches.enter(monkeypatch)
+    status = signer_pin.main(branches.signed(rel))
+    _out, err = capfd.readouterr()
     assert status == signer_pin.EXIT_RED
     want = [
         (
@@ -350,25 +360,33 @@ def test_the_pin_file_is_red(
 
 
 def test_an_untracked_pin_file_is_no_second_copy(
-    branches: Branches, capfd: pytest.CaptureFixture[str]
+    branches: Branches,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """On disk and untracked, the pin states nothing: green (#2013)."""
     rel = branches.plant("a.yml", workflow())
     branches.plant(signer_pin.PIN_FILE, f"{SHA}\n", track=False)
-    status, out, err = branches.check(rel, capfd=capfd)
+    branches.enter(monkeypatch)
+    status = signer_pin.main(branches.signed(rel))
+    out, err = capfd.readouterr()
     assert status == 0, err
     want = [f"lint:signer-pin: all signer references agree on {SHA}"]
     assert want == out.splitlines()
 
 
 def test_readers_are_red_and_named(
-    branches: Branches, capfd: pytest.CaptureFixture[str]
+    branches: Branches,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Readers on non-comment lines named; a comment is not a reader."""
     one = branches.plant("a.yml", workflow("      - run: cat security/signer.pin\n"))
     prose = branches.plant("b.yml", workflow("# security/signer.pin is gone\n"))
     two = branches.plant("c.yml", "x: security/signer.pin\n")
-    status, _out, err = branches.check(one, prose, two, capfd=capfd)
+    branches.enter(monkeypatch)
+    status = signer_pin.main(branches.signed(one, prose, two))
+    _out, err = capfd.readouterr()
     assert status == signer_pin.EXIT_RED
     want = [
         (
@@ -381,16 +399,24 @@ def test_readers_are_red_and_named(
 
 
 def test_not_utf8_is_an_error(
-    branches: Branches, capfd: pytest.CaptureFixture[str]
+    branches: Branches,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A workflow that is not UTF-8 is refused by name, exit 2."""
     rel = branches.plant("bad.yml", b"on: \xff\n")
-    status, _out, err = branches.check(rel, capfd=capfd)
+    branches.enter(monkeypatch)
+    status = signer_pin.main(branches.signed(rel))
+    _out, err = capfd.readouterr()
     assert status == signer_pin.EXIT_ERROR
     assert err.startswith(f"lint:signer-pin: {rel}: cannot be read as UTF-8:"), err
 
 
-def test_usage_errors(branches: Branches, capfd: pytest.CaptureFixture[str]) -> None:
+def test_usage_errors(
+    branches: Branches,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """No workflow, an empty owner, repo or signer: the usage line."""
     usage = [
         (
@@ -406,6 +432,8 @@ def test_usage_errors(branches: Branches, capfd: pytest.CaptureFixture[str]) -> 
         "no signer": [CANON_NAME, "", "a.yml"],
     }
     for argv in rows.values():
-        status, _out, err = branches.helper(*argv, capfd=capfd)
+        branches.enter(monkeypatch)
+        status = signer_pin.main([*argv])
+        _out, err = capfd.readouterr()
         assert status == signer_pin.EXIT_ERROR
         assert usage == err.splitlines()

@@ -108,23 +108,11 @@ class Pinned:
             path.write_text(text, encoding="utf-8")
         return rel
 
-    def helper(
-        self, *files: str, capfd: pytest.CaptureFixture[str]
-    ) -> tuple[int, str, str]:
-        """Call the helper's main in the planted tree.
-
-        Returns:
-            The status and what it printed.
-
-        """
-        argv = list(files)
-        with pytest.MonkeyPatch.context() as patched:
-            for name, value in self.env.items():
-                patched.setenv(name, value)
-            patched.chdir(self.tree)
-            status = installer_pinned.main(argv)
-        out, err = capfd.readouterr()
-        return status, out, err
+    def enter(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Stand in the planted tree as the task's main meets it."""
+        for name, value in self.env.items():
+            monkeypatch.setenv(name, value)
+        monkeypatch.chdir(self.tree)
 
     def task(self, *tracked: str) -> subprocess.CompletedProcess[str]:
         """Run the task body in the planted tree, git tracking some files.
@@ -174,7 +162,7 @@ def test_shortfall_is_red_through_the_task(pinned: Pinned) -> None:
 
 
 def test_holding_workflows_are_ok(
-    pinned: Pinned, capfd: pytest.CaptureFixture[str]
+    pinned: Pinned, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """No step, a pin per step, spare pins, a step in a comment: ok."""
     rows = {
@@ -187,14 +175,16 @@ def test_holding_workflows_are_ok(
     }
     for text in rows.values():
         rel = pinned.plant("wf.yml", text)
-        status, out, err = pinned.helper(rel, capfd=capfd)
+        pinned.enter(monkeypatch)
+        status = installer_pinned.main([rel])
+        out, err = capfd.readouterr()
         same(status, 0, err)
         same(out.splitlines(), OK)
         same(err, "")
 
 
 def test_shortfalls_are_red_with_counts(
-    pinned: Pinned, capfd: pytest.CaptureFixture[str]
+    pinned: Pinned, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """No pin, too few, a pin in prose or short: each named, in order."""
     bare = pinned.plant("bare.yml", STEP)
@@ -202,7 +192,9 @@ def test_shortfalls_are_red_with_counts(
     prose = pinned.plant("prose.yml", STEP + "  # version: 2026.11.3\n")
     short = pinned.plant("short.yml", STEP + "version: 2026.1\n")
     clean = pinned.plant("clean.yml", STEP + PIN)
-    status, out, err = pinned.helper(bare, clean, few, prose, short, capfd=capfd)
+    pinned.enter(monkeypatch)
+    status = installer_pinned.main([bare, clean, few, prose, short])
+    out, err = capfd.readouterr()
     same(status, installer_pinned.EXIT_RED)
     want = red(
         f"{bare}(1 steps, 0 version pins)",
@@ -215,20 +207,24 @@ def test_shortfalls_are_red_with_counts(
 
 
 def test_not_utf8_is_an_error(
-    pinned: Pinned, capfd: pytest.CaptureFixture[str]
+    pinned: Pinned, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A workflow that is not UTF-8 is refused by name, exit 2."""
     rel = pinned.plant("bad.yml", b"on: \xff\n")
-    status, _out, err = pinned.helper(rel, capfd=capfd)
+    pinned.enter(monkeypatch)
+    status = installer_pinned.main([rel])
+    _out, err = capfd.readouterr()
     same(status, installer_pinned.EXIT_ERROR)
     assert err.startswith(f"{TASK}: {rel}: cannot be read as UTF-8:"), err
 
 
 def test_no_workflows_is_a_usage_error(
-    pinned: Pinned, capfd: pytest.CaptureFixture[str]
+    pinned: Pinned, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """No workflow named: exit 2 with the usage line."""
-    status, _out, err = pinned.helper(capfd=capfd)
+    pinned.enter(monkeypatch)
+    status = installer_pinned.main([])
+    _out, err = capfd.readouterr()
     same(status, installer_pinned.EXIT_ERROR)
     usage = f"{TASK}: usage: installer_pinned.py WORKFLOW..."
     same(err.splitlines(), [usage])

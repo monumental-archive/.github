@@ -151,23 +151,11 @@ class Lint:
             path.write_text(text, encoding="utf-8")
         return rel
 
-    def helper(
-        self, *argv: str, capfd: pytest.CaptureFixture[str]
-    ) -> tuple[int, str, str]:
-        """Call the helper's main in the planted tree.
-
-        Returns:
-            The status and what it printed.
-
-        """
-        args = list(argv)
-        with pytest.MonkeyPatch.context() as patched:
-            for name, value in self.env.items():
-                patched.setenv(name, value)
-            patched.chdir(self.tree)
-            status = gate_stub.main(args)
-        out, err = capfd.readouterr()
-        return status, out, err
+    def enter(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Stand in the planted tree as the task's main meets it."""
+        for name, value in self.env.items():
+            monkeypatch.setenv(name, value)
+        monkeypatch.chdir(self.tree)
 
 
 @fixture
@@ -193,7 +181,7 @@ def test_no_workflows_is_skipped_by_name(lint: Lint, track: support.Track) -> No
 
 
 def test_a_conforming_caller_is_ok(
-    lint: Lint, capfd: pytest.CaptureFixture[str]
+    lint: Lint, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Every requirement met, `edited` as a list item too: ok."""
     listed = GOOD.replace(
@@ -202,14 +190,16 @@ def test_a_conforming_caller_is_ok(
     )
     one = lint.plant("gate.yml", GOOD)
     two = lint.plant("listed.yaml", listed)
-    status, out, err = lint.helper(CANON, one, two, capfd=capfd)
+    lint.enter(monkeypatch)
+    status = gate_stub.main([CANON, one, two])
+    out, err = capfd.readouterr()
     same(status, 0, err)
     same(out.splitlines(), OK)
     same(err, "")
 
 
 def test_not_a_gate_caller_is_not_held(
-    lint: Lint, capfd: pytest.CaptureFixture[str]
+    lint: Lint, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """No ci.yml call, another repository's, or no pull_request: not held."""
     rows = {
@@ -218,44 +208,52 @@ def test_not_a_gate_caller_is_not_held(
         "no pull_request": "on:\n  push:\n" + JOB,
     }
     names = [lint.plant(f"{i}.yml", text) for i, text in enumerate(rows.values())]
-    status, out, err = lint.helper(CANON, *names, capfd=capfd)
+    lint.enter(monkeypatch)
+    status = gate_stub.main([CANON, *names])
+    out, err = capfd.readouterr()
     same(status, 0, err)
     same(out.splitlines(), OK)
 
 
 def test_edited_only_in_a_comment_is_red(
-    lint: Lint, capfd: pytest.CaptureFixture[str]
+    lint: Lint, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """`edited` after a `#` on the types line is not the type."""
     rel = lint.plant(
         "gate.yml",
         GOOD.replace("reopened, edited]", "reopened] # edited"),
     )
-    status, out, err = lint.helper(CANON, rel, capfd=capfd)
+    lint.enter(monkeypatch)
+    status = gate_stub.main([CANON, rel])
+    out, err = capfd.readouterr()
     same(status, gate_stub.EXIT_RED)
     same(err.splitlines(), unedited(f" {rel}"))
     same(out, "")
 
 
 def test_an_unindented_merge_group_is_red(
-    lint: Lint, capfd: pytest.CaptureFixture[str]
+    lint: Lint, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """`merge_group:` at column 0 is not a trigger under `on:`."""
     rel = lint.plant("gate.yml", GOOD.replace("  merge_group:", "merge_group:"))
-    status, _out, err = lint.helper(CANON, rel, capfd=capfd)
+    lint.enter(monkeypatch)
+    status = gate_stub.main([CANON, rel])
+    _out, err = capfd.readouterr()
     same(status, gate_stub.EXIT_RED)
     same(err.splitlines(), unqueued(f" {rel}"))
 
 
 def test_all_three_unmet_name_every_caller(
-    lint: Lint, capfd: pytest.CaptureFixture[str]
+    lint: Lint, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A bare caller in the canon (`./`) and one elsewhere: three messages."""
     own = "jobs:\n  ci:\n    uses: ./.github/workflows/ci.yaml\n"
     local = lint.plant("self.yml", "on:\n  pull_request:\n" + own)
     bare = lint.plant("bare.yml", "on:\n  pull_request:\n" + JOB)
     clean = lint.plant("clean.yml", GOOD)
-    status, _out, err = lint.helper(CANON, local, clean, bare, capfd=capfd)
+    lint.enter(monkeypatch)
+    status = gate_stub.main([CANON, local, clean, bare])
+    _out, err = capfd.readouterr()
     same(status, gate_stub.EXIT_RED)
     files = f" {local} {bare}"
     expected = [*unedited(files), *unqueued(files), *ungrouped(files)]
@@ -263,7 +261,7 @@ def test_all_three_unmet_name_every_caller(
 
 
 def test_a_cancel_line_compares_without_its_comment(
-    lint: Lint, capfd: pytest.CaptureFixture[str]
+    lint: Lint, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Indent, a trailing comment and trailing blanks are dropped first."""
     commented = GOOD.replace(
@@ -271,36 +269,46 @@ def test_a_cancel_line_compares_without_its_comment(
         f"\t cancel-in-progress: {gate_stub_fix.CANCEL} \t# why  \n",
     )
     rel = lint.plant("gate.yml", commented)
-    status, out, err = lint.helper(CANON, rel, capfd=capfd)
+    lint.enter(monkeypatch)
+    status = gate_stub.main([CANON, rel])
+    out, err = capfd.readouterr()
     same(status, 0, err)
     same(out.splitlines(), OK)
 
 
-def test_not_utf8_is_an_error(lint: Lint, capfd: pytest.CaptureFixture[str]) -> None:
+def test_not_utf8_is_an_error(
+    lint: Lint, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A workflow that is not UTF-8 is refused by name, exit 2."""
     rel = lint.plant("bad.yml", b"on: \xff\n")
-    status, _out, err = lint.helper(CANON, rel, capfd=capfd)
+    lint.enter(monkeypatch)
+    status = gate_stub.main([CANON, rel])
+    _out, err = capfd.readouterr()
     same(status, gate_stub.EXIT_ERROR)
     assert err.startswith(f"lint:gate-stub: {rel}: cannot be read as UTF-8:"), err
 
 
 def test_missing_file_is_an_error(
-    lint: Lint, capfd: pytest.CaptureFixture[str]
+    lint: Lint, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A named workflow that does not exist is refused by name, exit 2."""
     rel = ".github/workflows/gone.yml"
-    status, _out, err = lint.helper(CANON, rel, capfd=capfd)
+    lint.enter(monkeypatch)
+    status = gate_stub.main([CANON, rel])
+    _out, err = capfd.readouterr()
     same(status, gate_stub.EXIT_ERROR)
     assert err.startswith(f"lint:gate-stub: {rel}: cannot be read as UTF-8:"), err
 
 
 def test_a_bad_call_is_a_usage_error(
-    lint: Lint, capfd: pytest.CaptureFixture[str]
+    lint: Lint, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """No canon, half a canon, or no workflow: exit 2 with the usage line."""
     usage = "lint:gate-stub: usage: belt gate-stub OWNER/REPO WORKFLOW..."
     calls: list[list[str]] = [[], [CANON], ["/repo", "x"], ["owner/", "x"]]
     for argv in calls:
-        status, _out, err = lint.helper(*argv, capfd=capfd)
+        lint.enter(monkeypatch)
+        status = gate_stub.main([*argv])
+        _out, err = capfd.readouterr()
         same(status, gate_stub.EXIT_ERROR)
         same(err.splitlines(), [usage])
