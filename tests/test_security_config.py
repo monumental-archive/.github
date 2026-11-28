@@ -468,44 +468,43 @@ def test_live_answers(endpoint: str, body: object, message: str) -> None:
     assert str(cm.value) == message
 
 
-def test_gh_reads_strictly_and_names_the_endpoint() -> None:
+def test_gh_reads_strictly_and_names_the_endpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A duplicate key in gh's output is refused with the endpoint."""
     done = subprocess.CompletedProcess([], 0, stdout='{"a": 1, "a": 2}', stderr="")
-    with (
-        pytest.MonkeyPatch.context() as patched,
-        pytest.raises(decoded.UndecodableError) as cm,
-    ):
-        patched.setattr(subprocess, "run", lambda *_args, **_kwargs: done)
+    with pytest.raises(decoded.UndecodableError) as cm:
+        monkeypatch.setattr(subprocess, "run", lambda *_args, **_kwargs: done)
         sc.gh_fetch("x/y")
     assert str(cm.value) == 'x/y: duplicate key "a"'
     pages = subprocess.CompletedProcess([], 0, stdout="[[1], [2]]", stderr="")
-    with pytest.MonkeyPatch.context() as patched:
-        patched.setattr(subprocess, "run", lambda *_args, **_kwargs: pages)
-        assert sc.gh_fetch("x/y", paginate=True) == (200, [1, 2])
+    monkeypatch.setattr(subprocess, "run", lambda *_args, **_kwargs: pages)
+    assert sc.gh_fetch("x/y", paginate=True) == (200, [1, 2])
 
 
-def test_main_reports_a_refusal_as_an_unreadable_input() -> None:
+def test_main_reports_a_refusal_as_an_unreadable_input(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """The refusal exits as the audit's other input errors exit."""
     with tempfile.TemporaryDirectory() as tmp:
         bad = Path(tmp) / "roster.json"
         bad.write_text('{"population": {"repositories": [{}]}}', encoding="utf-8")
-        err = io.StringIO()
-        with redirect_stderr(err):
-            rc = sc.main(
-                [
-                    "--owner",
-                    OWNER,
-                    "--record",
-                    str(TREE / "security" / "org-default.json"),
-                    "--private-record",
-                    str(TREE / "security" / "org-private.json"),
-                    "--roster",
-                    str(bad),
-                ],
-                Live(),
-            )
+        rc = sc.main(
+            [
+                "--owner",
+                OWNER,
+                "--record",
+                str(TREE / "security" / "org-default.json"),
+                "--private-record",
+                str(TREE / "security" / "org-private.json"),
+                "--roster",
+                str(bad),
+            ],
+            Live(),
+        )
+        err = capfd.readouterr().err
     assert rc == 1
-    assert err.getvalue() == (
+    assert err == (
         "audit:security-config: cannot read an input: "
         "population.repositories[0].repo is not a string\n"
     )

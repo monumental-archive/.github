@@ -605,21 +605,15 @@ def test_fields_of_the_wrong_type_read_as_absent() -> None:
     assert len(out.splitlines()) == 1
 
 
-def test_no_standard_input_is_red() -> None:
+def test_no_standard_input_is_red(
+    monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """A process started with no stdin is refused by name, not raised."""
-    err = io.StringIO()
-    with (
-        pytest.MonkeyPatch.context() as patched,
-        redirect_stderr(err),
-        redirect_stdout(io.StringIO()),
-    ):
-        patched.setattr("sys.stdin", None)
-        status = gate_surface.main([])
+    monkeypatch.setattr("sys.stdin", None)
+    status = gate_surface.main([])
+    err = capfd.readouterr().err
     assert status == 1
-    assert (
-        err.getvalue()
-        == f"{TASK}: no standard input: the process was started without one\n"
-    )
+    assert err == f"{TASK}: no standard input: the process was started without one\n"
 
 
 def test_metadata_that_is_not_json_is_red() -> None:

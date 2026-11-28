@@ -12,7 +12,6 @@ string, is clean. Those rows are the before/after test: before the
 helper, `lint:biome` was green on both red plants.
 """
 
-import contextlib
 import io
 import re
 import subprocess
@@ -276,21 +275,20 @@ def test_a_file_that_is_not_utf8_is_refused_by_name(
     assert done.stderr == "lint:biome: a.ts: not UTF-8\n"
 
 
-def test_main_in_process() -> None:
+def test_main_in_process(capfd: pytest.CaptureFixture[str]) -> None:
     """`main` read in-process, so its own lines are measured."""
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "a.ts"
         path.write_text("// biome-ignore-end x\n")
-        err = io.StringIO()
         stdin = sys.stdin
         sys.stdin = io.StringIO(f"{path}\0")
         try:
-            with contextlib.redirect_stderr(err):
-                status = bsup.main([])
+            status = bsup.main([])
+            err = capfd.readouterr().err
         finally:
             sys.stdin = stdin
     assert status == 1
-    assert f"  {path}:1: biome-ignore-end\n" in err.getvalue()
+    assert f"  {path}:1: biome-ignore-end\n" in err
 
 
 PACKAGE = '{\n  "name": "fixture",\n  "private": true,\n  "type": "module"\n}\n'

@@ -10,8 +10,6 @@ merge (the TypeScript and Rust legs) to its union, its totals to
 istanbul's own rounding, and each refusal to its message.
 """
 
-import contextlib
-import io
 import os
 import shutil
 import subprocess
@@ -186,7 +184,9 @@ def test_four_rows_merge_to_one_runners_figure(measured: Measured) -> None:
     assert split[1] < 100.0  # `h(0)` is never run: a branch is missed
 
 
-def test_one_row_merges_as_one_row(measured: Measured) -> None:
+def test_one_row_merges_as_one_row(
+    measured: Measured, capfd: pytest.CaptureFixture[str]
+) -> None:
     """A rows directory holding one `coverage-run-<n>/` is one row.
 
     The layout a lone match downloads to (#2178): the artifact
@@ -198,11 +198,10 @@ def test_one_row_merges_as_one_row(measured: Measured) -> None:
     rows.mkdir()
     shutil.move(measured.run_dir, rows / "coverage-run-6")
     merged = measured.base / "merged"
-    out = io.StringIO()
-    with contextlib.redirect_stdout(out):
-        code = coverage_merge.main([str(rows), str(merged)])
+    code = coverage_merge.main([str(rows), str(merged)])
+    out = capfd.readouterr().out
     assert code == 0
-    assert f"coverage_merge: 1 row(s) gathered into {merged}\n" == out.getvalue()
+    assert f"coverage_merge: 1 row(s) gathered into {merged}\n" == out
     shutil.move(merged, measured.run_dir)
     split = measured.figure(measured.run_dir)
     shutil.rmtree(measured.run_dir)

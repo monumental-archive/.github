@@ -358,7 +358,9 @@ def test_a_fuzz_line_and_its_record_are_refused_by_name(fuzz_case: FuzzCase) -> 
 
 
 def test_adopt_writes_no_fuzz_line(
-    fuzz_case: FuzzCase, capfd: pytest.CaptureFixture[str]
+    fuzz_case: FuzzCase,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """coverage:adopt's measurement and writer, over fuzz targets: no `fuzz-`."""
     fuzz_case.both()
@@ -366,14 +368,13 @@ def test_adopt_writes_no_fuzz_line(
     assert measured.returncode == 0, measured.stderr
     assert measured.stdout == "go 93.0\n"
     capfd.readouterr()
-    with pytest.MonkeyPatch.context() as patched:
-        for key, value in fuzz_case.env.items():
-            patched.setenv(key, value)
-        patched.delenv("MISE_TASK_NAME", raising=False)
-        patched.chdir(fuzz_case.tree)
-        patched.setattr(sys, "stdin", io.StringIO(measured.stdout))
-        patched.setattr(sys, "argv", ["coverage-floor"])
-        status = cf.main(["write", "--provenance", "coverage:adopt", "--adopt"])
+    for key, value in fuzz_case.env.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.delenv("MISE_TASK_NAME", raising=False)
+    monkeypatch.chdir(fuzz_case.tree)
+    monkeypatch.setattr(sys, "stdin", io.StringIO(measured.stdout))
+    monkeypatch.setattr(sys, "argv", ["coverage-floor"])
+    status = cf.main(["write", "--provenance", "coverage:adopt", "--adopt"])
     out, err = capfd.readouterr()
     assert status == 0, err
     assert out == "coverage-floor: adopted .coverage-floor: go 90 (measured 93.0)\n"

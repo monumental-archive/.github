@@ -800,16 +800,15 @@ def test_a_last_line_without_a_newline_is_read(
 
 # A lone surrogate is recorded as its backslash escape (#1984).
 def test_a_lone_surrogate_is_recorded_as_printed(
-    capfd: pytest.CaptureFixture[str],
+    capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Exit 0, one record json.loads reads, the stderr line the same text."""
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         file = root / "out" / "job.jsonl"
-        with pytest.MonkeyPatch.context() as patched:
-            patched.setenv("MISE_TASK_NAME", "t")
-            patched.setenv("ORG_FINDINGS", str(file))
-            findings.finding(os.fsdecode(b"bad\xffname"), "x\ud800y")
+        monkeypatch.setenv("MISE_TASK_NAME", "t")
+        monkeypatch.setenv("ORG_FINDINGS", str(file))
+        findings.finding(os.fsdecode(b"bad\xffname"), "x\ud800y")
         done = Ran(0, *capfd.readouterr())
         assert done.returncode == 0, done.stderr
         lines = file.read_text(encoding="utf-8").splitlines()

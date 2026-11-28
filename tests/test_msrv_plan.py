@@ -588,7 +588,9 @@ def test_a_declaration_this_cannot_compare_is_red() -> None:
     assert "cannot compare" in err
 
 
-def test_a_root_is_the_subject_of_each_finding_about_its_members() -> None:
+def test_a_root_is_the_subject_of_each_finding_about_its_members(
+    monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """#2011: the rule, the pins, the unreadable and the failed name it."""
     fuzz = "fuzz/Cargo.toml"
     rows = {
@@ -610,22 +612,16 @@ def test_a_root_is_the_subject_of_each_finding_about_its_members() -> None:
         path = Path(tempfile.mkdtemp()) / "toolchains.json"
         path.write_text(json.dumps(listing), encoding="utf-8")
         argv = ["--toolchains", str(path), "--floor", floor, "--root", fuzz]
-        err = io.StringIO()
-        with (
-            pytest.MonkeyPatch.context() as patched,
-            redirect_stdout(io.StringIO()),
-            redirect_stderr(err),
-        ):
-            patched.setattr("sys.stdin", io.StringIO(json.dumps(doc)))
-            status = msrv_plan.main(argv)
+        monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(doc)))
+        status = msrv_plan.main(argv)
+        err = capfd.readouterr().err
         assert status == 1
-        said_err = err.getvalue()
+        said_err = err
         assert said_err.startswith(f"{TASK}: {fuzz}: {said}"), said_err
-    err_io = io.StringIO()
-    with redirect_stderr(err_io):
-        status = msrv_plan.main(["--failed", "1.85.0", "a@1", "--root", fuzz])
+    status = msrv_plan.main(["--failed", "1.85.0", "a@1", "--root", fuzz])
+    err_io = capfd.readouterr().err
     assert status == 1
-    assert err_io.getvalue().startswith(f"{TASK}: {fuzz}: a@1 failed to compile")
+    assert err_io.startswith(f"{TASK}: {fuzz}: a@1 failed to compile")
 
 
 def test_a_document_of_the_wrong_shape_is_red_by_where() -> None:
@@ -988,12 +984,13 @@ def test_promise_at_the_floor_passes() -> None:
     assert out.strip() == "check\t1.85.0\tdefault\tedtf-core@1.3.5"
 
 
-def test_compile_failure_at_the_derived_number_names_the_rule() -> None:
+def test_compile_failure_at_the_derived_number_names_the_rule(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """Item 4: the red is the rule working, and the remedy says so."""
-    err = io.StringIO()
-    with redirect_stderr(err):
-        status = msrv_plan.main(["--failed", "1.85.0", "edtf-core@1.3.5"])
-    said = err.getvalue()
+    status = msrv_plan.main(["--failed", "1.85.0", "edtf-core@1.3.5"])
+    err = capfd.readouterr().err
+    said = err
     assert status == 1
     assert "edtf-core@1.3.5 failed to compile at 1.85.0," in said
     assert "the rust-version the rule derives" in said
@@ -1107,5 +1104,5 @@ def test_an_unreadable_floor_file_is_red_and_named() -> None:
 
 def test_planning_without_the_floor_is_refused() -> None:
     """The rule has no opt-out, so neither has the command line."""
-    with redirect_stderr(io.StringIO()), pytest.raises(SystemExit):
+    with pytest.raises(SystemExit):
         msrv_plan.main(["--toolchains", "x"])

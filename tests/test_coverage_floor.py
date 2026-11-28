@@ -1762,6 +1762,7 @@ def test_the_producers_stdout_is_the_helpers_input(
     status: int,
     err: str,
     capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """pgrx-plan.sh's literal stdout, given to `planned --majors-json`."""
     plan = the_plan_feeds_the_helper.run_in_tree([
@@ -1773,14 +1774,13 @@ def test_the_producers_stdout_is_the_helpers_input(
     assert plan.stdout == '["15","16","17","18"]\n'
     the_plan_feeds_the_helper.floor(legs)
     capfd.readouterr()
-    with pytest.MonkeyPatch.context() as patched:
-        for key, value in the_plan_feeds_the_helper.env.items():
-            patched.setenv(key, value)
-        # ci.yml's plan step runs under no task: the command names it.
-        patched.delenv("MISE_TASK_NAME", raising=False)
-        patched.chdir(the_plan_feeds_the_helper.tree)
-        patched.setattr(sys, "argv", ["coverage-floor"])
-        said = cf.main(["planned", "--majors-json", plan.stdout])
+    for key, value in the_plan_feeds_the_helper.env.items():
+        monkeypatch.setenv(key, value)
+    # ci.yml's plan step runs under no task: the command names it.
+    monkeypatch.delenv("MISE_TASK_NAME", raising=False)
+    monkeypatch.chdir(the_plan_feeds_the_helper.tree)
+    monkeypatch.setattr(sys, "argv", ["coverage-floor"])
+    said = cf.main(["planned", "--majors-json", plan.stdout])
     out, wrote = capfd.readouterr()
     assert (status, "", err) == (said, out, wrote)
 

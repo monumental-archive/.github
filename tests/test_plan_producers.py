@@ -16,10 +16,8 @@ corresponding check removed and observed to pass, which is the failure it
 is written to catch.
 """
 
-import io
 import json
 import tempfile
-from contextlib import redirect_stderr
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -392,13 +390,14 @@ def test_a_policy_with_no_planned_obligations_is_nothing_to_join() -> None:
     assert pp.obligations(pp.read_policy(empty)) == set[tuple[str, str]]()
 
 
-def test_an_unreadable_policy_is_this_checks_own_input() -> None:
+def test_an_unreadable_policy_is_this_checks_own_input(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """A policy that will not decode stops the check, loudly."""
     missing = REPO / "slsa" / "no-such-policy.json"
-    err = io.StringIO()
-    with redirect_stderr(err):
-        assert pp.main(["--policy", str(missing)]) == 1
-    assert "does not read as JSON" in err.getvalue()
+    assert pp.main(["--policy", str(missing)]) == 1
+    err = capfd.readouterr().err
+    assert "does not read as JSON" in err
 
 
 # Every field the check reads, wrongly shaped, and its refusal.
@@ -456,26 +455,25 @@ def test_the_fixture_decodes() -> None:
     )
 
 
-def test_main_refuses_a_wrongly_shaped_policy() -> None:
+def test_main_refuses_a_wrongly_shaped_policy(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """The refusal reaches the exit, by file and field."""
     with tempfile.TemporaryDirectory() as tmp:
         bad = Path(tmp) / "policy.json"
         bad.write_text('{"evidence": {"classes": []}}', encoding="utf-8")
-        err = io.StringIO()
-        with redirect_stderr(err):
-            assert pp.main(["--policy", str(bad)]) == 1
-    assert err.getvalue() == f"{TASK}: {bad}: evidence.classes is not an object\n"
+        assert pp.main(["--policy", str(bad)]) == 1
+        err = capfd.readouterr().err
+    assert err == f"{TASK}: {bad}: evidence.classes is not an object\n"
 
 
-def test_main_refuses_a_duplicate_key_as_json() -> None:
+def test_main_refuses_a_duplicate_key_as_json(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """The strict loader's refusal keeps the check's own words."""
     with tempfile.TemporaryDirectory() as tmp:
         bad = Path(tmp) / "policy.json"
         bad.write_text('{"evidence": {}, "evidence": {}}', encoding="utf-8")
-        err = io.StringIO()
-        with redirect_stderr(err):
-            assert pp.main(["--policy", str(bad)]) == 1
-    assert (
-        err.getvalue()
-        == f'{TASK}: {bad} does not read as JSON\n  duplicate key "evidence"\n'
-    )
+        assert pp.main(["--policy", str(bad)]) == 1
+        err = capfd.readouterr().err
+    assert err == f'{TASK}: {bad} does not read as JSON\n  duplicate key "evidence"\n'

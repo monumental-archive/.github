@@ -2014,7 +2014,10 @@ def test_two_databases_merge_to_one_database_running_both(
 
 
 def test_two_databases_leave_the_branch_floor_untouched(
-    server: Server, tmp_path: Path, capfd: pytest.CaptureFixture[str]
+    server: Server,
+    tmp_path: Path,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Not held, by name and count; coverage:check changes no floor line."""
     read = totals(server, two_databases(server, tmp_path))
@@ -2033,12 +2036,11 @@ def test_two_databases_leave_the_branch_floor_untouched(
         "v1.0.0",
     )
     floor.write_text(text, encoding="utf-8")
-    with pytest.MonkeyPatch.context() as patched:
-        for name, value in server.env.items():
-            patched.setenv(name, value)
-        patched.chdir(tree)
-        patched.setattr(sys, "stdin", io.StringIO(read.stdout))
-        status = cf.main(["hold", "--label", "coverage:check", "--job", "gate"])
+    for name, value in server.env.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.chdir(tree)
+    monkeypatch.setattr(sys, "stdin", io.StringIO(read.stdout))
+    status = cf.main(["hold", "--label", "coverage:check", "--job", "gate"])
     out, err = capfd.readouterr()
     held = Done(status, out, err)
     assert held.returncode == 0, held.stderr

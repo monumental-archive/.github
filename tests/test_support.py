@@ -1034,7 +1034,10 @@ def test_a_stub_never_writes_the_canon(belt_state: Belt, plant: support.Plant) -
 
 
 def test_a_file_added_to_the_belt_appears_unasked(
-    belt_state: Belt, belt: support.Belt, env: support.Env
+    belt_state: Belt,
+    belt: support.Belt,
+    env: support.Env,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A new helper, or a new sibling a script starts, needs no row change."""
     scratch = belt_state.tmp / "canon"
@@ -1042,13 +1045,12 @@ def test_a_file_added_to_the_belt_appears_unasked(
     (scratch / "mise" / "a.py").write_text("x\n", encoding="utf-8")
     git(scratch, "init", "-q", env=env)
     git(scratch, "add", ".", env=env)
-    with pytest.MonkeyPatch.context() as patched:
-        patched.setattr(support, "CANON", scratch)
-        before = belt(belt_state.tmp / "before")
-        (scratch / "mise" / "sub").mkdir()
-        (scratch / "mise" / "sub" / "b.sh").write_text("x\n", encoding="utf-8")
-        git(scratch, "add", ".", env=env)
-        after = belt(belt_state.tmp / "after")
+    monkeypatch.setattr(support, "CANON", scratch)
+    before = belt(belt_state.tmp / "before")
+    (scratch / "mise" / "sub").mkdir()
+    (scratch / "mise" / "sub" / "b.sh").write_text("x\n", encoding="utf-8")
+    git(scratch, "add", ".", env=env)
+    after = belt(belt_state.tmp / "after")
     found: list[str] = sorted(str(p.relative_to(before)) for p in before.rglob("*.*"))
     grown: list[str] = sorted(str(p.relative_to(after)) for p in after.rglob("*.*"))
     once: list[str] = ["a.py"]

@@ -577,21 +577,19 @@ def test_an_offline_degradation_is_a_finding(records_state: Records) -> None:
     assert want == records_state.records()
 
 
-def test_no_zizmor_is_refused_by_name(records_state: Records) -> None:
+def test_no_zizmor_is_refused_by_name(
+    records_state: Records,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """No zizmor on PATH: refused by name, 1, its one record (#1934)."""
-    with pytest.MonkeyPatch.context() as patched:
-        patched.setattr(signer, "ZIZMOR", "/nonexistent/zizmor")
-        out, err = io.StringIO(), io.StringIO()
-        with (
-            pytest.MonkeyPatch.context() as patched,
-            redirect_stdout(out),
-            redirect_stderr(err),
-        ):
-            for name, value in records_state.env.items():
-                patched.setenv(name, value)
-            status = signer.main(["--signer-workflow", SIGNER_WORKFLOW])
+    monkeypatch.setattr(signer, "ZIZMOR", "/nonexistent/zizmor")
+    for name, value in records_state.env.items():
+        monkeypatch.setenv(name, value)
+    status = signer.main(["--signer-workflow", SIGNER_WORKFLOW])
+    out, err = capfd.readouterr()
     assert status == 1
-    assert f"{TASK}: zizmor is not on PATH" in err.getvalue()
+    assert f"{TASK}: zizmor is not on PATH" in err
     want: list[object] = [
         {
             "v": 1,

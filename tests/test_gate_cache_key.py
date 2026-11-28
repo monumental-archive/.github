@@ -11,17 +11,13 @@ cargo caches' compiler digest, read from `rustc -vV`; #2045 the digest
 of every other input that decides what the cargo caches hold.
 """
 
-import contextlib
 import hashlib
-import io
 import os
 import platform
 import re
 import stat
 import subprocess
 import sys
-import tempfile
-from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
 import pytest
@@ -186,32 +182,23 @@ run = "{}"
 """
 
 
-def run(canon: Path) -> dict[str, str]:
-    """Run the helper over a canon tree as the workflow does.
+@fixture
+def runner(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    """Stand in the gate's runner: its environment, its machine, its outputs.
 
     Returns:
-        The outputs it wrote.
-
-    Raises:
-        AssertionError: the helper exited non-zero.
+        The GITHUB_OUTPUT file the workflow reads.
 
     """
-    with tempfile.TemporaryDirectory() as tmp:
-        out = Path(tmp) / "out"
-        env = {**RUNNER, "GITHUB_OUTPUT": str(out)}
-        with pytest.MonkeyPatch.context() as patched, redirect_stdout(io.StringIO()):
-            for name in list(os.environ):
-                patched.delenv(name)
-            for name, value in env.items():
-                patched.setenv(name, value)
-            patched.setattr(platform, "system", lambda *_args, **_kwargs: "Linux")
-            patched.setattr(platform, "machine", lambda *_args, **_kwargs: "x86_64")
-            code = gate_cache_key.main(["tool", "mise-v2", str(canon)], now=WHEN)
-        if code != 0:
-            msg = f"gate-cache-key exited {code}"
-            raise AssertionError(msg)
-        lines = out.read_text("utf-8").splitlines()
-    return dict(line.split("=", 1) for line in lines)
+    out = tmp_path / "out"
+    out.touch()
+    for name in list(os.environ):
+        monkeypatch.delenv(name)
+    for name, value in {**RUNNER, "GITHUB_OUTPUT": str(out)}.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setattr(platform, "system", lambda *_args, **_kwargs: "Linux")
+    monkeypatch.setattr(platform, "machine", lambda *_args, **_kwargs: "x86_64")
+    return out
 
 
 def canon(root: Path, ruff: str = "0.17.4", body: str = "ruff check") -> Path:
@@ -230,65 +217,96 @@ def canon(root: Path, ruff: str = "0.17.4", body: str = "ruff check") -> Path:
     return root
 
 
+def outputs(written: str) -> dict[str, str]:
+    """Read what a step wrote to GITHUB_OUTPUT, the last line of a name winning.
+
+    Returns:
+        Each `name=value` line, by name.
+
+    """
+    out: dict[str, str] = {}
+    for line in written.splitlines():
+        name, _, value = line.partition("=")
+        out[name] = value
+    return out
+
+
 # The workflow reads three outputs.
-def test_writes_the_outputs() -> None:
+def test_writes_the_outputs(runner: Path, tmp_path: Path) -> None:
     """key, prefix and dir land in GITHUB_OUTPUT."""
-    with tempfile.TemporaryDirectory() as tmp:
-        tree = canon(Path(tmp))
-        lock = (tree / "mise" / "mise.lock").read_bytes()
-        got = run(tree)
-    belt = hashlib.sha256(lock).hexdigest()
+    tree = canon(tmp_path / "canon")
+    status = gate_cache_key.main(["tool", "mise-v2", str(tree)], now=WHEN)
+    got = outputs(runner.read_text("utf-8"))
+    belt = hashlib.sha256((tree / "mise" / "mise.lock").read_bytes()).hexdigest()
+    assert status == 0
     assert f"{LOGGED}-b{belt}" == got["key"]
     assert got["prefix"] == "mise-v2-linux-x64-ubuntu26-"
     assert got["dir"] == "/home/runner/.local/share/mise"
 
 
-def test_a_missing_tree_is_red() -> None:
+def test_a_missing_tree_is_red(
+    monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """A canon tree without its files is a red step, not a key."""
-    err = io.StringIO()
-    with pytest.MonkeyPatch.context() as patched, redirect_stderr(err):
-        patched.setenv("MISE_TASK_NAME", "")
-        patched.setenv("ORG_FINDINGS", "")
-        patched.setattr(sys, "argv", ["gate_cache_key.py"])
-        code = gate_cache_key.main(["tool", "mise-v2", "/nonexistent"])
-        assert code == 1
-    assert "gate_cache_key.py:" in err.getvalue()
+    monkeypatch.setenv("MISE_TASK_NAME", "")
+    monkeypatch.setenv("ORG_FINDINGS", "")
+    monkeypatch.setattr(sys, "argv", ["gate_cache_key.py"])
+    status = gate_cache_key.main(["tool", "mise-v2", "/nonexistent"])
+    _out, err = capfd.readouterr()
+    assert status == 1
+    assert "gate_cache_key.py:" in err
 
 
-def test_a_tree_without_a_belt_lockfile_is_red() -> None:
+def test_a_tree_without_a_belt_lockfile_is_red(
+    tmp_path: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
     """No lockfile, no key: a key that cannot name the belt is refused."""
-    with tempfile.TemporaryDirectory() as tmp:
-        tree = canon(Path(tmp))
-        (tree / "mise" / "mise.lock").unlink()
-        err = io.StringIO()
-        with redirect_stderr(err):
-            assert gate_cache_key.main(["tool", "mise-v2", str(tree)]) == 1
-    assert "mise.lock" in err.getvalue()
+    tree = canon(tmp_path)
+    (tree / "mise" / "mise.lock").unlink()
+    status = gate_cache_key.main(["tool", "mise-v2", str(tree)])
+    _out, err = capfd.readouterr()
+    assert status == 1
+    assert "mise.lock" in err
 
 
 # The key moves with the belt's tools and not with its tasks (#1414).
-def test_a_belt_tool_bump_names_a_new_cache() -> None:
+def test_a_belt_tool_bump_names_a_new_cache(runner: Path, tmp_path: Path) -> None:
     """Two lockfiles differing in one tool's version give two keys."""
-    with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b:
-        old = run(canon(Path(a), ruff="0.17.4"))
-        new = run(canon(Path(b), ruff="0.17.5"))
+    first = gate_cache_key.main(
+        ["tool", "mise-v2", str(canon(tmp_path / "a", ruff="0.17.4"))], now=WHEN
+    )
+    old = outputs(runner.read_text("utf-8"))
+    second = gate_cache_key.main(
+        ["tool", "mise-v2", str(canon(tmp_path / "b", ruff="0.17.5"))], now=WHEN
+    )
+    new = outputs(runner.read_text("utf-8"))
+    assert (first, second) == (0, 0)
     assert old["key"] != new["key"]
     assert old["prefix"] == new["prefix"]
 
 
-def test_a_task_body_change_keeps_the_cache() -> None:
+def test_a_task_body_change_keeps_the_cache(runner: Path, tmp_path: Path) -> None:
     """Two config.tomls differing only in a task body give one key."""
-    with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b:
-        old = run(canon(Path(a), body="ruff check"))
-        new = run(canon(Path(b), body="ruff check --preview"))
+    first = gate_cache_key.main(
+        ["tool", "mise-v2", str(canon(tmp_path / "a", body="ruff check"))], now=WHEN
+    )
+    old = outputs(runner.read_text("utf-8"))
+    second = gate_cache_key.main(
+        ["tool", "mise-v2", str(canon(tmp_path / "b", body="ruff check --preview"))],
+        now=WHEN,
+    )
+    new = outputs(runner.read_text("utf-8"))
+    assert (first, second) == (0, 0)
     assert old["key"] == new["key"]
 
 
-def test_the_real_belt_lockfile_is_read() -> None:
+def test_the_real_belt_lockfile_is_read(runner: Path) -> None:
     """The tree's own mise/mise.lock is what the key digests."""
     tree = support.CANON
-    got = run(tree)
+    status = gate_cache_key.main(["tool", "mise-v2", str(tree)], now=WHEN)
+    got = outputs(runner.read_text("utf-8"))
     lock = (tree / "mise" / "mise.lock").read_bytes()
+    assert status == 0
     assert got["key"].endswith("-b" + hashlib.sha256(lock).hexdigest())
 
 
@@ -353,27 +371,14 @@ def test_no_list_is_todays_key(install: object) -> None:
     assert out["prefix"] == "mise-v2-linux-x64-ubuntu26-"
 
 
-def test_main_reads_the_list() -> None:
+def test_main_reads_the_list(runner: Path, tmp_path: Path) -> None:
     """`--install` reaches the key the workflow reads."""
-    with tempfile.TemporaryDirectory() as tmp:
-        tree = canon(Path(tmp))
-        out = Path(tmp) / "out"
-        env = {**RUNNER, "GITHUB_OUTPUT": str(out)}
-        with (
-            pytest.MonkeyPatch.context() as patched,
-            redirect_stdout(io.StringIO()),
-        ):
-            for name in list(os.environ):
-                patched.delenv(name)
-            for name, value in env.items():
-                patched.setenv(name, value)
-            patched.setattr(platform, "system", lambda *_args, **_kwargs: "Linux")
-            patched.setattr(platform, "machine", lambda *_args, **_kwargs: "x86_64")
-            argv = ["tool", "mise-pgrx-v1-pg18", str(tree)]
-            argv += ["--install", "jq rust@1"]
-            assert gate_cache_key.main(argv, now=WHEN) == 0
-        written = out.read_text("utf-8")
+    tree = canon(tmp_path / "canon")
+    argv = ["tool", "mise-pgrx-v1-pg18", str(tree), "--install", "jq rust@1"]
+    status = gate_cache_key.main(argv, now=WHEN)
+    written = runner.read_text("utf-8")
     digest = gate_cache_key.install_digest("jq rust@1")
+    assert status == 0
     assert f"-i{digest}-b" in written
     assert "prefix=mise-pgrx-v1-pg18-linux-x64-ubuntu26-\n" in written
 
@@ -424,16 +429,18 @@ TREE = {
     "mise.toml": '[tools]\nrust = "1.97.1"\n',
 }
 
+CARGO = ["cargo", "--canon-ref", CANON_REF]
 
-def git_tree(root: Path, files: dict[str, str], *, env: support.Env) -> Path:
+
+def git_tree(
+    root: Path, files: dict[str, str], git: str, environ: dict[str, str]
+) -> Path:
     """Write `files` into a fresh repository at `root` and track them.
 
     Returns:
         `root`.
 
     """
-    git = support.tool("git")
-    environ = env()
     subprocess.run([git, "init", "-q", str(root)], env=environ, check=True)
     for name, text in files.items():
         (root / name).parent.mkdir(parents=True, exist_ok=True)
@@ -442,62 +449,81 @@ def git_tree(root: Path, files: dict[str, str], *, env: support.Env) -> Path:
     return root
 
 
-def cargo_main(
-    path: str,
-    tree: Path | None = None,
-    canon_ref: str = CANON_REF,
-    *,
-    env: support.Env,
-    **runner: str,
-) -> tuple[int, str, str]:
-    """Run `cargo` in `tree` with PATH set to `path`, as the workflow does.
+class Cargo:
+    """The gate's runner as the cargo caches' step meets it (#1864, #2045)."""
 
-    Returns:
-        The exit code, what it wrote to GITHUB_OUTPUT and its stderr.
-
-    """
-    with tempfile.TemporaryDirectory() as tmp:
-        out = Path(tmp) / "out"
-        out.touch()
-        where = tree or git_tree(Path(tmp) / "tree", TREE, env=env)
-        environ = {
+    def __init__(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, env: support.Env
+    ) -> None:
+        """Put a `rustc` on PATH and set the step's environment, nothing else."""
+        self.tmp = tmp_path
+        self.git_env = env()
+        self.git = support.tool("git")
+        self.path = rustc_on_path(tmp_path, f"printf '%s' '{RUSTC}'")
+        self.out = tmp_path / "out"
+        self.out.touch()
+        self.trees = 0
+        step = {
             **RUNNER,
             "ImageVersion": "20261116.1.0",
             "ORG_MISE_CONFIG_GLOBS": GLOBS,
-            "GITHUB_OUTPUT": str(out),
-            "PATH": path,
-            **runner,
+            "GITHUB_OUTPUT": str(self.out),
+            "PATH": self.path,
         }
-        err = io.StringIO()
-        with (
-            pytest.MonkeyPatch.context() as patched,
-            contextlib.chdir(where),
-            redirect_stdout(io.StringIO()),
-            redirect_stderr(err),
-        ):
-            for name in list(os.environ):
-                patched.delenv(name)
-            for name, value in environ.items():
-                patched.setenv(name, value)
-            code = gate_cache_key.main(["cargo", "--canon-ref", canon_ref])
-        return code, out.read_text("utf-8"), err.getvalue()
+        for name in list(os.environ):
+            monkeypatch.delenv(name)
+        for name, value in step.items():
+            monkeypatch.setenv(name, value)
+
+    def tree(
+        self, files: dict[str, str] = TREE, untracked: dict[str, str] | None = None
+    ) -> Path:
+        """Track `files` in a repository of their own, `untracked` beside them.
+
+        Returns:
+            The tree's root.
+
+        """
+        self.trees += 1
+        tree = git_tree(self.tmp / f"tree{self.trees}", files, self.git, self.git_env)
+        for name, text in (untracked or {}).items():
+            (tree / name).parent.mkdir(parents=True, exist_ok=True)
+            (tree / name).write_text(text, "utf-8")
+        return tree
+
+    def stub(self, name: str, script: str) -> Path:
+        """Write a command `name` on the step's PATH that runs `script`.
+
+        Returns:
+            Its path.
+
+        """
+        tool = Path(self.path) / name
+        tool.write_text(f"#!/bin/sh\n{script}\n", "utf-8")
+        tool.chmod(tool.stat().st_mode | stat.S_IXUSR)
+        return tool
+
+    def written(self) -> dict[str, str]:
+        """Read the step's outputs so far.
+
+        Returns:
+            Each name's last value.
+
+        """
+        return outputs(self.out.read_text("utf-8"))
 
 
-def outputs(written: str) -> dict[str, str]:
-    """Read what a step wrote to GITHUB_OUTPUT.
+@fixture
+def cargo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, env: support.Env) -> Cargo:
+    """Give each row the cargo step's runner.
 
     Returns:
-        Each `name=value` line, by name.
+        The runner.
 
     """
-    out: dict[str, str] = {}
-    for line in written.splitlines():
-        name, _, value = line.partition("=")
-        out[name] = value
-    return out
+    return Cargo(tmp_path, monkeypatch, env=env)
 
 
-# The cargo caches' key names the compiler that fills them (#1864).
 def test_the_same_compiler_gives_the_same_digest() -> None:
     """One `rustc -vV`, one digest: a rerun hits."""
     assert gate_cache_key.rustc_digest(RUSTC) == gate_cache_key.rustc_digest(RUSTC)
@@ -525,164 +551,189 @@ def test_text_naming_no_compiler_is_red(text: object) -> None:
         gate_cache_key.rustc_digest(text)
 
 
-def test_main_writes_the_digest_of_the_rustc_on_path(env: support.Env) -> None:
+def test_main_writes_the_digest_of_the_rustc_on_path(
+    cargo: Cargo, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """`cargo` asks PATH's rustc and writes `digest` for the key."""
-    with tempfile.TemporaryDirectory() as tmp:
-        path = rustc_on_path(Path(tmp), f"printf '%s' '{RUSTC}'")
-        code, written, _ = cargo_main(path, env=env)
-    assert code == 0
-    assert gate_cache_key.rustc_digest(RUSTC) == outputs(written)["digest"]
+    monkeypatch.chdir(cargo.tree())
+    status = gate_cache_key.main(CARGO)
+    got = cargo.written()
+    assert status == 0
+    assert gate_cache_key.rustc_digest(RUSTC) == got["digest"]
     want: set[str] = {"digest", "inputs"}
-    got: set[str] = set(outputs(written))
-    assert want == got
+    assert want == set(got)
 
 
-def test_two_releases_on_path_give_two_keys(env: support.Env) -> None:
+def test_two_releases_on_path_give_two_keys(
+    cargo: Cargo, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Two toolchains differing only in release write two digests."""
     bumped = RUSTC.replace("release: 1.97.1", "release: 1.100.0")
-    written: list[str] = []
-    for text in (RUSTC, bumped):
-        with tempfile.TemporaryDirectory() as tmp:
-            path = rustc_on_path(Path(tmp), f"printf '%s' '{text}'")
-            written.append(outputs(cargo_main(path, env=env)[1])["digest"])
-    assert written[0] != written[1]
+    monkeypatch.chdir(cargo.tree())
+    first = gate_cache_key.main(CARGO)
+    old = cargo.written()["digest"]
+    cargo.stub("rustc", f"printf '%s' '{bumped}'")
+    second = gate_cache_key.main(CARGO)
+    new = cargo.written()["digest"]
+    assert (first, second) == (0, 0)
+    assert old != new
 
 
-def test_no_rustc_is_red(env: support.Env) -> None:
+def test_no_rustc_is_red(
+    cargo: Cargo, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """A job with a cargo cache and no compiler fails by name."""
-    with tempfile.TemporaryDirectory() as tmp:
-        code, written, err = cargo_main(tmp, env=env)
-    assert code == 1
-    assert written == ""
+    monkeypatch.chdir(cargo.tree())
+    monkeypatch.setenv("PATH", str(cargo.tmp / "tree1"))
+    status = gate_cache_key.main(CARGO)
+    _out, err = capfd.readouterr()
+    assert status == 1
+    assert not cargo.out.read_text("utf-8")
     assert "no rustc on PATH" in err
 
 
-def test_a_failing_rustc_is_red(env: support.Env) -> None:
+def test_a_failing_rustc_is_red(
+    cargo: Cargo, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """A rustup proxy with no toolchain installed fails by its message."""
-    with tempfile.TemporaryDirectory() as tmp:
-        script = "echo 'toolchain 1.100.0 is not installed' >&2; exit 1"
-        code, written, err = cargo_main(rustc_on_path(Path(tmp), script), env=env)
-    assert code == 1
-    assert written == ""
+    cargo.stub("rustc", "echo 'toolchain 1.100.0 is not installed' >&2; exit 1")
+    monkeypatch.chdir(cargo.tree())
+    status = gate_cache_key.main(CARGO)
+    _out, err = capfd.readouterr()
+    assert status == 1
+    assert not cargo.out.read_text("utf-8")
     assert "-vV exited 1: toolchain 1.100.0 is not installed" in err
 
 
-class CargoInputs:
-    """The cargo key names every declared input of its builds (#2045)."""
-
-    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
-        """Put a `rustc` on PATH for every row."""
-        self.make_env = env
-        self.tmp = tmp_path
-        self.path = rustc_on_path(tmp_path, f"printf '%s' '{RUSTC}'")
-        self.trees = 0
-
-    def run_in(
-        self,
-        files: dict[str, str],
-        untracked: dict[str, str] | None = None,
-        **kw: str,
-    ) -> dict[str, str]:
-        """Run `cargo` in a tree of `files`, plus `untracked` beside them.
-
-        Returns:
-            The step's outputs.
-
-        """
-        self.trees += 1
-        tree = git_tree(self.tmp / f"tree{self.trees}", files, env=self.make_env)
-        for name, text in (untracked or {}).items():
-            (tree / name).parent.mkdir(parents=True, exist_ok=True)
-            (tree / name).write_text(text, "utf-8")
-        code, written, err = cargo_main(self.path, tree, **kw, env=self.make_env)
-        assert code == 0, err
-        return outputs(written)
-
-
-@fixture
-def cargo_inputs(tmp_path: Path, env: support.Env) -> CargoInputs:
-    """Give each row its own CargoInputs."""
-    return CargoInputs(tmp_path, env=env)
-
-
+# The cargo key names every declared input of its builds (#2045).
 def assert_moves_inputs_only(before: dict[str, str], after: dict[str, str]) -> None:
     """Hold the compiler's digest and move `inputs`."""
     assert before["digest"] == after["digest"]
     assert before["inputs"] != after["inputs"]
 
 
-def test_a_feature_change_moves_inputs(cargo_inputs: CargoInputs) -> None:
+def test_a_feature_change_moves_inputs(
+    cargo: Cargo, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Edtf's pg19: one manifest's features, the measured case."""
     pg19 = TREE["Cargo.toml"] + "pg19 = []\n"
-    assert_moves_inputs_only(
-        cargo_inputs.run_in(TREE), cargo_inputs.run_in({**TREE, "Cargo.toml": pg19})
-    )
+    monkeypatch.chdir(cargo.tree())
+    first = gate_cache_key.main(CARGO)
+    before = cargo.written()
+    monkeypatch.chdir(cargo.tree({**TREE, "Cargo.toml": pg19}))
+    second = gate_cache_key.main(CARGO)
+    assert (first, second) == (0, 0)
+    assert_moves_inputs_only(before, cargo.written())
 
 
-def test_a_member_manifest_change_moves_inputs(cargo_inputs: CargoInputs) -> None:
+def test_a_member_manifest_change_moves_inputs(
+    cargo: Cargo, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A workspace member's manifest is named as the root's is."""
     member = {**TREE, "crates/pg/Cargo.toml": '[package]\nname = "pg"\n'}
     bumped = {**member, "crates/pg/Cargo.toml": '[package]\nname = "pg2"\n'}
-    assert_moves_inputs_only(cargo_inputs.run_in(member), cargo_inputs.run_in(bumped))
+    monkeypatch.chdir(cargo.tree(member))
+    first = gate_cache_key.main(CARGO)
+    before = cargo.written()
+    monkeypatch.chdir(cargo.tree(bumped))
+    second = gate_cache_key.main(CARGO)
+    assert (first, second) == (0, 0)
+    assert_moves_inputs_only(before, cargo.written())
 
 
-def test_a_mise_config_change_moves_inputs(cargo_inputs: CargoInputs) -> None:
+def test_a_mise_config_change_moves_inputs(
+    cargo: Cargo, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A tool pin (the Postgres pgrx records the path of) is an input."""
     pinned = {**TREE, "mise.toml": TREE["mise.toml"] + 'postgres = "18.1"\n'}
-    assert_moves_inputs_only(cargo_inputs.run_in(TREE), cargo_inputs.run_in(pinned))
+    monkeypatch.chdir(cargo.tree())
+    first = gate_cache_key.main(CARGO)
+    before = cargo.written()
+    monkeypatch.chdir(cargo.tree(pinned))
+    second = gate_cache_key.main(CARGO)
+    assert (first, second) == (0, 0)
+    assert_moves_inputs_only(before, cargo.written())
 
 
-def test_a_canon_change_moves_inputs(cargo_inputs: CargoInputs) -> None:
+def test_a_canon_change_moves_inputs(
+    cargo: Cargo, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The belt's flags and variables reach cargo: its ref is an input."""
-    assert_moves_inputs_only(
-        cargo_inputs.run_in(TREE), cargo_inputs.run_in(TREE, canon_ref="v1.77.0")
-    )
+    monkeypatch.chdir(cargo.tree())
+    first = gate_cache_key.main(CARGO)
+    before = cargo.written()
+    second = gate_cache_key.main(["cargo", "--canon-ref", "v1.77.0"])
+    assert (first, second) == (0, 0)
+    assert_moves_inputs_only(before, cargo.written())
 
 
-def test_an_image_build_number_holds_inputs(cargo_inputs: CargoInputs) -> None:
+def test_an_image_build_number_holds_inputs(
+    cargo: Cargo, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Two fleets, one toolchain: the build number names nothing (#2066)."""
-    assert cargo_inputs.run_in(
-        TREE, ImageVersion="20261116.88.1"
-    ) == cargo_inputs.run_in(TREE, ImageVersion="20261116.202.1")
+    monkeypatch.chdir(cargo.tree())
+    monkeypatch.setenv("ImageVersion", "20261116.88.1")
+    first = gate_cache_key.main(CARGO)
+    before = cargo.written()
+    monkeypatch.setenv("ImageVersion", "20261116.202.1")
+    second = gate_cache_key.main(CARGO)
+    assert (first, second) == (0, 0)
+    assert before == cargo.written()
 
 
-def test_identical_trees_give_the_same_inputs(cargo_inputs: CargoInputs) -> None:
+def test_identical_trees_give_the_same_inputs(
+    cargo: Cargo, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Two runs over the same tree hit the same entry."""
-    assert cargo_inputs.run_in(TREE) == cargo_inputs.run_in(TREE)
+    monkeypatch.chdir(cargo.tree())
+    first = gate_cache_key.main(CARGO)
+    before = cargo.written()
+    monkeypatch.chdir(cargo.tree())
+    second = gate_cache_key.main(CARGO)
+    assert (first, second) == (0, 0)
+    assert before == cargo.written()
 
 
-def test_an_untracked_manifest_changes_nothing(cargo_inputs: CargoInputs) -> None:
+def test_an_untracked_manifest_changes_nothing(
+    cargo: Cargo, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A file CI never checks out builds nothing and names nothing."""
     stray = {"Cargo.toml": "[workspace]\n", "scratch/Cargo.toml": "x\n"}
-    assert cargo_inputs.run_in({
-        k: v for k, v in TREE.items() if k != "Cargo.toml"
-    }) == cargo_inputs.run_in(
-        {k: v for k, v in TREE.items() if k != "Cargo.toml"},
-        untracked=stray,
-    )
+    tracked = {k: v for k, v in TREE.items() if k != "Cargo.toml"}
+    monkeypatch.chdir(cargo.tree(tracked))
+    first = gate_cache_key.main(CARGO)
+    before = cargo.written()
+    monkeypatch.chdir(cargo.tree(tracked, untracked=stray))
+    second = gate_cache_key.main(CARGO)
+    assert (first, second) == (0, 0)
+    assert before == cargo.written()
 
 
-def test_no_canon_ref_is_red(cargo_inputs: CargoInputs, env: support.Env) -> None:
+def test_no_canon_ref_is_red(
+    cargo: Cargo, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """An empty ref is refused, never hashed into a key."""
-    tree = git_tree(cargo_inputs.tmp / "tree", TREE, env=env)
-    code, written, err = cargo_main(cargo_inputs.path, tree, canon_ref="", env=env)
-    assert code == 1
-    assert written == ""
+    monkeypatch.chdir(cargo.tree())
+    status = gate_cache_key.main(["cargo", "--canon-ref", ""])
+    _out, err = capfd.readouterr()
+    assert status == 1
+    assert not cargo.out.read_text("utf-8")
     assert "no --canon-ref" in err
 
 
-def test_no_globs_is_red(cargo_inputs: CargoInputs, env: support.Env) -> None:
+def test_no_globs_is_red(
+    cargo: Cargo, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """A workflow that sets no mise globs would omit the tool pins."""
-    tree = git_tree(cargo_inputs.tmp / "tree", TREE, env=env)
-    code, written, err = cargo_main(
-        cargo_inputs.path, tree, ORG_MISE_CONFIG_GLOBS="", env=env
-    )
-    assert code == 1
-    assert written == ""
+    monkeypatch.chdir(cargo.tree())
+    monkeypatch.setenv("ORG_MISE_CONFIG_GLOBS", "")
+    status = gate_cache_key.main(CARGO)
+    _out, err = capfd.readouterr()
+    assert status == 1
+    assert not cargo.out.read_text("utf-8")
     assert "ORG_MISE_CONFIG_GLOBS is unset" in err
 
 
-@pytest.mark.usefixtures("cargo_inputs")
 def test_the_globs_are_the_tool_keys() -> None:
     """The rows read the gate's own list, which names mise.toml."""
     assert "mise.toml" in GLOBS.splitlines()
@@ -693,235 +744,219 @@ def test_the_globs_are_the_tool_keys() -> None:
 CC = "x86_64-linux-gnu-gcc-15 (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
 CLANG = "Ubuntu clang version 21.1.8 (6ubuntu1)"
 LDD = "ldd (Ubuntu GLIBC 2.43-2ubuntu2.7) 2.43"
-
-
-class Toolchain:
-    """The cargo key names the toolchain the build takes from the image."""
-
-    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
-        """Put `rustc`, the toolchain and an `xcrun` on PATH for every row.
-
-        The `xcrun` finds the row's `clang` on PATH, so the rows read the
-        same stub on Darwin as `clang` on PATH does elsewhere.
-        """
-        self.make_env = env
-        self.tmp = tmp_path
-        self.path = rustc_on_path(tmp_path, f"printf '%s' '{RUSTC}'")
-        self.trees = 0
-        self.stub("xcrun", "command -v clang || exit 1")
-        for name, text in (("cc", CC), ("c++", CC), ("clang", CLANG), ("ldd", LDD)):
-            self.stub(name, f"echo '{text}'")
-
-    def stub(self, name: str, script: str) -> Path:
-        """Write a command `name` on the rows' PATH that runs `script`.
-
-        Returns:
-            Its path.
-
-        """
-        tool = Path(self.path) / name
-        tool.write_text(f"#!/bin/sh\n{script}\n", "utf-8")
-        tool.chmod(tool.stat().st_mode | stat.S_IXUSR)
-        return tool
-
-    def run_with(self, **kw: str) -> tuple[int, str, str]:
-        """Run `cargo` over TREE with the toolchain the stubs now hold.
-
-        Returns:
-            The exit code, what it wrote to GITHUB_OUTPUT and its stderr.
-
-        """
-        self.trees += 1
-        tree = git_tree(self.tmp / f"tree{self.trees}", TREE, env=self.make_env)
-        return cargo_main(self.path, tree, **kw, env=self.make_env)
-
-    def run_in(self, **kw: str) -> dict[str, str]:
-        """Run `cargo` as `run_with` does, and require it to pass.
-
-        Returns:
-            The step's outputs.
-
-        """
-        code, written, err = self.run_with(**kw)
-        assert code == 0, err
-        return outputs(written)
-
-    def assert_moves(self, name: str, **kw: str) -> None:
-        """Move `inputs` and hold `digest` on a new `--version` from `name`."""
-        before = self.run_in(**kw)
-        self.stub(name, "echo 'a newer build'")
-        after = self.run_in(**kw)
-        assert before["digest"] == after["digest"]
-        assert before["inputs"] != after["inputs"]
-
-    def assert_holds(self, name: str, **kw: str) -> None:
-        """Hold `inputs` on a new `--version` from `name`."""
-        before = self.run_in(**kw)
-        self.stub(name, "echo 'a newer build'")
-        assert before == self.run_in(**kw)
+NEWER = "echo 'a newer build'"
 
 
 @fixture
-def toolchain(tmp_path: Path, env: support.Env) -> Toolchain:
-    """Give each row its own Toolchain."""
-    return Toolchain(tmp_path, env=env)
+def toolchain(cargo: Cargo, monkeypatch: pytest.MonkeyPatch) -> Cargo:
+    """Put the image's toolchain and an `xcrun` on PATH, in a tracked tree.
+
+    The `xcrun` finds the row's `clang` on PATH, so the rows read the
+    same stub on Darwin as `clang` on PATH does elsewhere.
+
+    Returns:
+        The cargo step's runner, standing in the tree.
+
+    """
+    cargo.stub("xcrun", "command -v clang || exit 1")
+    for name, text in (("cc", CC), ("c++", CC), ("clang", CLANG), ("ldd", LDD)):
+        cargo.stub(name, f"echo '{text}'")
+    monkeypatch.chdir(cargo.tree())
+    return cargo
 
 
-def test_a_cc_change_moves_inputs(toolchain: Toolchain) -> None:
+def test_a_cc_change_moves_inputs(toolchain: Cargo) -> None:
     """`cc` on PATH is the C compiler cargo's build scripts run."""
-    toolchain.assert_moves("cc")
+    first = gate_cache_key.main(CARGO)
+    before = toolchain.written()
+    toolchain.stub("cc", NEWER)
+    second = gate_cache_key.main(CARGO)
+    assert (first, second) == (0, 0)
+    assert_moves_inputs_only(before, toolchain.written())
 
 
-def test_a_cxx_change_moves_inputs(toolchain: Toolchain) -> None:
+def test_a_cxx_change_moves_inputs(toolchain: Cargo) -> None:
     """`c++` on PATH is the C++ compiler they run."""
-    toolchain.assert_moves("c++")
+    first = gate_cache_key.main(CARGO)
+    before = toolchain.written()
+    toolchain.stub("c++", NEWER)
+    second = gate_cache_key.main(CARGO)
+    assert (first, second) == (0, 0)
+    assert_moves_inputs_only(before, toolchain.written())
 
 
-def test_a_clang_change_moves_inputs(toolchain: Toolchain) -> None:
+def test_a_clang_change_moves_inputs(toolchain: Cargo) -> None:
     """The clang driver pgrx runs, and so its libclang, is an input."""
-    toolchain.assert_moves("clang")
+    first = gate_cache_key.main(CARGO)
+    before = toolchain.written()
+    toolchain.stub("clang", NEWER)
+    second = gate_cache_key.main(CARGO)
+    assert (first, second) == (0, 0)
+    assert_moves_inputs_only(before, toolchain.written())
 
 
-def test_inputs_follow_cc(toolchain: Toolchain) -> None:
-    """`$CC` names the compiler, so `cc` on PATH is not read."""
-    toolchain.stub("gcc-15", f"echo '{CC}'")
-    toolchain.assert_moves("gcc-15", CC="gcc-15")
-    toolchain.assert_holds("cc", CC="gcc-15")
+@pytest.mark.parametrize(
+    ("variable", "named", "default"),
+    [("CC", "gcc-15", "cc"), ("CXX", "g++-15", "c++")],
+)
+def test_inputs_follow_the_named_compiler(
+    toolchain: Cargo,
+    monkeypatch: pytest.MonkeyPatch,
+    variable: str,
+    named: str,
+    default: str,
+) -> None:
+    """`$CC` and `$CXX` name the compiler, so the one on PATH is not read."""
+    toolchain.stub(named, f"echo '{CC}'")
+    monkeypatch.setenv(variable, named)
+    first = gate_cache_key.main(CARGO)
+    before = toolchain.written()
+    toolchain.stub(named, NEWER)
+    second = gate_cache_key.main(CARGO)
+    moved = toolchain.written()
+    toolchain.stub(default, NEWER)
+    third = gate_cache_key.main(CARGO)
+    assert (first, second, third) == (0, 0, 0)
+    assert_moves_inputs_only(before, moved)
+    assert moved == toolchain.written()
 
 
-def test_inputs_follow_cxx(toolchain: Toolchain) -> None:
-    """`$CXX` names the compiler, so `c++` on PATH is not read."""
-    toolchain.stub("g++-15", f"echo '{CC}'")
-    toolchain.assert_moves("g++-15", CXX="g++-15")
-    toolchain.assert_holds("c++", CXX="g++-15")
-
-
-def test_inputs_follow_clang_path(toolchain: Toolchain) -> None:
+def test_inputs_follow_clang_path(
+    toolchain: Cargo, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """`$CLANG_PATH` is the driver pgrx runs, as pgrx-env.sh leaves it."""
-    driver = str(toolchain.stub("clang-21", f"echo '{CLANG}'"))
-    toolchain.assert_moves("clang-21", CLANG_PATH=driver)
-    toolchain.assert_holds("clang", CLANG_PATH=driver)
+    monkeypatch.setenv("CLANG_PATH", str(toolchain.stub("clang-21", f"echo '{CLANG}'")))
+    first = gate_cache_key.main(CARGO)
+    before = toolchain.written()
+    toolchain.stub("clang-21", NEWER)
+    second = gate_cache_key.main(CARGO)
+    moved = toolchain.written()
+    toolchain.stub("clang", NEWER)
+    third = gate_cache_key.main(CARGO)
+    assert (first, second, third) == (0, 0, 0)
+    assert_moves_inputs_only(before, moved)
+    assert moved == toolchain.written()
 
 
-def test_a_libc_change_moves_inputs(toolchain: Toolchain) -> None:
+def test_a_libc_change_moves_inputs(toolchain: Cargo) -> None:
     """The first line of `ldd --version` carries the package revision."""
-    before = toolchain.run_in()
+    first = gate_cache_key.main(CARGO)
+    before = toolchain.written()
     toolchain.stub("ldd", "echo 'ldd (Ubuntu GLIBC 2.43-2ubuntu2.8) 2.43'")
-    after = toolchain.run_in()
-    assert before["digest"] == after["digest"]
-    assert before["inputs"] != after["inputs"]
+    second = gate_cache_key.main(CARGO)
+    assert (first, second) == (0, 0)
+    assert_moves_inputs_only(before, toolchain.written())
 
 
-def test_no_toolchain_is_absent_not_red(toolchain: Toolchain) -> None:
+def test_no_toolchain_is_absent_not_red(toolchain: Cargo) -> None:
     """A runner without them builds nothing that needs them."""
-    present = toolchain.run_in()
+    first = gate_cache_key.main(CARGO)
+    present = toolchain.written()
     for name in ("cc", "c++", "clang", "ldd", "xcrun"):
         (Path(toolchain.path) / name).unlink()
-    absent = toolchain.run_in()
-    assert present["inputs"] != absent["inputs"]
+    second = gate_cache_key.main(CARGO)
+    assert (first, second) == (0, 0)
+    assert present["inputs"] != toolchain.written()["inputs"]
 
 
-def test_a_failing_ldd_is_absent(toolchain: Toolchain) -> None:
+def test_a_failing_ldd_is_absent(toolchain: Cargo) -> None:
     """An `ldd` that cannot report a glibc (musl) is not a finding."""
     toolchain.stub("ldd", "exit 1")
-    failing = toolchain.run_in()
+    first = gate_cache_key.main(CARGO)
+    failing = toolchain.written()
     (Path(toolchain.path) / "ldd").unlink()
-    assert failing == toolchain.run_in()
+    second = gate_cache_key.main(CARGO)
+    assert (first, second) == (0, 0)
+    assert failing == toolchain.written()
 
 
-def test_a_clang_that_cannot_report_is_red(toolchain: Toolchain) -> None:
+def test_a_clang_that_cannot_report_is_red(
+    toolchain: Cargo, capfd: pytest.CaptureFixture[str]
+) -> None:
     """The key never names a compiler it could not identify."""
     toolchain.stub("clang", "echo broken >&2; exit 3")
-    code, written, err = toolchain.run_with()
-    assert code == 1
-    assert written == ""
+    status = gate_cache_key.main(CARGO)
+    _out, err = capfd.readouterr()
+    assert status == 1
+    assert not toolchain.out.read_text("utf-8")
     assert "clang --version exited 3" in err
 
 
-def digest_main(path: str) -> tuple[int, str, str]:
-    """Run `digest` with PATH set to `path`, as a coverage script does.
-
-    Returns:
-        The exit code, its stdout and its stderr.
-
-    """
-    out, err = io.StringIO(), io.StringIO()
-    env: dict[str, str] = {"PATH": path, "MISE_TASK_NAME": "coverage:check"}
-    with (
-        pytest.MonkeyPatch.context() as patched,
-        redirect_stdout(out),
-        redirect_stderr(err),
-    ):
-        for name in list(os.environ):
-            patched.delenv(name)
-        for name, value in env.items():
-            patched.setenv(name, value)
-        code = gate_cache_key.main(["digest"])
-    return code, out.getvalue(), err.getvalue()
-
-
-class Directory:
-    """Every coverage directory names its compiler (#1877)."""
-
-    def __init__(self, tmp_path: Path) -> None:
-        """Give the row's scratch directories one home, removed after it."""
-        self.tmp = tmp_path
-
-    def digest_of(self, script: str) -> tuple[int, str, str]:
-        """Run `digest` beside a `rustc` that runs `script`.
-
-        Returns:
-            The exit code, its stdout and its stderr.
-
-        """
-        tmp = tempfile.mkdtemp(dir=self.tmp)
-        return digest_main(rustc_on_path(Path(tmp), script))
-
-
+# Every coverage directory names its compiler (#1877).
 @fixture
-def directory(tmp_path: Path) -> Directory:
-    """Give each row its own Directory."""
-    return Directory(tmp_path)
+def coverage_step(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run as a coverage script runs `digest`: its task, no other variable."""
+    for name in list(os.environ):
+        monkeypatch.delenv(name)
+    monkeypatch.setenv("MISE_TASK_NAME", "coverage:check")
 
 
-def test_the_same_rustc_gives_the_same_sixteen_hex(directory: Directory) -> None:
+@pytest.mark.usefixtures("coverage_step")
+def test_the_same_rustc_gives_the_same_sixteen_hex(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """One `rustc -vV`, one directory: the cache key's digest, cut to 16."""
-    printed = f"printf '%s' '{RUSTC}'"
-    first, second = directory.digest_of(printed), directory.digest_of(printed)
+    monkeypatch.setenv("PATH", rustc_on_path(tmp_path, f"printf '%s' '{RUSTC}'"))
+    first = gate_cache_key.main(["digest"])
+    once = capfd.readouterr()
+    second = gate_cache_key.main(["digest"])
+    again = capfd.readouterr()
     whole = hashlib.sha256(RUSTC.encode()).hexdigest()
-    assert (0, f"{whole[:16]}\n", "") == first
-    assert first == second
+    assert (first, second) == (0, 0)
+    assert (once.out, once.err) == (f"{whole[:16]}\n", "")
+    assert once == again
 
 
-def test_a_different_release_gives_a_different_directory(directory: Directory) -> None:
+@pytest.mark.usefixtures("coverage_step")
+def test_a_different_release_gives_a_different_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """1.97.1 and 1.100.0 differ only in `release:`: two directories."""
     bumped = RUSTC.replace("release: 1.97.1", "release: 1.100.0")
-    old = directory.digest_of(f"printf '%s' '{RUSTC}'")
-    new = directory.digest_of(f"printf '%s' '{bumped}'")
-    assert (old[0], new[0]) == (0, 0)
-    assert re.search(r"^[0-9a-f]{16}\n$", new[1])
-    assert old[1] != new[1]
+    monkeypatch.setenv("PATH", rustc_on_path(tmp_path, f"printf '%s' '{RUSTC}'"))
+    first = gate_cache_key.main(["digest"])
+    old = capfd.readouterr().out
+    (tmp_path / "b").mkdir()
+    monkeypatch.setenv("PATH", rustc_on_path(tmp_path / "b", f"printf '%s' '{bumped}'"))
+    second = gate_cache_key.main(["digest"])
+    new = capfd.readouterr().out
+    assert (first, second) == (0, 0)
+    assert re.search(r"^[0-9a-f]{16}\n$", new)
+    assert old != new
 
 
-@pytest.mark.usefixtures("directory")
-def test_directory_no_rustc_is_red() -> None:
+@pytest.mark.usefixtures("coverage_step")
+def test_directory_no_rustc_is_red(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """No compiler: red by name, and no directory printed."""
-    with tempfile.TemporaryDirectory() as tmp:
-        code, out, err = digest_main(tmp)
-    assert (code, out) == (1, "")
+    monkeypatch.setenv("PATH", str(tmp_path))
+    status = gate_cache_key.main(["digest"])
+    out, err = capfd.readouterr()
+    assert (status, out) == (1, "")
     assert "coverage:check: no rustc on PATH" in err
 
 
-def test_directory_a_failing_rustc_is_red(directory: Directory) -> None:
+@pytest.mark.usefixtures("coverage_step")
+def test_directory_a_failing_rustc_is_red(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """A rustup proxy with no toolchain: red by its message."""
     script = "echo 'toolchain nightly-2026-07-20 is not installed' >&2; exit 1"
-    code, out, err = directory.digest_of(script)
-    assert (code, out) == (1, "")
+    monkeypatch.setenv("PATH", rustc_on_path(tmp_path, script))
+    status = gate_cache_key.main(["digest"])
+    out, err = capfd.readouterr()
+    assert (status, out) == (1, "")
     assert "-vV exited 1: toolchain nightly-2026-07-20 is not installed" in err
 
 
-def test_no_release_line_is_red(directory: Directory) -> None:
+@pytest.mark.usefixtures("coverage_step")
+def test_no_release_line_is_red(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """Output naming no compiler names no directory."""
-    code, out, err = directory.digest_of("echo 'binary: rustc'")
-    assert (code, out) == (1, "")
+    monkeypatch.setenv("PATH", rustc_on_path(tmp_path, "echo 'binary: rustc'"))
+    status = gate_cache_key.main(["digest"])
+    out, err = capfd.readouterr()
+    assert (status, out) == (1, "")
     assert "printed no release line" in err

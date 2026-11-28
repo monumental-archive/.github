@@ -1007,14 +1007,15 @@ def test_metadata_of_the_wrong_shape_is_refused_by_name() -> None:
         assert str(caught.value) == why
 
 
-def test_default_major_refuses_metadata_it_cannot_read() -> None:
+def test_default_major_refuses_metadata_it_cannot_read(
+    monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """The step says so on stderr and exits 1; the leg stops with it."""
-    err = io.StringIO()
-    with pytest.MonkeyPatch.context() as patched, contextlib.redirect_stderr(err):
-        patched.setattr("sys.stdin", io.StringIO('{"packages": 1}'))
-        status = helper.main(["default-major", "a"])
+    monkeypatch.setattr("sys.stdin", io.StringIO('{"packages": 1}'))
+    status = helper.main(["default-major", "a"])
+    err = capfd.readouterr().err
     assert status == 1
-    assert err.getvalue() == f"{LABEL}: cargo metadata: packages is not a list\n"
+    assert err == f"{LABEL}: cargo metadata: packages is not a list\n"
 
 
 def test_a_listing_counts_lines_with_anything_on_them() -> None:
@@ -1113,19 +1114,20 @@ def test_a_malformed_record_is_named_for_its_first_fault() -> None:
     assert helper.malformed(sound) == list[str]()
 
 
-def test_records_prints_each_pattern_when_every_record_is_sound() -> None:
+def test_records_prints_each_pattern_when_every_record_is_sound(
+    monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """One pattern a line, in the grep's order; blank input is no record."""
-    out = io.StringIO()
     grep = (
         f"src/lib.rs:19:  {MARK} {EQUAL}: why\n"
         f"src/lib.rs:20:  x {MARK} delete -: why\n\n"
     )
-    with pytest.MonkeyPatch.context() as patched, contextlib.redirect_stdout(out):
-        patched.setattr("sys.stdin", io.StringIO(grep))
-        status = helper.main(["records"])
+    monkeypatch.setattr("sys.stdin", io.StringIO(grep))
+    status = helper.main(["records"])
+    out = capfd.readouterr().out
     assert status == 0
     want = [DERIVED, r"^src/lib\.rs:20:[0-9]+: delete \-( in .*)?$"]
-    assert out.getvalue().splitlines() == want
+    assert out.splitlines() == want
 
 
 def test_a_pinned_entry_is_an_exclude_re_entry_holding_a_position() -> None:

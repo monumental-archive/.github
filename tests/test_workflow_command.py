@@ -19,7 +19,7 @@ import io
 import re
 import sys
 import tempfile
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import redirect_stdout
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -179,13 +179,12 @@ def test_a_group_title_is_escaped_and_closed() -> None:
     assert written(lambda: workflow_command.endgroup(stream=None)) == "::endgroup::\n"
 
 
-def test_group_then_endgroup_in_process() -> None:
+def test_group_then_endgroup_in_process(capfd: pytest.CaptureFixture[str]) -> None:
     """Called directly, the two write the group's start and its end."""
-    out = io.StringIO()
-    with redirect_stdout(out):
-        workflow_command.group("npm debug log\n::error::x")
-        workflow_command.endgroup()
-    assert out.getvalue() == "::group::npm debug log%0A::error::x\n::endgroup::\n"
+    workflow_command.group("npm debug log\n::error::x")
+    workflow_command.endgroup()
+    out = capfd.readouterr().out
+    assert out == "::group::npm debug log%0A::error::x\n::endgroup::\n"
 
 
 def test_the_stream_is_the_callers() -> None:
@@ -196,7 +195,9 @@ def test_the_stream_is_the_callers() -> None:
 
 
 # #1660's helper row: pgrx_images quotes the major it was given.
-def test_the_refusal_is_one_line() -> None:
+def test_the_refusal_is_one_line(
+    monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """A major carrying a newline refuses on one line, the text escaped.
 
     On main this printed two lines, the second `::error::b`.
@@ -204,24 +205,19 @@ def test_the_refusal_is_one_line() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         table = Path(tmp) / "pgrx-base-images.toml"
         table.write_text("[build]\n", "utf-8")
-        err = io.StringIO()
-        with (
-            pytest.MonkeyPatch.context() as patched,
-            redirect_stdout(io.StringIO()),
-            redirect_stderr(err),
-        ):
-            patched.setenv("MISE_TASK_NAME", "")
-            patched.setenv("ORG_FINDINGS", "")
-            patched.setattr(sys, "argv", ["pgrx_images.py"])
-            code = pgrx_images.main([
-                "base-image",
-                "--pg",
-                "a\n::error::b",
-                "--table",
-                str(table),
-            ])
+        monkeypatch.setenv("MISE_TASK_NAME", "")
+        monkeypatch.setenv("ORG_FINDINGS", "")
+        monkeypatch.setattr(sys, "argv", ["pgrx_images.py"])
+        code = pgrx_images.main([
+            "base-image",
+            "--pg",
+            "a\n::error::b",
+            "--table",
+            str(table),
+        ])
+        err = capfd.readouterr().err
     assert code == 1
-    assert err.getvalue() == (
+    assert err == (
         f"::error::pgrx_images.py: pga%0A::error::b has no build image in {table}\n"
     )
 

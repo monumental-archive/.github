@@ -16,8 +16,6 @@ included, and the entry is the same answers under the names the site
 serves them by.
 """
 
-import contextlib
-import io
 import json
 import shutil
 import subprocess
@@ -452,41 +450,39 @@ def test_an_empty_readme_names_no_entry() -> None:
 
 
 @pytest.mark.usefixtures("_set_up_test_helper")
-def test_no_curl_is_red() -> None:
+def test_no_curl_is_red(
+    monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """The fetch is curl's; without it the leg cannot ask."""
     with tempfile.TemporaryDirectory() as tmp:
         readme = Path(tmp) / "README.md"
         readme.write_text(README, encoding="utf-8")
-        with (
-            pytest.MonkeyPatch.context() as patched,
-            contextlib.redirect_stderr(io.StringIO()) as err,
-        ):
-            patched.setattr(shutil, "which", lambda *_args, **_kwargs: None)
-            status = drift.main([".bestpractices.json", REPO, str(readme)])
+        monkeypatch.setattr(shutil, "which", lambda *_args, **_kwargs: None)
+        status = drift.main([".bestpractices.json", REPO, str(readme)])
+        err = capfd.readouterr().err
     assert status == 1
-    assert err.getvalue() == "audit:bestpractices: curl missing\n"
+    assert err == "audit:bestpractices: curl missing\n"
 
 
 @pytest.mark.usefixtures("_set_up_test_helper")
-def test_a_file_answer_that_is_not_a_string_is_refused() -> None:
+def test_a_file_answer_that_is_not_a_string_is_refused(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """The file's answers are strings or null, read once (#1681)."""
     with tempfile.NamedTemporaryFile("w", suffix=".json", encoding="utf-8") as handle:
         handle.write('{"name": 1, "test_most_status": true}')
         handle.flush()
-        with contextlib.redirect_stderr(io.StringIO()) as err:
-            assert drift.compare(handle.name, REPO, ID, "{}") == 1
-    assert (
-        err.getvalue()
-        == f"{LABEL}: {handle.name}: test_most_status is not a string or null\n"
-    )
+        assert drift.compare(handle.name, REPO, ID, "{}") == 1
+        err = capfd.readouterr().err
+    assert err == f"{LABEL}: {handle.name}: test_most_status is not a string or null\n"
 
 
 @pytest.mark.usefixtures("_set_up_test_helper")
-def test_an_unreadable_file_is_red() -> None:
+def test_an_unreadable_file_is_red(capfd: pytest.CaptureFixture[str]) -> None:
     """A file that is not JSON is a finding, not a crash."""
     with tempfile.NamedTemporaryFile("w", suffix=".json", encoding="utf-8") as handle:
         handle.write("{")
         handle.flush()
-        with contextlib.redirect_stderr(io.StringIO()) as err:
-            assert drift.compare(handle.name, REPO, ID, "{}") == 1
-    assert " is not JSON: " in err.getvalue()
+        assert drift.compare(handle.name, REPO, ID, "{}") == 1
+        err = capfd.readouterr().err
+    assert " is not JSON: " in err

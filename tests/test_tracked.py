@@ -259,7 +259,7 @@ def test_tracked_lists_the_three_names_from_a_root(producers: Producers) -> None
 
 
 def test_tracked_lists_the_working_directory_by_pathspec(
-    producers: Producers, env: support.Env
+    producers: Producers, env: support.Env, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """No root: the working directory's tree; a pathspec narrows it.
 
@@ -274,26 +274,24 @@ def test_tracked_lists_the_working_directory_by_pathspec(
     tree = producers.planted()
     # Built before the old environment is cleared: it reads from it.
     planted = env(tree.parent / "home")
-    with pytest.MonkeyPatch.context() as patched:
-        patched.chdir(tree)
-        for name in list(os.environ):
-            patched.delenv(name)
-        for name, value in planted.items():
-            patched.setenv(name, value)
-        narrowed: list[str] = tracked.tracked("é*")
-        every: list[str] = sorted(tracked.tracked())
+    monkeypatch.chdir(tree)
+    for name in list(os.environ):
+        monkeypatch.delenv(name)
+    for name, value in planted.items():
+        monkeypatch.setenv(name, value)
+    narrowed: list[str] = tracked.tracked("é*")
+    every: list[str] = sorted(tracked.tracked())
     assert list[str]([ACCENTED]) == narrowed
     assert every == WANT
 
 
 @pytest.mark.usefixtures("producers")
 def test_stdin_paths_reads_a_nul_separated_list(
-    capfd: pytest.CaptureFixture[str],
+    capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A name with a space or a newline is one path; empties dropped."""
-    with pytest.MonkeyPatch.context() as patched:
-        patched.setattr(sys, "stdin", io.StringIO(f"{SPACED}\0\0a\nb.md\0{ACCENTED}\0"))
-        status = len(tracked.stdin_paths()) - 3
+    monkeypatch.setattr(sys, "stdin", io.StringIO(f"{SPACED}\0\0a\nb.md\0{ACCENTED}\0"))
+    status = len(tracked.stdin_paths()) - 3
     _out, _err = capfd.readouterr()
     assert status == 0
 
@@ -519,20 +517,19 @@ def test_the_shell_ends_on_a_git_that_cannot_answer(
     )
 
 
-def test_python_raises_on_a_git_that_cannot_answer(has_state: Has) -> None:
+def test_python_raises_on_a_git_that_cannot_answer(
+    has_state: Has, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Exit 128 is never False."""
     tree = has_state.planted()
     stub = tree.parent / "git"
     stub.write_text(FAILING_GIT, encoding="utf-8")
     stub.chmod(0o755)
-    with (
-        pytest.MonkeyPatch.context() as patched,
-        pytest.raises(
-            tracked.GitUnanswerableError,
-            match=r"^git could not say whether kept is tracked \(exit 128\)$",
-        ),
+    with pytest.raises(
+        tracked.GitUnanswerableError,
+        match=r"^git could not say whether kept is tracked \(exit 128\)$",
     ):
-        patched.setattr(tracked, "GIT", str(stub))
+        monkeypatch.setattr(tracked, "GIT", str(stub))
         tracked.has("kept", root=tree)
 
 

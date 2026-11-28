@@ -621,7 +621,7 @@ def test_a_single_line_format_finding_carries_shfmt_text(parser: Parser) -> None
 
 @pytest.mark.usefixtures("parser")
 def test_a_file_yq_cannot_parse_is_refused_by_name(
-    capfd: pytest.CaptureFixture[str],
+    capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Not YAML: exit 1 naming the file, never an empty clean run."""
     with TemporaryDirectory() as tmp:
@@ -630,9 +630,8 @@ def test_a_file_yq_cannot_parse_is_refused_by_name(
         plain = es.main([str(path)])
         _out, said = capfd.readouterr()
         debt = Path(tmp) / "debt.txt"
-        with pytest.MonkeyPatch.context() as patched:
-            patched.setenv("MISE_TASK_NAME", "lint:workflow-shell")
-            ceiling = es.main(["--ceiling", str(debt), str(path)])
+        monkeypatch.setenv("MISE_TASK_NAME", "lint:workflow-shell")
+        ceiling = es.main(["--ceiling", str(debt), str(path)])
         _out, err = capfd.readouterr()
     assert plain == 1
     assert said.startswith(f"{TASK}: {path}: ")
@@ -699,7 +698,7 @@ def org_config(tmp_path: Path) -> OrgConfig:
 
 
 def test_a_home_shellcheckrc_cannot_lower_the_org_checks(
-    org_config: OrgConfig, env: support.Env
+    org_config: OrgConfig, env: support.Env, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A machine's own rc file does not switch a belt check off.
 
@@ -720,12 +719,11 @@ def test_a_home_shellcheckrc_cannot_lower_the_org_checks(
     # The environment is built before the old one is cleared: it
     # reads the variables it keeps from this one.
     planted = env(home)
-    with pytest.MonkeyPatch.context() as patched:
-        for name in list(os.environ):
-            patched.delenv(name)
-        for name, value in planted.items():
-            patched.setenv(name, value)
-        found = es.check(path, fmt=False, lint=True)
+    for name in list(os.environ):
+        monkeypatch.delenv(name)
+    for name, value in planted.items():
+        monkeypatch.setenv(name, value)
+    found = es.check(path, fmt=False, lint=True)
     assert any("[SC2250]" in f for f in found), found
 
 

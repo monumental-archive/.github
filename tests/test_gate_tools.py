@@ -728,7 +728,9 @@ def test_a_helper_calls_what_its_belt_import_spawns() -> None:
     assert first_call(expand(text, set()), ["yq"]) == 1
 
 
-def test_a_helper_calls_what_a_belt_script_it_runs_calls() -> None:
+def test_a_helper_calls_what_a_belt_script_it_runs_calls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Planted: a helper sources a script it hands `script()`; its tool is called.
 
     rust_task.py runs `bash -c '. <belt>/pgrx-env.sh; …'` for
@@ -754,21 +756,22 @@ def test_a_helper_calls_what_a_belt_script_it_runs_calls() -> None:
             "utf-8",
         )
         here = sys.modules[__name__]
-        with pytest.MonkeyPatch.context() as patched:
-            patched.setattr(here, "BELT", belt_dir)
-            patched.setattr(here, "PACKAGE", belt_dir / "belt")
-            for key in list(_SOURCES):
-                patched.delitem(_SOURCES, key)
-            for key in list(_CODE):
-                patched.delitem(_CODE, key)
-            planted: list[str] = ["planted.sh"]
-            assert planted == python_code("runs.py").scripts
-            runs = expand('"${ORG_PYTHON}" -I "${ORG_CANON_DIR}/belt" runs', set())
-            assert first_call(runs, ["hadolint"]) == 3
-            assert first_call(runs, ["shfmt"]) is None
+        monkeypatch.setattr(here, "BELT", belt_dir)
+        monkeypatch.setattr(here, "PACKAGE", belt_dir / "belt")
+        for key in list(_SOURCES):
+            monkeypatch.delitem(_SOURCES, key)
+        for key in list(_CODE):
+            monkeypatch.delitem(_CODE, key)
+        planted: list[str] = ["planted.sh"]
+        assert planted == python_code("runs.py").scripts
+        runs = expand('"${ORG_PYTHON}" -I "${ORG_CANON_DIR}/belt" runs', set())
+        assert first_call(runs, ["hadolint"]) == 3
+        assert first_call(runs, ["shfmt"]) is None
 
 
-def test_a_name_in_a_message_is_charged_nothing() -> None:
+def test_a_name_in_a_message_is_charged_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Planted: a tool and a script named only in a message (#1903).
 
     The helper spawns git; hadolint and planted.sh are prose.
@@ -784,19 +787,18 @@ def test_a_name_in_a_message_is_charged_nothing() -> None:
             "utf-8",
         )
         here = sys.modules[__name__]
-        with pytest.MonkeyPatch.context() as patched:
-            patched.setattr(here, "BELT", belt_dir)
-            patched.setattr(here, "PACKAGE", belt_dir / "belt")
-            for key in list(_SOURCES):
-                patched.delitem(_SOURCES, key)
-            for key in list(_CODE):
-                patched.delitem(_CODE, key)
-            says = expand('"${ORG_PYTHON}" -I "${ORG_CANON_DIR}/belt" says', set())
-            assert first_call(says, ["hadolint"]) is None
-            assert first_call(says, ["git"]) == 1
+        monkeypatch.setattr(here, "BELT", belt_dir)
+        monkeypatch.setattr(here, "PACKAGE", belt_dir / "belt")
+        for key in list(_SOURCES):
+            monkeypatch.delitem(_SOURCES, key)
+        for key in list(_CODE):
+            monkeypatch.delitem(_CODE, key)
+        says = expand('"${ORG_PYTHON}" -I "${ORG_CANON_DIR}/belt" says', set())
+        assert first_call(says, ["hadolint"]) is None
+        assert first_call(says, ["git"]) == 1
 
 
-def test_a_list_a_wrapper_runs_is_a_call() -> None:
+def test_a_list_a_wrapper_runs_is_a_call(monkeypatch: pytest.MonkeyPatch) -> None:
     """Planted: an argv literal handed to the helper's own wrapper (#2037)."""
     with tempfile.TemporaryDirectory() as tmp:
         belt_dir = Path(tmp)
@@ -808,15 +810,14 @@ def test_a_list_a_wrapper_runs_is_a_call() -> None:
             "utf-8",
         )
         here = sys.modules[__name__]
-        with pytest.MonkeyPatch.context() as patched:
-            patched.setattr(here, "BELT", belt_dir)
-            patched.setattr(here, "PACKAGE", belt_dir / "belt")
-            for key in list(_SOURCES):
-                patched.delitem(_SOURCES, key)
-            for key in list(_CODE):
-                patched.delitem(_CODE, key)
-            wraps = expand('"${ORG_PYTHON}" -I "${ORG_CANON_DIR}/belt" wraps', set())
-            assert first_call(wraps, ["hadolint"]) == 1
+        monkeypatch.setattr(here, "BELT", belt_dir)
+        monkeypatch.setattr(here, "PACKAGE", belt_dir / "belt")
+        for key in list(_SOURCES):
+            monkeypatch.delitem(_SOURCES, key)
+        for key in list(_CODE):
+            monkeypatch.delitem(_CODE, key)
+        wraps = expand('"${ORG_PYTHON}" -I "${ORG_CANON_DIR}/belt" wraps', set())
+        assert first_call(wraps, ["hadolint"]) == 1
 
 
 def test_the_belt_helpers_that_run_belt_scripts() -> None:
@@ -1069,7 +1070,11 @@ def test_the_disable_env() -> None:
 
 @pytest.mark.parametrize("tree", ["go", "canon"])
 def test_the_disable_mode(
-    tree: str, tmp_path: Path, capfd: pytest.CaptureFixture[str], env: support.Env
+    tree: str,
+    tmp_path: Path,
+    capfd: pytest.CaptureFixture[str],
+    env: support.Env,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A Go tree leaves hadolint out; the canon leaves nothing out."""
     root = (
@@ -1079,11 +1084,10 @@ def test_the_disable_mode(
     )
     env_file = tmp_path / "env"
     env_file.write_text("")
-    with pytest.MonkeyPatch.context() as patched:
-        for name, value in (clean_env(env=env) | {"GITHUB_ENV": str(env_file)}).items():
-            patched.setenv(name, value)
-        patched.setattr(sys, "argv", [STEP])
-        status = gate_tools.main(["--root", str(root), "disable"])
+    for name, value in (clean_env(env=env) | {"GITHUB_ENV": str(env_file)}).items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setattr(sys, "argv", [STEP])
+    status = gate_tools.main(["--root", str(root), "disable"])
     out, err = capfd.readouterr()
     assert status == 0, err
     written = env_file.read_text()
@@ -1100,17 +1104,17 @@ def test_the_helper_refuses_a_table_out_of_step(
     capfd: pytest.CaptureFixture[str],
     belt: support.Belt,
     env: support.Env,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A belt key with no row is refused by name, not left out."""
     text = (BELT / "gate-tools.toml").read_text("utf-8")
     stub = text.replace('[tools."aqua:hadolint/hadolint"]', "[x]")
     table = belt(tmp_path, stubs={"gate-tools.toml": stub}) / "gate-tools.toml"
-    with pytest.MonkeyPatch.context() as patched:
-        for name, value in (env()).items():
-            patched.setenv(name, value)
-        patched.chdir(CANON)
-        patched.setattr(sys, "argv", [STEP])
-        status = gate_tools.main(["--table", str(table), "list"])
+    for name, value in (env()).items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.chdir(CANON)
+    monkeypatch.setattr(sys, "argv", [STEP])
+    status = gate_tools.main(["--table", str(table), "list"])
     _out, err = capfd.readouterr()
     assert status == 1
     assert f"::error::{STEP}: aqua:hadolint/hadolint is in one of" in err

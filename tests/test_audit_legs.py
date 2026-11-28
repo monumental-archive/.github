@@ -954,22 +954,20 @@ def test_a_fuzz_crate_with_no_bin_is_skipped_by_name(env: support.Env) -> None:
     assert len(lists["fuzz-targets"]) == 0
 
 
-def test_an_unreadable_fuzz_manifest_is_red_naming_it(env: support.Env) -> None:
+def test_an_unreadable_fuzz_manifest_is_red_naming_it(
+    env: support.Env, capfd: pytest.CaptureFixture[str]
+) -> None:
     """A fuzz/Cargo.toml that will not parse fails the applies job by name."""
     for text, message in (
         ("[[bin]\n", "fuzz/Cargo.toml: "),
         ("[[bin]]\npath = 'x.rs'\n", "fuzz/Cargo.toml: [[bin]] 1.name is not"),
     ):
         root = git_tree({"fuzz/Cargo.toml": text}, env=env)
-        err = io.StringIO()
-        with (
-            as_step(),
-            contextlib.redirect_stderr(err),
-            contextlib.redirect_stdout(io.StringIO()),
-        ):
+        with as_step():
             status = audit_legs.main(["--root", str(root), "repo-deep-tests"])
+        err = capfd.readouterr().err
         assert status == 1
-        assert err.getvalue().startswith(f"::error::{STEP}: {message}"), err.getvalue()
+        assert err.startswith(f"::error::{STEP}: {message}"), err
 
 
 def test_the_list_names_every_target_and_its_leg(env: support.Env) -> None:

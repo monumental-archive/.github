@@ -16,8 +16,6 @@ Every row asserts the exact output, so a row cannot pass by stopping
 somewhere else.
 """
 
-import contextlib
-import io
 import json
 import re
 import subprocess
@@ -1039,16 +1037,17 @@ EACH_FIELD_THE_VERDICT_READS_ROWS: tuple[tuple[object, str], ...] = (
 
 # A report field of another shape is refused by name, never a crash.
 @pytest.mark.parametrize(("value", "why"), EACH_FIELD_THE_VERDICT_READS_ROWS)
-def test_each_field_the_verdict_reads(value: object, why: str) -> None:
+def test_each_field_the_verdict_reads(
+    value: object, why: str, capfd: pytest.CaptureFixture[str]
+) -> None:
     """The refusal names the field, where it is, in the report."""
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp, "mutation.json")
         path.write_text(json.dumps(value), encoding="utf-8")
-        err = io.StringIO()
-        with contextlib.redirect_stderr(err):
-            status = mutants_typescript.judge(str(path), LABEL, "")
+        status = mutants_typescript.judge(str(path), LABEL, "")
+        err = capfd.readouterr().err
         assert status == 1
-        assert err.getvalue() == f"{LABEL}: no readable report at {path}: {why}\n"
+        assert err == f"{LABEL}: no readable report at {path}: {why}\n"
 
 
 def call(argv: list[str], *, capfd: pytest.CaptureFixture[str]) -> tuple[int, str, str]:

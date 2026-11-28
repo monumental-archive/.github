@@ -19,7 +19,6 @@ import json
 import subprocess
 import sys
 import tempfile
-from contextlib import redirect_stderr
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
@@ -942,7 +941,7 @@ def invoke(
     ],
 )
 def test_an_org_config_it_cannot_read_is_refused_by_name(
-    text: object, said: object
+    text: object, said: object, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """Not JSON, or a linter / rules / nursery not an object: named."""
     tree = Path(tempfile.mkdtemp())
@@ -953,10 +952,9 @@ def test_an_org_config_it_cannot_read_is_refused_by_name(
     args.nursery = NURSERY_FILE
     args.out = tree / "generated.json"
     args.declaration = tree / "biome.json"
-    err = io.StringIO()
-    with redirect_stderr(err):
-        status = biome_config.run(args, [])
-    lines = err.getvalue().splitlines()
+    status = biome_config.run(args, [])
+    err = capfd.readouterr().err
+    lines = err.splitlines()
     assert status == 1
     assert f"{TASK}: {args.org} cannot be read" == lines[0]
     assert lines[1].startswith(f"  {said}"), lines[1]
@@ -1017,7 +1015,9 @@ def test_a_declaration_carrying_rules_fails(capfd: pytest.CaptureFixture[str]) -
     assert not path.exists()
 
 
-def test_invalid_json_fails_without_a_traceback() -> None:
+def test_invalid_json_fails_without_a_traceback(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """A hand-edited file that does not parse gets a sentence, not a stack."""
     tree = Path(tempfile.mkdtemp())
     declared = tree / "biome.json"
@@ -1029,11 +1029,10 @@ def test_invalid_json_fails_without_a_traceback() -> None:
     args.nursery = NURSERY_FILE
     args.out = tree / "generated.json"
     args.declaration = declared
-    stderr = io.StringIO()
-    with redirect_stderr(stderr):
-        status = biome_config.run(args, [])
+    status = biome_config.run(args, [])
+    stderr = capfd.readouterr().err
     assert status == 1
-    assert "not valid JSON" in stderr.getvalue()
+    assert "not valid JSON" in stderr
 
 
 # A Node import, the one line noNodejsModules judges (#2116).

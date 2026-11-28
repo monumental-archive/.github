@@ -125,7 +125,9 @@ DOC = {"docs/a.md": "# A\n\nNothing cited.\n"}
 
 
 # docs/ is read from git, and a missing one is red by name.
-def test_an_untracked_docs_is_missing(env: support.Env) -> None:
+def test_an_untracked_docs_is_missing(
+    env: support.Env, capfd: pytest.CaptureFixture[str]
+) -> None:
     """docs/ on disk, nothing tracked under it: the missing-input red."""
     with tempfile.TemporaryDirectory() as tmp:
         tree = Path(tmp) / "repo"
@@ -133,14 +135,13 @@ def test_an_untracked_docs_is_missing(env: support.Env) -> None:
         plant(tree, {"README.md": "x\n"}, env=env)
         (tree / "docs").mkdir()
         (tree / "docs" / "a.md").write_text("x\n", encoding="utf-8")
-        err = io.StringIO()
-        with contextlib.redirect_stderr(err):
-            status = citations.main([], net=Org(), top=tree)
+        status = citations.main([], net=Org(), top=tree)
+        err = capfd.readouterr().err
     assert status == 1
     assert (
         f"{TASK}: on the canon, and the input this leg walks is missing: docs/\n"
         "  a canon-only audit reds on a missing input, never skips (#738).\n"
-    ) == err.getvalue()
+    ) == err
 
 
 def test_docs_without_markdown_is_red(env: support.Env) -> None:
@@ -154,11 +155,10 @@ def test_docs_without_markdown_is_red(env: support.Env) -> None:
     ) == err
 
 
-def test_no_gh_is_red(env: support.Env) -> None:
+def test_no_gh_is_red(env: support.Env, monkeypatch: pytest.MonkeyPatch) -> None:
     """With no network stand-in and no gh on PATH: `gh missing`."""
-    with pytest.MonkeyPatch.context() as patched:
-        patched.setattr("shutil.which", lambda *_args, **_kwargs: None)
-        status, _, err = audit(DOC, None, env=env)
+    monkeypatch.setattr("shutil.which", lambda *_args, **_kwargs: None)
+    status, _, err = audit(DOC, None, env=env)
     assert (1, f"{TASK}: gh missing\n") == (status, err)
 
 

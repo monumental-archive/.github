@@ -19,8 +19,6 @@ it — and the writer would have spliced a `'''` block over the `run = [`
 line and eaten the array in the first adopter that had one.
 """
 
-import io
-from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
@@ -421,38 +419,37 @@ def test_errexit_is_modelled() -> None:
 
 
 # The command surface's own exits.
-def test_no_files_is_not_a_failure() -> None:
+def test_no_files_is_not_a_failure(capfd: pytest.CaptureFixture[str]) -> None:
     """The task guards for this, and so does the helper behind it."""
-    out = io.StringIO()
-    with redirect_stdout(out):
-        assert bs.main([]) == 0
-    assert "nothing to check" in out.getvalue()
+    assert bs.main([]) == 0
+    out = capfd.readouterr().out
+    assert "nothing to check" in out
 
 
-def test_a_non_shell_task_shell_skips() -> None:
+def test_a_non_shell_task_shell_skips(capfd: pytest.CaptureFixture[str]) -> None:
     """Shellcheck has nothing to say about a `pwsh` body."""
     with TemporaryDirectory() as tmp:
         path = write(
             tmp,
             '[task_config]\nshell = "pwsh -c"\n\n[tasks.t]\nrun = "echo hi"\n',
         )
-        out = io.StringIO()
-        with redirect_stdout(out):
-            assert bs.main([str(path)]) == 0
-    assert "not shell — skipped" in out.getvalue()
+        assert bs.main([str(path)]) == 0
+        out = capfd.readouterr().out
+    assert "not shell — skipped" in out
 
 
-def test_a_clean_config_exits_zero() -> None:
+def test_a_clean_config_exits_zero(capfd: pytest.CaptureFixture[str]) -> None:
     """And says how much it checked, so a vacuous pass is visible."""
     with TemporaryDirectory() as tmp:
         path = write(tmp, f"{PIN}\n[tasks.t]\nrun = '''\n{CLEAN}'''\n")
-        out = io.StringIO()
-        with redirect_stdout(out):
-            assert bs.main([str(path)]) == 0
-    assert "1 task body(ies)" in out.getvalue()
+        assert bs.main([str(path)]) == 0
+        out = capfd.readouterr().out
+    assert "1 task body(ies)" in out
 
 
-def test_a_config_that_is_not_toml_is_refused_by_name() -> None:
+def test_a_config_that_is_not_toml_is_refused_by_name(
+    monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """Checked or written, an undecodable config is named (#1681)."""
     with pytest.raises(decoded.UndecodableError) as caught:
         decoded.load_toml("[tasks.t\n")
@@ -460,24 +457,18 @@ def test_a_config_that_is_not_toml_is_refused_by_name() -> None:
     with TemporaryDirectory() as tmp:
         path = write(tmp, "[tasks.t\n")
         for task, extra in ((LINT, []), (FIX, ["--write"])):
-            err = io.StringIO()
-            with (
-                pytest.MonkeyPatch.context() as patched,
-                redirect_stdout(io.StringIO()),
-                redirect_stderr(err),
-            ):
-                patched.setenv("MISE_TASK_NAME", task)
-                patched.setenv("ORG_FINDINGS", "")
-                assert bs.main([str(path), *extra]) == 1
-            assert err.getvalue() == f"{task}: {path}: not TOML: {why}\n"
+            monkeypatch.setenv("MISE_TASK_NAME", task)
+            monkeypatch.setenv("ORG_FINDINGS", "")
+            assert bs.main([str(path), *extra]) == 1
+            err = capfd.readouterr().err
+            assert err == f"{task}: {path}: not TOML: {why}\n"
 
 
 def test_a_finding_exits_one() -> None:
     """The gate's whole point."""
     with TemporaryDirectory() as tmp:
         path = write(tmp, "[tasks.t]\nrun = '''\necho $x\n'''\n")
-        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
-            assert bs.main([str(path)]) == 1
+        assert bs.main([str(path)]) == 1
 
 
 # The task-shell pin assertion (#700).
@@ -527,14 +518,13 @@ def test_a_pin_to_something_other_than_bash_is_still_a_pin() -> None:
         assert bs.unpinned({path: bs.read(path)}) == list[str]()
 
 
-def test_main_reds_on_an_unpinned_config() -> None:
+def test_main_reds_on_an_unpinned_config(capfd: pytest.CaptureFixture[str]) -> None:
     """End to end, through the exit status the gate reads."""
     with TemporaryDirectory() as tmp:
         path = write(tmp, f"[tasks.t]\nrun = '''\n{CLEAN}'''\n")
-        err = io.StringIO()
-        with redirect_stdout(io.StringIO()), redirect_stderr(err):
-            assert bs.main([str(path)]) == 1
-    assert "pins no task shell" in err.getvalue()
+        assert bs.main([str(path)]) == 1
+        err = capfd.readouterr().err
+    assert "pins no task shell" in err
 
 
 def test_an_env_from_config_is_not_asserted_on() -> None:
@@ -547,9 +537,7 @@ def test_an_env_from_config_is_not_asserted_on() -> None:
         checked = write(tmp, f'{PIN}\n[tasks.t]\nrun = "echo hi"\n')
         other = Path(tmp) / "belt.toml"
         other.write_text('[tasks.b]\nrun = "echo belt"\n', encoding="utf-8")
-        out = io.StringIO()
-        with redirect_stdout(out), redirect_stderr(io.StringIO()):
-            rc = bs.main([str(checked), "--env-from", str(other)])
+        rc = bs.main([str(checked), "--env-from", str(other)])
     assert rc == 0
 
 
@@ -557,11 +545,12 @@ def test_write_mode_does_not_assert() -> None:
     """`fix:belt-shell` formats bodies; it cannot add a pin for you."""
     with TemporaryDirectory() as tmp:
         path = write(tmp, f"[tasks.t]\nrun = '''\n{CLEAN}'''\n")
-        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
-            assert bs.main([str(path), "--write"]) == 0
+        assert bs.main([str(path), "--write"]) == 0
 
 
-def test_an_unpinned_config_reds_even_when_modelling_is_skipped() -> None:
+def test_an_unpinned_config_reds_even_when_modelling_is_skipped(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """A file the tools decline to read still answers for its pin.
 
     The shell resolves to `pwsh` from the env-from config, so the body
@@ -571,12 +560,11 @@ def test_an_unpinned_config_reds_even_when_modelling_is_skipped() -> None:
         checked = write(tmp, '[tasks.t]\nrun = "echo hi"\n')
         other = Path(tmp) / "belt.toml"
         other.write_text('[task_config]\nshell = "pwsh -c"\n', encoding="utf-8")
-        out, err = io.StringIO(), io.StringIO()
-        with redirect_stdout(out), redirect_stderr(err):
-            rc = bs.main([str(checked), "--env-from", str(other)])
+        rc = bs.main([str(checked), "--env-from", str(other)])
+        out, err = capfd.readouterr()
     assert rc == 1
-    assert "not shell — skipped" in out.getvalue()
-    assert "pins no task shell" in err.getvalue()
+    assert "not shell — skipped" in out
+    assert "pins no task shell" in err
 
 
 def nested(body: str) -> list[str]:
@@ -669,30 +657,27 @@ def test_scrub_preserves_offsets() -> None:
     assert bs.scrub(source).count("\n") == source.count("\n")
 
 
-def test_main_reds_on_a_planted_invocation() -> None:
+def test_main_reds_on_a_planted_invocation(capfd: pytest.CaptureFixture[str]) -> None:
     """End to end, through the exit status the gate reads."""
     with TemporaryDirectory() as tmp:
         path = write(tmp, f"{PIN}\n[tasks.t]\nrun = '''\nmise run other\n'''\n")
-        err = io.StringIO()
-        with redirect_stdout(io.StringIO()), redirect_stderr(err):
-            assert bs.main([str(path)]) == 1
-    assert "execute `mise run`" in err.getvalue()
+        assert bs.main([str(path)]) == 1
+        err = capfd.readouterr().err
+    assert "execute `mise run`" in err
 
 
 def test_main_greens_when_the_invocation_is_removed() -> None:
     """The same file with the one line gone, so the red was the line."""
     with TemporaryDirectory() as tmp:
         path = write(tmp, f"{PIN}\n[tasks.t]\nrun = '''\n{CLEAN}'''\n")
-        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
-            assert bs.main([str(path)]) == 0
+        assert bs.main([str(path)]) == 0
 
 
 def test_nested_write_mode_does_not_assert() -> None:
     """fix:belt-shell formats bodies; it cannot extract a helper for you."""
     with TemporaryDirectory() as tmp:
         path = write(tmp, f"{PIN}\n[tasks.t]\nrun = '''\nmise run other\n'''\n")
-        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
-            assert bs.main([str(path), "--write"]) == 0
+        assert bs.main([str(path), "--write"]) == 0
 
 
 def test_nested_an_env_from_config_is_not_asserted_on() -> None:
@@ -704,8 +689,7 @@ def test_nested_an_env_from_config_is_not_asserted_on() -> None:
             "[tasks.b]\nrun = '''\nmise run x\n'''\n",
             encoding="utf-8",
         )
-        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
-            rc = bs.main([str(checked), "--env-from", str(other)])
+        rc = bs.main([str(checked), "--env-from", str(other)])
     assert rc == 0
 
 

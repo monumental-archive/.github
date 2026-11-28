@@ -365,18 +365,19 @@ def test_a_clean_extension_says_what_was_linted(
 
 
 def test_the_manifest_path_reaches_every_cargo_command(
-    planted_state: Planted, capfd: pytest.CaptureFixture[str]
+    planted_state: Planted,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Fetch, metadata and clippy each name the workspace they read."""
-    with pytest.MonkeyPatch.context() as patched:
-        for name, value in (
-            planted_state.env | {"ORG_BELT_DIR": str(planted_state.belt)}
-        ).items():
-            patched.setenv(name, value)
-        patched.chdir(planted_state.tree)
-        status = pg_clippy.workspace(
-            str(planted_state.bins / "cargo"), "crates/Cargo.toml"
-        ).status
+    for name, value in (
+        planted_state.env | {"ORG_BELT_DIR": str(planted_state.belt)}
+    ).items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.chdir(planted_state.tree)
+    status = pg_clippy.workspace(
+        str(planted_state.bins / "cargo"), "crates/Cargo.toml"
+    ).status
     _out, err = capfd.readouterr()
     assert status == 0, err
     tail = "--manifest-path crates/Cargo.toml"

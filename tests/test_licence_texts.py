@@ -261,9 +261,8 @@ def test_the_canons_own_tree_is_green() -> None:
         assert want == lt.findings(ROOT, without)
 
 
-def test_usage() -> None:
+def test_usage(capfd: pytest.CaptureFixture[str]) -> None:
     """An argument is a usage error, not a pass."""
-    err = io.StringIO()
-    with contextlib.redirect_stderr(err):
-        assert lt.main(["extra"]) == 2
-    assert f"{TASK}: usage: org_tracked | belt licence-texts\n" == err.getvalue()
+    assert lt.main(["extra"]) == 2
+    err = capfd.readouterr().err
+    assert f"{TASK}: usage: org_tracked | belt licence-texts\n" == err

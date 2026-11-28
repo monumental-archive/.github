@@ -7,7 +7,6 @@ where an attribute's own literal holds `allow(`, and each manifest
 shape that is or is not a lint table.
 """
 
-import contextlib
 import io
 import subprocess
 import sys
@@ -238,18 +237,17 @@ def test_undecodable_files_are_refused_by_name(
         assert done.stderr.startswith(f"lint:rust: {name}: ")
 
 
-def test_main_in_process() -> None:
+def test_main_in_process(capfd: pytest.CaptureFixture[str]) -> None:
     """`main` read in-process, so its own lines are measured."""
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "lib.rs"
         path.write_text("#![allow(y)]\n")
-        err = io.StringIO()
         stdin = sys.stdin
         sys.stdin = io.StringIO(f"{path}\0")
         try:
-            with contextlib.redirect_stderr(err):
-                status = rsup.main([])
+            status = rsup.main([])
+            err = capfd.readouterr().err
         finally:
             sys.stdin = stdin
     assert status == 1
-    assert f"  {path}:1: #![allow(y)]\n" in err.getvalue()
+    assert f"  {path}:1: #![allow(y)]\n" in err

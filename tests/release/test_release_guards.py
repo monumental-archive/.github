@@ -554,23 +554,27 @@ def test_an_unknown_result_is_refused_by_name(env: support.Env) -> None:
 
 
 # A fixture's environment is what the row gives it (#1508).
-def test_the_release_job_inputs_do_not_reach_a_fixture(env: support.Env) -> None:
+def test_the_release_job_inputs_do_not_reach_a_fixture(
+    env: support.Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The release job exports its step inputs; no fixture sees them."""
     planted = {"VERSION": "1.69.4", "PLAN": "{}", "APP_SLUG": "canon-release"}
-    with pytest.MonkeyPatch.context() as patched, TemporaryDirectory() as d:
+    with TemporaryDirectory() as d:
         for name, value in planted.items():
-            patched.setenv(name, value)
+            monkeypatch.setenv(name, value)
         environ = hermetic_env(Path(d), env=env)
     leaked = sorted(set(planted) & set(environ))
     assert list[str]() == leaked
 
 
-def test_a_row_still_states_its_own_input(env: support.Env) -> None:
+def test_a_row_still_states_its_own_input(
+    env: support.Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Overrides are how a row gives a fixture an input."""
     planted = {"VERSION": "1.69.4"}
-    with pytest.MonkeyPatch.context() as patched, TemporaryDirectory() as d:
+    with TemporaryDirectory() as d:
         for name, value in planted.items():
-            patched.setenv(name, value)
+            monkeypatch.setenv(name, value)
         environ = hermetic_env(Path(d), VERSION="2.0.0", env=env)
     assert environ["VERSION"] == "2.0.0"
 

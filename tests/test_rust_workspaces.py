@@ -389,29 +389,32 @@ def test_an_unmarked_root_adds_nothing(fuzzing_state: Fuzzing) -> None:
     ("before", "inside"), BUILT_AS_HOLDS_THE_FLAGS_AND_PUTS_THEM_BACK_ROWS
 )
 def test_built_as_holds_the_flags_and_puts_them_back(
-    fuzzing_state: Fuzzing, before: dict[str, str], inside: str
+    fuzzing_state: Fuzzing,
+    before: dict[str, str],
+    inside: str,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Set inside, restored after: a value kept, an absent one removed."""
     marked = fuzzing_state.manifest("[package]\nmetadata = { cargo-fuzz = true }\n")
-    with pytest.MonkeyPatch.context() as patched:
-        for name in list(os.environ):
-            patched.delenv(name)
-        for name, value in before.items():
-            patched.setenv(name, value)
-        with rust_workspaces.built_as(marked):
-            assert inside == os.environ["RUSTFLAGS"]
-        assert before.get("RUSTFLAGS") == os.environ.get("RUSTFLAGS")
+    for name in list(os.environ):
+        monkeypatch.delenv(name)
+    for name, value in before.items():
+        monkeypatch.setenv(name, value)
+    with rust_workspaces.built_as(marked):
+        assert inside == os.environ["RUSTFLAGS"]
+    assert before.get("RUSTFLAGS") == os.environ.get("RUSTFLAGS")
 
 
-def test_built_as_restores_after_a_raise(fuzzing_state: Fuzzing) -> None:
+def test_built_as_restores_after_a_raise(
+    fuzzing_state: Fuzzing, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """An exception inside still puts the environment back."""
     marked = fuzzing_state.manifest("[package]\nmetadata = { cargo-fuzz = true }\n")
     empty: dict[str, str] = {}
-    with pytest.MonkeyPatch.context() as patched:
-        for name in list(os.environ):
-            patched.delenv(name)
-        for name, value in empty.items():
-            patched.setenv(name, value)
-        with pytest.raises(KeyError), rust_workspaces.built_as(marked):
-            _ = os.environ["PLANTED_ABSENT"]
-        assert "RUSTFLAGS" not in os.environ
+    for name in list(os.environ):
+        monkeypatch.delenv(name)
+    for name, value in empty.items():
+        monkeypatch.setenv(name, value)
+    with pytest.raises(KeyError), rust_workspaces.built_as(marked):
+        _ = os.environ["PLANTED_ABSENT"]
+    assert "RUSTFLAGS" not in os.environ

@@ -187,7 +187,7 @@ def test_an_ignore_that_is_not_an_array_is_refused_by_name(
 
 
 def test_each_finding_is_recorded(
-    capfd: pytest.CaptureFixture[str], env: support.Env
+    capfd: pytest.CaptureFixture[str], env: support.Env, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """ORG_FINDINGS set: one record per advisory, through findings.py."""
     with tempfile.TemporaryDirectory() as tmp:
@@ -196,11 +196,10 @@ def test_each_finding_is_recorded(
         path.write_text(text, encoding="utf-8")
         records = Path(tmp) / "findings.jsonl"
         environ = env(MISE_TASK_NAME="lint:deny", ORG_FINDINGS=str(records))
-        with pytest.MonkeyPatch.context() as patched:
-            for name, value in environ.items():
-                patched.setenv(name, value)
-            patched.chdir(tmp)
-            status = da.main(["deny.toml"])
+        for name, value in environ.items():
+            monkeypatch.setenv(name, value)
+        monkeypatch.chdir(tmp)
+        status = da.main(["deny.toml"])
         _out, _err = capfd.readouterr()
         lines = records.read_text(encoding="utf-8").splitlines()
     assert status == 1

@@ -273,12 +273,13 @@ def test_only_the_last_300_lines_survive() -> None:
 
 # The command's one argument.
 @pytest.mark.parametrize("argv", [[], [""], ["a", "b"]])
-def test_a_missing_package_is_a_usage_error(argv: object) -> None:
+def test_a_missing_package_is_a_usage_error(
+    argv: object, capfd: pytest.CaptureFixture[str]
+) -> None:
     """No package, or an empty one, exits 2 with the usage line."""
-    out = io.StringIO()
-    with redirect_stdout(out):
-        assert publish_npm.main(argv) == 2
-    assert out.getvalue() == "usage: belt publish-npm <name@version>\n"
+    assert publish_npm.main(argv) == 2
+    out = capfd.readouterr().out
+    assert out == "usage: belt publish-npm <name@version>\n"
 
 
 def test_the_package_reaches_run_with_the_job_s_environment(

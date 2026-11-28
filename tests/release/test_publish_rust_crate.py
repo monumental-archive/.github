@@ -533,14 +533,13 @@ def test_cargo_metadata_with_no_target_directory_is_refused() -> None:
     assert str(refused.value) == "cargo metadata's target_directory is not a string"
 
 
-def test_an_answer_that_is_not_a_response_is_refused() -> None:
+def test_an_answer_that_is_not_a_response_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """What answered is not an HTTP response: refused by name (#1682)."""
     url = "https://index.crates.io/ed/tf/edtf-core"
-    with (
-        pytest.MonkeyPatch.context() as patched,
-        pytest.raises(publish_crates.RefusalError) as caught,
-    ):
-        patched.setattr(urllib.request, "urlopen", lambda *_args, **_kwargs: None)
+    with pytest.raises(publish_crates.RefusalError) as caught:
+        monkeypatch.setattr(urllib.request, "urlopen", lambda *_args, **_kwargs: None)
         publish_crates.http("GET", url, {})
     assert f"{url} answered NoneType, not an HTTP response" == str(caught.value)
 
@@ -597,8 +596,7 @@ def test_a_failed_command_names_itself_and_its_status(
     )
 
 
-def test_success_is_run_s_exit() -> None:
+def test_success_is_run_s_exit(monkeypatch: pytest.MonkeyPatch) -> None:
     """Without a failure, main returns what run returned."""
-    with pytest.MonkeyPatch.context() as patched:
-        patched.setattr(publish_crates, "run", lambda *_args, **_kwargs: 0)
-        assert publish_crates.main([]) == 0
+    monkeypatch.setattr(publish_crates, "run", lambda *_args, **_kwargs: 0)
+    assert publish_crates.main([]) == 0

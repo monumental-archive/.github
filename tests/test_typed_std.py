@@ -84,20 +84,16 @@ def test_an_empty_group_is_text() -> None:
 
 
 # All of standard input, or the one refusal.
-def test_text() -> None:
+def test_text(monkeypatch: pytest.MonkeyPatch) -> None:
     """Standard input's text, read to its end."""
-    with pytest.MonkeyPatch.context() as patched:
-        patched.setattr("sys.stdin", io.StringIO("one\ntwo\n"))
-        assert typed_std.stdin_text() == "one\ntwo\n"
+    monkeypatch.setattr("sys.stdin", io.StringIO("one\ntwo\n"))
+    assert typed_std.stdin_text() == "one\ntwo\n"
 
 
-def test_absent_in_process() -> None:
+def test_absent_in_process(monkeypatch: pytest.MonkeyPatch) -> None:
     """No standard input (sys.stdin is None): refused by name."""
-    with (
-        pytest.MonkeyPatch.context() as patched,
-        pytest.raises(typed_std.NoStdinError) as caught,
-    ):
-        patched.setattr("sys.stdin", None)
+    with pytest.raises(typed_std.NoStdinError) as caught:
+        monkeypatch.setattr("sys.stdin", None)
         typed_std.stdin_text()
     assert str(caught.value) == "no standard input: the process was started without one"
 
@@ -171,7 +167,7 @@ class Opener(urllib.request.OpenerDirector):
 
 
 # One HTTP answer, typed; never `Any`.
-def test_urllib_s_answer_is_returned_and_read() -> None:
+def test_urllib_s_answer_is_returned_and_read(monkeypatch: pytest.MonkeyPatch) -> None:
     """No opener: urllib's own urlopen answers, with the timeout."""
     answer = Answer(200, b"body", "text/plain")
     timeouts: list[float] = []
@@ -181,15 +177,13 @@ def test_urllib_s_answer_is_returned_and_read() -> None:
         timeouts.append(timeout)
         return answer
 
-    # typed_std's urllib.request is this module: the one urlopen it calls.
-    with pytest.MonkeyPatch.context() as patched:
-        patched.setattr(urllib.request, "urlopen", opened)
-        got = typed_std.urlopen(urllib.request.Request(URL), timeout=7)
-        assert (got.status, got.read(), got.getheader("Content-Type")) == (
-            200,
-            b"body",
-            "text/plain",
-        )
+    monkeypatch.setattr(urllib.request, "urlopen", opened)
+    got = typed_std.urlopen(urllib.request.Request(URL), timeout=7)
+    assert (got.status, got.read(), got.getheader("Content-Type")) == (
+        200,
+        b"body",
+        "text/plain",
+    )
     want: list[float] = [7]
     assert want == timeouts
 

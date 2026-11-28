@@ -992,7 +992,9 @@ def test_a_digest_the_registry_does_not_hold(tag_state: Tag) -> None:
     assert methods == want
 
 
-def test_registry_url_in_the_environment_changes_nothing(harness: Harness) -> None:
+def test_registry_url_in_the_environment_changes_nothing(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """A GITHUB_ENV write cannot send the token elsewhere (#1382 review).
 
     The production entry (no `origin`) is run with `REGISTRY_URL` set
@@ -1010,31 +1012,25 @@ def test_registry_url_in_the_environment_changes_nothing(harness: Harness) -> No
         reason = "no network in this row"
         raise urllib.error.URLError(reason)
 
-    out = io.StringIO()
-    with (
-        pytest.MonkeyPatch.context() as patched,
-        contextlib.redirect_stdout(out),
-        contextlib.redirect_stderr(out),
-    ):
-        patched.setattr(urllib.request, "urlopen", refuse)
-        code = registry.main(["tag"], harness.env)
+    monkeypatch.setattr(urllib.request, "urlopen", refuse)
+    code = registry.main(["tag"], harness.env)
+    out, out = capfd.readouterr()
     assert code == 1
     want: list[str] = [
         "https://ghcr.io/token?scope=repository:a/b:pull,push&service=ghcr.io"
     ]
     assert opened == want
-    assert "attacker" not in out.getvalue()
+    assert "attacker" not in out
 
 
 @pytest.mark.usefixtures("harness")
-def test_an_answer_that_is_not_a_response_is_refused() -> None:
+def test_an_answer_that_is_not_a_response_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """What answered is not an HTTP response: refused by name (#1682)."""
     url = "https://ghcr.io/v2/a/b/manifests/1"
-    with (
-        pytest.MonkeyPatch.context() as patched,
-        pytest.raises(registry.RefusedError) as caught,
-    ):
-        patched.setattr(urllib.request, "urlopen", lambda *_args, **_kwargs: None)
+    with pytest.raises(registry.RefusedError) as caught:
+        monkeypatch.setattr(urllib.request, "urlopen", lambda *_args, **_kwargs: None)
         registry.Registry.request("GET", url, {})
     assert f"{url} answered NoneType, not an HTTP response" == str(caught.value)
 

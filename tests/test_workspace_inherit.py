@@ -403,14 +403,13 @@ def test_a_declared_table_with_no_member_fails() -> None:
 
 @pytest.mark.parametrize(("document", "where"), WRONG_SHAPES)
 def test_metadata_of_the_wrong_shape_stops_the_task_by_where(
-    document: object, where: str
+    document: object, where: str, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """A wrong-shaped account is refused naming where, never a crash."""
     said = f"{TASK}: Cargo.toml: cargo metadata is unreadable"
-    err = io.StringIO()
-    with redirect_stderr(err):
-        assert wi.check(json.dumps(document), "Cargo.toml") == 1
-    assert f"{said} ({where})\n" == err.getvalue()
+    assert wi.check(json.dumps(document), "Cargo.toml") == 1
+    err = capfd.readouterr().err
+    assert f"{said} ({where})\n" == err
 
 
 def test_a_manifest_of_the_wrong_shape_stops_the_task() -> None:
@@ -428,8 +427,7 @@ def test_a_manifest_of_the_wrong_shape_stops_the_task() -> None:
 
 def test_unreadable_metadata_stops_the_task() -> None:
     """A broken account is refused, never read as an empty one."""
-    with redirect_stderr(io.StringIO()):
-        assert wi.check("not json", "Cargo.toml") == 1
+    assert wi.check("not json", "Cargo.toml") == 1
 
 
 # cargo for the two-root rows (#2004): locate-project names the fuzz

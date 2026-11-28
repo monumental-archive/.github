@@ -1,6 +1,5 @@
 """Tests for lock_arch.py, the lock architecture-agreement check."""
 
-import contextlib
 import io
 import pathlib
 import re
@@ -170,15 +169,14 @@ def test_unjudgeable_asset_is_not_reported() -> None:
         ("tools = 1\n", "tools is not an object"),
     ],
 )
-def test_an_unreadable_lock_is_named_and_skipped(body: object, said: object) -> None:
+def test_an_unreadable_lock_is_named_and_skipped(
+    body: object, said: object, capfd: pytest.CaptureFixture[str]
+) -> None:
     """Not TOML, or `tools` not a table: said by name, no candidate."""
     path = _lock(body)
-    err = io.StringIO()
-    with contextlib.redirect_stderr(err):
-        assert lock_arch.candidates(path) == NO_CANDIDATES
-    assert err.getvalue().startswith(f"lock-arch: cannot read {path}: {said}"), (
-        err.getvalue()
-    )
+    assert lock_arch.candidates(path) == NO_CANDIDATES
+    err = capfd.readouterr().err
+    assert err.startswith(f"lock-arch: cannot read {path}: {said}"), err
 
 
 def test_empty_lock_is_clean() -> None:
@@ -210,14 +208,13 @@ def planted_lock(body: str) -> pathlib.Path:
 
 # The entry the task starts, called in the test process (#1697).
 def test_each_lock_on_stdin_is_read_and_its_candidates_printed(
-    capfd: pytest.CaptureFixture[str],
+    capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """An empty entry and a missing file are passed over; exit is 0."""
     path = planted_lock(DEFECT)
     listing = f"\0{path}\0{path.parent / 'absent.lock'}\0"
-    with pytest.MonkeyPatch.context() as patched:
-        patched.setattr(sys, "stdin", io.StringIO(listing))
-        status = lock_arch.main([])
+    monkeypatch.setattr(sys, "stdin", io.StringIO(listing))
+    status = lock_arch.main([])
     out, _err = capfd.readouterr()
     assert status == 0
     assert lock_arch.candidates(path) == out.splitlines()

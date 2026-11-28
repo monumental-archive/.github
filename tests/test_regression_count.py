@@ -424,15 +424,14 @@ def test_empty_range_prints_no_fixes(report: Report) -> None:
 
 
 @pytest.mark.usefixtures("report")
-def test_branch_with_no_commits() -> None:
+def test_branch_with_no_commits(capfd: pytest.CaptureFixture[str]) -> None:
     """A repository whose branch has no commits yet has no fixes."""
     with tempfile.TemporaryDirectory() as tmp:
         run_git(tmp, "init", "--quiet")
-        out = io.StringIO()
-        with contextlib.redirect_stdout(out):
-            status = rc.main(["--repo", tmp])
+        status = rc.main(["--repo", tmp])
+        out = capfd.readouterr().out
     assert status == 0
-    assert "= no fixes" in out.getvalue()
+    assert "= no fixes" in out
 
 
 def test_lists_and_ratio(report: Report) -> None:
@@ -450,13 +449,13 @@ def test_lists_and_ratio(report: Report) -> None:
     assert "= 1 of 3 (33.3%)" in out
 
 
-def test_summary_lists_only_recent_no_test(report: Report) -> None:
+def test_summary_lists_only_recent_no_test(
+    report: Report, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The summary carries the window's ratio and the recent fixes only."""
-    env = {"GIT_COMMITTER_DATE": "2020-01-01T00:00:00Z"}
-    with pytest.MonkeyPatch.context() as patched:
-        for name, value in env.items():
-            patched.setenv(name, value)
-        report.repo.commit("fix: old", {"old.py": "1\n"})
+    monkeypatch.setenv("GIT_COMMITTER_DATE", "2020-01-01T00:00:00Z")
+    report.repo.commit("fix: old", {"old.py": "1\n"})
+    monkeypatch.delenv("GIT_COMMITTER_DATE")
     report.repo.commit("fix: new", {"new.py": "1\n"})
     report.repo.commit("fix: tested", {"t.py": "1\n", "test_t.py": "1\n"})
     with tempfile.TemporaryDirectory() as tmp:
@@ -477,28 +476,25 @@ def test_summary_lists_only_recent_no_test(report: Report) -> None:
     assert "fix: tested" not in text
 
 
-def test_shallow_clone_is_refused(report: Report) -> None:
+def test_shallow_clone_is_refused(
+    report: Report, capfd: pytest.CaptureFixture[str]
+) -> None:
     """A shallow clone cuts the window short; the ratio is not measured."""
     for i in range(3):
         report.repo.commit(f"fix: {i}", {f"{i}.py": "1\n"})
     with tempfile.TemporaryDirectory() as tmp:
         run_git(tmp, "clone", "--quiet", "--depth=1", f"file://{report.repo.root}", ".")
-        err = io.StringIO()
-        with (
-            contextlib.redirect_stderr(err),
-            contextlib.redirect_stdout(io.StringIO()),
-        ):
-            status = rc.main(["--repo", tmp])
+        status = rc.main(["--repo", tmp])
+        err = capfd.readouterr().err
     assert status == 2
-    assert "the clone is shallow" in err.getvalue()
+    assert "the clone is shallow" in err
 
 
 @pytest.mark.usefixtures("report")
-def test_not_a_repository() -> None:
+def test_not_a_repository(capfd: pytest.CaptureFixture[str]) -> None:
     """A directory git cannot read is an error, not "no fixes"."""
     with tempfile.TemporaryDirectory() as tmp:
-        err = io.StringIO()
-        with contextlib.redirect_stderr(err):
-            status = rc.main(["--repo", tmp])
+        status = rc.main(["--repo", tmp])
+        err = capfd.readouterr().err
     assert status == 2
-    assert f"{TASK}: git" in err.getvalue()
+    assert f"{TASK}: git" in err

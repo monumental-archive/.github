@@ -134,14 +134,15 @@ def test_a_missing_repo_url_is_red() -> None:
     )
 
 
-def test_a_process_with_no_stdin_is_red_by_name() -> None:
+def test_a_process_with_no_stdin_is_red_by_name(
+    monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """No standard input is named, never a traceback (#1681)."""
-    out = io.StringIO()
-    with pytest.MonkeyPatch.context() as patched, redirect_stdout(out):
-        patched.setattr("sys.stdin", None)
-        status = owner.main([CANON_WEARER])
+    monkeypatch.setattr("sys.stdin", None)
+    status = owner.main([CANON_WEARER])
+    out = capfd.readouterr().out
     assert status == 1
-    assert out.getvalue() == (
+    assert out == (
         "the issuer's answer cannot be read: no standard input: the"
         " process was started without one\n"
     )

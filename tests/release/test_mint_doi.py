@@ -1635,17 +1635,16 @@ def test_a_listing_page_that_cannot_be_read_refuses(
 
 
 def test_a_listing_still_full_at_the_page_bound_refuses(
-    capfd: pytest.CaptureFixture[str], env: support.Env
+    capfd: pytest.CaptureFixture[str], env: support.Env, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Full pages to the bound: the bound refuses, never passes."""
     (draft,) = captured_list("drafts-during")
     z = first_mint_zenodo([])
     z.title_pages = [[draft] * mint_doi.LISTING_PAGE] * 3
-    with pytest.MonkeyPatch.context() as patched:
-        patched.setattr(mint_doi, "LISTING_MAX_PAGES", 3)
-        run = run_helper(
-            "0BSD", zenodo=z, version="1.68.5", repo=CANON_REPO, capfd=capfd, env=env
-        )
+    monkeypatch.setattr(mint_doi, "LISTING_MAX_PAGES", 3)
+    run = run_helper(
+        "0BSD", zenodo=z, version="1.68.5", repo=CANON_REPO, capfd=capfd, env=env
+    )
     assert run.returncode == 1, run.stdout
     assert (
         f"could not be read to its end ({3 * mint_doi.LISTING_PAGE} entries read)"
@@ -1841,15 +1840,14 @@ def refused(call: Callable[[], object], message: str) -> None:
     assert message == str(caught.value)
 
 
-def test_an_answer_that_is_not_a_response_is_refused() -> None:
+def test_an_answer_that_is_not_a_response_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """What the opener answered is not an HTTP response: refused by name."""
     url = "https://zenodo.invalid/api/records/1"
     z = mint_doi.Zenodo("https://zenodo.invalid", "t", "a")
-    with (
-        pytest.MonkeyPatch.context() as patched,
-        pytest.raises(mint_doi.RefusedError) as caught,
-    ):
-        patched.setattr(z._public, "open", lambda *_args, **_kwargs: None)
+    with pytest.raises(mint_doi.RefusedError) as caught:
+        monkeypatch.setattr(z._public, "open", lambda *_args, **_kwargs: None)
         z.public(url)
     assert f"{url} answered NoneType, not an HTTP response" == str(caught.value)
 

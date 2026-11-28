@@ -138,12 +138,13 @@ def test_the_two_ignores_are_anchored() -> None:
 
 
 def test_no_workflow_is_a_usage_error(
-    actions_lint_state: ActionsLint, capfd: pytest.CaptureFixture[str]
+    actions_lint_state: ActionsLint,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """No file named: exit 2, never a walk of the directory."""
-    with pytest.MonkeyPatch.context() as patched:
-        patched.chdir(actions_lint_state.tree)
-        status = actions_lint.main([])
+    monkeypatch.chdir(actions_lint_state.tree)
+    status = actions_lint.main([])
     _out, err = capfd.readouterr()
     assert status == actions_lint.EXIT_ERROR
     usage: list[str] = ["lint:actions: usage: belt actions-lint WORKFLOW..."]
@@ -165,20 +166,21 @@ def test_no_canon_tree_is_refused(actions_lint_state: ActionsLint) -> None:
 
 
 def test_no_actionlint_is_refused(
-    actions_lint_state: ActionsLint, capfd: pytest.CaptureFixture[str], env: support.Env
+    actions_lint_state: ActionsLint,
+    capfd: pytest.CaptureFixture[str],
+    env: support.Env,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Actionlint not found: exit 2, named, never a pass."""
     rel = actions_lint_state.plant(CLEAN)
     missing = str(actions_lint_state.tree / "no-such-actionlint")
     environ = env(MISE_TASK_NAME=TASK, ORG_FINDINGS="", ORG_CANON_DIR=str(CANON_DIR))
-    with pytest.MonkeyPatch.context() as patched:
-        patched.setattr(actions_lint, "ACTIONLINT", missing)
-        with pytest.MonkeyPatch.context() as patched:
-            for name, value in environ.items():
-                patched.setenv(name, value)
-            patched.chdir(actions_lint_state.tree)
-            status = actions_lint.main([rel])
-        _out, err = capfd.readouterr()
+    monkeypatch.setattr(actions_lint, "ACTIONLINT", missing)
+    for name, value in environ.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.chdir(actions_lint_state.tree)
+    status = actions_lint.main([rel])
+    _out, err = capfd.readouterr()
     assert status == actions_lint.EXIT_ERROR
     missing_tool: list[str] = ["lint:actions: actionlint is not on PATH"]
     assert err.splitlines() == missing_tool

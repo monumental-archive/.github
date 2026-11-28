@@ -356,13 +356,12 @@ def test_arguments_other_than_the_canon_are_refused(
 
 
 def test_an_empty_canon_name_is_refused(
-    capfd: pytest.CaptureFixture[str], env: support.Env
+    capfd: pytest.CaptureFixture[str], env: support.Env, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """An identity read that failed leaves an empty name: refused."""
-    with pytest.MonkeyPatch.context() as patched:
-        for name, value in (env(MISE_TASK_NAME=TASK)).items():
-            patched.setenv(name, value)
-        status = ap.main([""])
+    for name, value in (env(MISE_TASK_NAME=TASK)).items():
+        monkeypatch.setenv(name, value)
+    status = ap.main([""])
     out, err = capfd.readouterr()
     assert (status, out) == (2, "")
     assert (

@@ -1426,7 +1426,9 @@ def test_a_failing_locate_project_says_cargos_words(
 
 
 def test_git_failing_to_name_the_tree_is_red(
-    every_workspace: EveryWorkspace, capfd: pytest.CaptureFixture[str]
+    every_workspace: EveryWorkspace,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The derivation's git cannot name the top: red, git's words kept."""
     git = every_workspace.bins / "failing-git"
@@ -1435,9 +1437,8 @@ def test_git_failing_to_name_the_tree_is_red(
         encoding="utf-8",
     )
     git.chmod(0o755)
-    with pytest.MonkeyPatch.context() as patched:
-        patched.setattr(rust_workspaces, "GIT", str(git))
-        done = every_workspace.call("lint", capfd=capfd)
+    monkeypatch.setattr(rust_workspaces, "GIT", str(git))
+    done = every_workspace.call("lint", capfd=capfd)
     every_workspace.assert_finding(
         done, 1, "git could not name the tree", "fatal: planted"
     )

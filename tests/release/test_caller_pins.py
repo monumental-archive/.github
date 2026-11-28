@@ -374,14 +374,14 @@ def test_a_missing_pin_is_refused_with_the_class() -> None:
 # A call that names nothing would install everything: refused.
 def test_install_with_no_tools_is_a_usage_error() -> None:
     """An empty install_args is `mise install`, the whole config."""
-    with pytest.raises(SystemExit) as raised, redirect_stderr(io.StringIO()):
+    with pytest.raises(SystemExit) as raised:
         caller_pins.main(["install", "--input-of", INPUT_OF], root=Path())
     assert raised.value.code == 2
 
 
 def test_env_with_a_malformed_pair_is_a_usage_error() -> None:
     """A pair without `=` names no variable."""
-    with pytest.raises(SystemExit) as raised, redirect_stderr(io.StringIO()):
+    with pytest.raises(SystemExit) as raised:
         caller_pins.main(["env", "--input-of", INPUT_OF, "rust"], root=Path())
     assert raised.value.code == 2
 
@@ -535,6 +535,6 @@ def test_no_major_planned_asks_for_nothing() -> None:
 )
 def test_a_malformed_major_is_a_usage_error(spec: object) -> None:
     """Not a whole number or a list of them: refused before reading."""
-    with pytest.raises(SystemExit) as exit_, redirect_stderr(io.StringIO()):
+    with pytest.raises(SystemExit) as exit_:
         by_major(PG_LIST, spec)
     assert exit_.value.code == 2

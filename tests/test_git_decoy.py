@@ -246,32 +246,28 @@ def helper(tmp_path: Path, env: support.Env) -> Helper:
 
 
 def test_plant_makes_the_decoy_and_exits_0(
-    helper: Helper, capfd: pytest.CaptureFixture[str]
+    helper: Helper, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """`plant DIR` makes a repository there: the task's first call."""
     fresh = helper.work / "fresh"
     fresh.mkdir()
-    with pytest.MonkeyPatch.context() as patched:
-        for name, value in (helper.leak_env()).items():
-            patched.setenv(name, value)
-        patched.chdir(helper.work)
-        status = gd.main(["plant", str(fresh)])
+    for name, value in (helper.leak_env()).items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.chdir(helper.work)
+    status = gd.main(["plant", str(fresh)])
     _out, err = capfd.readouterr()
     assert (status, err) == (0, "")
     assert (fresh / ".git").is_dir()
 
 
 def test_run_with_no_command_is_a_usage_error(
-    helper: Helper, capfd: pytest.CaptureFixture[str]
+    helper: Helper, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """`run DIR` and nothing to run is argparse's exit 2, by name."""
-    with (
-        pytest.MonkeyPatch.context() as patched,
-        pytest.raises(SystemExit) as ended,
-    ):
+    with pytest.raises(SystemExit) as ended:
         for name, value in (helper.leak_env()).items():
-            patched.setenv(name, value)
-        patched.chdir(helper.work)
+            monkeypatch.setenv(name, value)
+        monkeypatch.chdir(helper.work)
         gd.main(["run", str(helper.decoy)])
     _out, err = capfd.readouterr()
     assert ended.value.code == 2

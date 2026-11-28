@@ -15,13 +15,11 @@ Run through the gate as `mise run test`, which `ci` collects.
 
 import io
 import json
-import os
 import re
 import sys
-from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import TYPE_CHECKING, Self
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -32,7 +30,6 @@ from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
-    from types import TracebackType
 
 # What Renovate appends to an advisory subject, and what default.json
 # writes out explicitly since #667. Eleven columns.
@@ -72,49 +69,6 @@ PRESET: dict[str, object] = {
 NO_FINDINGS: list[sb.Finding] = []
 NO_DEPS: list[sb.Dep] = []
 NO_LINES: list[str] = []
-
-
-class Stops:
-    """Expect the task to stop: exit 1, its finding said on stderr (#1934).
-
-    The refusal is a finding, written through the writer; `said` is what
-    it printed, without the final newline.
-    """
-
-    def __init__(self) -> None:
-        """Start with nothing said."""
-        self.said = ""
-        self._err = io.StringIO()
-        self._redirect = redirect_stderr(self._err)
-
-    def __enter__(self) -> Self:
-        """Start capturing stderr.
-
-        Returns:
-            This expectation, to read `said` from afterwards.
-
-        """
-        self._redirect.__enter__()
-        return self
-
-    def __exit__(
-        self,
-        kind: type[BaseException] | None,
-        exc: BaseException | None,
-        tb: TracebackType | None,
-    ) -> bool:
-        """Stop capturing, and hold the block to a stop with status 1.
-
-        Returns:
-            True: the expected stop is swallowed.
-
-        """
-        self._redirect.__exit__(kind, exc, tb)
-        self.said = self._err.getvalue().rstrip("\n")
-        if not isinstance(exc, SystemExit):
-            pytest.fail(f"the task did not stop: {exc!r}")
-        assert exc.code == 1, self.said
-        return True
 
 
 def dep(name: str, current: str = "v1.0.0", manager: str = "mise") -> sb.Dep:
@@ -388,7 +342,9 @@ def test_manager_scoped_rule_reaches_only_that_manager() -> None:
     assert sole(config, dep("x", manager="mise"))["semanticCommitType"] == "chore"
 
 
-def test_absent_field_is_a_hard_error_not_a_fallback() -> None:
+def test_absent_field_is_a_hard_error_not_a_fallback(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """A field the preset omits stops the task and names itself.
 
     The review decision on #576: a simulation that fills in a value
@@ -397,17 +353,23 @@ def test_absent_field_is_a_hard_error_not_a_fallback() -> None:
     """
     incomplete = preset()
     del incomplete["commitMessageExtra"]
-    with Stops() as caught:
+    with pytest.raises(SystemExit) as stop:
         sb.effective(owned(incomplete), dep("ruff"))
-    assert "commitMessageExtra" in caught.said
+    said = capfd.readouterr().err.rstrip("\n")
+    assert stop.value.code == 1, said
+    assert "commitMessageExtra" in said
 
 
-def test_every_missing_field_is_named_at_once() -> None:
+def test_every_missing_field_is_named_at_once(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """The error lists all absent fields, not just the first."""
-    with Stops() as caught:
+    with pytest.raises(SystemExit) as stop:
         sb.effective(owned({"packageRules": []}), dep("ruff"))
+    said = capfd.readouterr().err.rstrip("\n")
+    assert stop.value.code == 1, said
     for field in sb.MESSAGE_CONFIG:
-        assert field in caught.said
+        assert field in said
 
 
 # The repo's own packageRules, folded in after the preset's (#677).
@@ -488,7 +450,9 @@ def test_a_repo_rule_that_does_not_select_changes_nothing() -> None:
     assert config["commitMessageTopic"] == "{{depName}}"
 
 
-def test_a_repo_rule_may_not_be_the_only_place_a_field_is_written() -> None:
+def test_a_repo_rule_may_not_be_the_only_place_a_field_is_written(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """The absent-field error sits BETWEEN the two lists.
 
     That placement is the rule: a repo may override a field the
@@ -499,9 +463,11 @@ def test_a_repo_rule_may_not_be_the_only_place_a_field_is_written() -> None:
     thin = preset()
     del thin["commitMessageAction"]
     repo = [{"matchPackageNames": ["*"], "commitMessageAction": "bump"}]
-    with Stops() as caught:
+    with pytest.raises(SystemExit) as stop:
         sb.effective(owned(thin, repo), dep("ruff"))
-    assert "commitMessageAction" in caught.said
+    said = capfd.readouterr().err.rstrip("\n")
+    assert stop.value.code == 1, said
+    assert "commitMessageAction" in said
 
 
 def test_judge_goes_red_on_a_widening_repo_rule_and_green_without() -> None:
@@ -589,7 +555,9 @@ def test_it_reaches_every_forked_resolution() -> None:
     assert types == want
 
 
-def test_a_repo_top_level_field_cannot_satisfy_the_absent_field_error() -> None:
+def test_a_repo_top_level_field_cannot_satisfy_the_absent_field_error(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """A repo may override any of the five; it may write none of them.
 
     Same law the repo's packageRules answer to (#677), one layer up:
@@ -599,12 +567,14 @@ def test_a_repo_top_level_field_cannot_satisfy_the_absent_field_error() -> None:
     """
     thin = preset()
     del thin["semanticCommitType"]
-    with Stops() as caught:
+    with pytest.raises(SystemExit) as stop:
         sb.effective(
             owned(thin, repo_top={"semanticCommitType": "chore"}),
             dep("ruff"),
         )
-    assert "semanticCommitType" in caught.said
+    said = capfd.readouterr().err.rstrip("\n")
+    assert stop.value.code == 1, said
+    assert "semanticCommitType" in said
 
 
 def test_judge_goes_red_on_a_widening_top_level_field_and_green_without() -> None:
@@ -771,7 +741,9 @@ def test_a_narrowing_fork_buys_no_margin() -> None:
     assert findings[0].width == limit
 
 
-def test_a_forked_rule_may_not_be_the_only_place_a_field_is_written() -> None:
+def test_a_forked_rule_may_not_be_the_only_place_a_field_is_written(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """The absent-field law holds across every resolution.
 
     A field only the applied branch carries is absent on the other,
@@ -784,9 +756,11 @@ def test_a_forked_rule_may_not_be_the_only_place_a_field_is_written() -> None:
         ],
     )
     del thin["semanticCommitScope"]
-    with Stops() as caught:
+    with pytest.raises(SystemExit) as stop:
         sb.effective(owned(thin), dep("ruff"))
-    assert "semanticCommitScope" in caught.said
+    said = capfd.readouterr().err.rstrip("\n")
+    assert stop.value.code == 1, said
+    assert "semanticCommitScope" in said
 
 
 # Subject composition, substitution, and the unmodelled report.
@@ -1018,15 +992,17 @@ def test_an_unreadable_lock_file_is_a_finding() -> None:
     assert len(locks.report) == 2
 
 
-def test_a_missing_lock_file_for_a_range_is_a_finding() -> None:
+def test_a_missing_lock_file_for_a_range_is_a_finding(
+    lay_out: Callable[[dict[str, str]], None], capfd: pytest.CaptureFixture[str]
+) -> None:
     """No tracked lock file: red by name, never the declared width."""
-    status, _, err = run_tree(
-        {
-            "renovate.json": "{}\n",
-            "default.json": LOCK_PRESET_JSON,
-            "package.json": HONO_MANIFEST,
-        },
-    )
+    lay_out({
+        "renovate.json": "{}\n",
+        "default.json": LOCK_PRESET_JSON,
+        "package.json": HONO_MANIFEST,
+    })
+    status = sb.main([])
+    err = capfd.readouterr().err
     assert status == 1
     assert (
         "1 range-declared dependency has no locked version for the"
@@ -1039,16 +1015,18 @@ def test_a_missing_lock_file_for_a_range_is_a_finding() -> None:
     ) in err
 
 
-def test_a_lock_file_without_the_entry_is_a_finding() -> None:
+def test_a_lock_file_without_the_entry_is_a_finding(
+    lay_out: Callable[[dict[str, str]], None], capfd: pytest.CaptureFixture[str]
+) -> None:
     """A tracked lock file that resolves no version is no fallback either."""
-    status, _, err = run_tree(
-        {
-            "renovate.json": "{}\n",
-            "default.json": LOCK_PRESET_JSON,
-            "Cargo.toml": '[dependencies]\nserde = "1"\ntokio = "1"\n',
-            "Cargo.lock": CARGO_LOCK,
-        },
-    )
+    lay_out({
+        "renovate.json": "{}\n",
+        "default.json": LOCK_PRESET_JSON,
+        "Cargo.toml": '[dependencies]\nserde = "1"\ntokio = "1"\n',
+        "Cargo.lock": CARGO_LOCK,
+    })
+    status = sb.main([])
+    err = capfd.readouterr().err
     assert status == 1
     assert (
         "tokio (cargo, Cargo.toml) declares '1', and Cargo.lock resolves no"
@@ -1057,16 +1035,18 @@ def test_a_lock_file_without_the_entry_is_a_finding() -> None:
     assert "serde (cargo" not in err
 
 
-def test_a_locked_tree_passes_end_to_end() -> None:
+def test_a_locked_tree_passes_end_to_end(
+    lay_out: Callable[[dict[str, str]], None], capfd: pytest.CaptureFixture[str]
+) -> None:
     """Every range resolved and every subject fitting is green."""
-    status, out, err = run_tree(
-        {
-            "renovate.json": "{}\n",
-            "default.json": LOCK_PRESET_JSON,
-            "package.json": VITEST_MANIFEST,
-            "pnpm-lock.yaml": PNPM_LOCK,
-        },
-    )
+    lay_out({
+        "renovate.json": "{}\n",
+        "default.json": LOCK_PRESET_JSON,
+        "package.json": VITEST_MANIFEST,
+        "pnpm-lock.yaml": PNPM_LOCK,
+    })
+    status = sb.main([])
+    out, err = capfd.readouterr()
     assert status == 0, err
     assert "every subject the owned template can mint fits" in out
 
@@ -1137,16 +1117,20 @@ def test_a_repo_block_without_the_field_falls_to_the_preset() -> None:
     )
 
 
-def test_an_absent_suffix_is_a_hard_error_not_an_empty_string() -> None:
+def test_an_absent_suffix_is_a_hard_error_not_an_empty_string(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """Renovate appends one whether or not the org writes it.
 
     Reading no suffix would not model "no suffix"; it would model an
     upstream default from memory, eleven columns wide, which is the
     failure #576 exists to kill.
     """
-    with Stops() as caught:
+    with pytest.raises(SystemExit) as stop:
         sb.advisory_suffix(sb.decode_config({}), sb.decode_config({}))
-    assert "commitMessageSuffix" in caught.said
+    said = capfd.readouterr().err.rstrip("\n")
+    assert stop.value.code == 1, said
+    assert "commitMessageSuffix" in said
 
 
 def test_the_suffix_renders_last_before_the_pull_request_tail() -> None:
@@ -1317,14 +1301,18 @@ def test_each_wrong_shape_is_refused_by_where_it_sits(
     assert str(caught.value) == message
 
 
-def test_a_wrong_shaped_file_stops_the_task_by_name() -> None:
+def test_a_wrong_shaped_file_stops_the_task_by_name(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """The refusal carries the task's label and the file's path."""
     with TemporaryDirectory() as tmp:
         path = Path(tmp) / "renovate.json"
         path.write_text('{"packageRules": {}}', encoding="utf-8")
-        with Stops() as caught:
+        with pytest.raises(SystemExit) as stop:
             sb.read_config(path, [])
-    assert caught.said == f"lint:subject-budget: {path}: packageRules is not a list"
+        said = capfd.readouterr().err.rstrip("\n")
+        assert stop.value.code == 1, said
+    assert said == f"lint:subject-budget: {path}: packageRules is not a list"
 
 
 def test_an_unreadable_file_decodes_as_an_empty_config() -> None:
@@ -1340,7 +1328,9 @@ def test_an_unreadable_file_decodes_as_an_empty_config() -> None:
 
 
 # The ceiling comes from the delivered config or the task stops.
-def test_reads_subject_length_from_the_delivered_config() -> None:
+def test_reads_subject_length_from_the_delivered_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The one definition of 72 is the delivered committed.toml."""
     with TemporaryDirectory() as tmp:
         (Path(tmp) / "committed.toml").write_text(
@@ -1348,33 +1338,29 @@ def test_reads_subject_length_from_the_delivered_config() -> None:
             encoding="utf-8",
         )
         env: dict[str, str] = {"ORG_BELT_DIR": tmp}
-        with pytest.MonkeyPatch.context() as patched:
-            for name, value in env.items():
-                patched.setenv(name, value)
-            assert sb.ceiling() == 61
+        for name, value in env.items():
+            monkeypatch.setenv(name, value)
+        assert sb.ceiling() == 61
 
 
-def test_unset_belt_dir_is_a_hard_error() -> None:
+def test_unset_belt_dir_is_a_hard_error(monkeypatch: pytest.MonkeyPatch) -> None:
     """No belt means no ceiling; the task must not invent one."""
     env: dict[str, str] = {"ORG_BELT_DIR": ""}
-    with (
-        pytest.MonkeyPatch.context() as patched,
-        pytest.raises(
-            SystemExit,
-        ),
+    with pytest.raises(
+        SystemExit,
     ):
         for name, value in env.items():
-            patched.setenv(name, value)
+            monkeypatch.setenv(name, value)
         sb.ceiling()
 
 
-def test_absent_committed_toml_is_a_hard_error() -> None:
+def test_absent_committed_toml_is_a_hard_error(monkeypatch: pytest.MonkeyPatch) -> None:
     """A belt without the delivered config fails rather than defaults."""
     with TemporaryDirectory() as tmp:
         env: dict[str, str] = {"ORG_BELT_DIR": tmp}
-        with pytest.MonkeyPatch.context() as patched, pytest.raises(SystemExit):
+        with pytest.raises(SystemExit):
             for name, value in env.items():
-                patched.setenv(name, value)
+                monkeypatch.setenv(name, value)
             sb.ceiling()
 
 
@@ -1387,15 +1373,21 @@ def test_absent_committed_toml_is_a_hard_error() -> None:
     ],
 )
 def test_a_ceiling_of_the_wrong_shape_is_refused_by_name(
-    text: str, message: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    text: str,
+    message: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
 ) -> None:
     """Unparsable, absent or not an integer: the task stops, named."""
     config = tmp_path / "committed.toml"
     config.write_text(text, encoding="utf-8")
     monkeypatch.setenv("ORG_BELT_DIR", str(tmp_path))
-    with Stops() as caught:
+    with pytest.raises(SystemExit) as stop:
         sb.ceiling()
-    assert caught.said == f"lint:subject-budget: {config}: {message}"
+    said = capfd.readouterr().err.rstrip("\n")
+    assert stop.value.code == 1, said
+    assert said == f"lint:subject-budget: {config}: {message}"
 
 
 def test_the_canon_ceiling_is_what_the_org_ships() -> None:
@@ -1559,84 +1551,83 @@ def test_an_unreadable_file_is_reported_not_raised() -> None:
 
 
 # The applicability guards, driven end to end in a real tree.
-def run_tree(tree: dict[str, str]) -> tuple[int, str, str]:
-    """Lay out a tree, run main() against it, capture everything.
+@fixture
+def lay_out(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Callable[[dict[str, str]], None]:
+    """Stand each row in a tree of its own, as the task meets it.
 
     Returns:
-        The exit status, stdout and stderr.
+        A function that writes a tree's files beside a belt, lists them
+        on stdin, and steps into the tree.
 
     """
-    # The real directory, read before anything is patched (#1491):
-    # under the patch below, Path.cwd() answers the temporary root.
-    cwd = Path.cwd()
-    with TemporaryDirectory() as tmp:
-        root = Path(tmp)
+
+    trees = iter(range(1_000))
+
+    def tree(files: dict[str, str]) -> None:
+        root = tmp_path / f"tree{next(trees)}"
         belt = root / "belt"
-        belt.mkdir()
-        (belt / "committed.toml").write_text(
-            "subject_length = 72\n",
-            encoding="utf-8",
-        )
-        for name, body in tree.items():
+        belt.mkdir(parents=True)
+        (belt / "committed.toml").write_text("subject_length = 72\n", encoding="utf-8")
+        for name, body in files.items():
             target = root / name
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(body, encoding="utf-8")
-        listing = "\0".join(tree)
-        out, err = io.StringIO(), io.StringIO()
-        env = {"ORG_BELT_DIR": str(belt), "ORG_CANON_DIR": str(root)}
-        with pytest.MonkeyPatch.context() as patched:
-            for name, value in env.items():
-                patched.setenv(name, value)
-            patched.setattr(sys, "stdin", io.StringIO(listing))
-            patched.setattr(Path, "cwd", lambda *_args, **_kwargs: root)
-            os.chdir(root)
-            try:
-                with redirect_stdout(out), redirect_stderr(err):
-                    status = sb.main([])
-            except SystemExit as stop:
-                # A refusal the task stops on: said as a finding, exit 1.
-                status = stop.code if isinstance(stop.code, int) else 1
-            finally:
-                os.chdir(cwd)
-        return status, out.getvalue(), err.getvalue()
+        monkeypatch.setenv("ORG_BELT_DIR", str(belt))
+        monkeypatch.setenv("ORG_CANON_DIR", str(root))
+        monkeypatch.setattr(sys, "stdin", io.StringIO("\0".join(files)))
+        monkeypatch.chdir(root)
+
+    return tree
 
 
-def test_no_renovate_json_skips_clean() -> None:
+def test_no_renovate_json_skips_clean(
+    lay_out: Callable[[dict[str, str]], None], capfd: pytest.CaptureFixture[str]
+) -> None:
     """Nothing mints subjects here, so there is nothing to bound."""
-    status, out, _ = run_tree({"README.md": "# repo\n"})
+    lay_out({"README.md": "# repo\n"})
+    status = sb.main([])
+    out = capfd.readouterr().out
     assert status == 0
     assert "no renovate.json tracked, skipped" in out
 
 
-def test_a_declared_dependency_that_fits_passes() -> None:
+def test_a_declared_dependency_that_fits_passes(
+    lay_out: Callable[[dict[str, str]], None], capfd: pytest.CaptureFixture[str]
+) -> None:
     """The green path reports the count and the ceiling it met."""
-    status, out, _ = run_tree(
-        {
-            "renovate.json": "{}\n",
-            "default.json": json.dumps(PRESET),
-            "mise.toml": '[tools]\nruff = "0.16.2"\n',
-        },
-    )
+    lay_out({
+        "renovate.json": "{}\n",
+        "default.json": json.dumps(PRESET),
+        "mise.toml": '[tools]\nruff = "0.16.2"\n',
+    })
+    status = sb.main([])
+    out = capfd.readouterr().out
     assert status == 0
     assert "1 dependency" in out
     assert "fits 72 columns" in out
 
 
-def test_an_over_budget_dependency_fails_with_the_remedy() -> None:
+def test_an_over_budget_dependency_fails_with_the_remedy(
+    lay_out: Callable[[dict[str, str]], None], capfd: pytest.CaptureFixture[str]
+) -> None:
     """The red path names the dependency, the width, and the fix."""
-    status, _, err = run_tree(
-        {
-            "renovate.json": "{}\n",
-            "default.json": json.dumps(PRESET),
-            "mise.toml": f'[tools]\n"{"n" * 60}" = "1.0.0"\n',
-        },
-    )
+    lay_out({
+        "renovate.json": "{}\n",
+        "default.json": json.dumps(PRESET),
+        "mise.toml": f'[tools]\n"{"n" * 60}" = "1.0.0"\n',
+    })
+    status = sb.main([])
+    err = capfd.readouterr().err
     assert status == 1
     assert "would mint a subject past 72 columns" in err
     assert "commitMessageTopic" in err
 
 
-def test_the_preset_reference_is_itself_a_dependency() -> None:
+def test_the_preset_reference_is_itself_a_dependency(
+    lay_out: Callable[[dict[str, str]], None], capfd: pytest.CaptureFixture[str]
+) -> None:
     """A repo with only a renovate.json still counts one, not zero.
 
     The zero-dependency branch is therefore nearly unreachable, and
@@ -1663,19 +1654,21 @@ def test_the_preset_reference_is_itself_a_dependency() -> None:
         "customManagers": [manager],
         "packageRules": [short],
     }
-    status, out, _ = run_tree(
-        {
-            "renovate.json": (
-                '{"extends":["github>monumental-archive/.github#v1.46.0"]}\n'
-            ),
-            "default.json": json.dumps(doc),
-        },
-    )
+    lay_out({
+        "renovate.json": (
+            '{"extends":["github>monumental-archive/.github#v1.46.0"]}\n'
+        ),
+        "default.json": json.dumps(doc),
+    })
+    status = sb.main([])
+    out = capfd.readouterr().out
     assert status == 0
     assert "1 dependency" in out
 
 
-def test_a_repo_rule_reaches_the_end_to_end_verdict() -> None:
+def test_a_repo_rule_reaches_the_end_to_end_verdict(
+    lay_out: Callable[[dict[str, str]], None], capfd: pytest.CaptureFixture[str]
+) -> None:
     """The whole point, driven through main().
 
     The same dependency goes red under a widening repo rule and
@@ -1688,7 +1681,9 @@ def test_a_repo_rule_reaches_the_end_to_end_verdict() -> None:
         "default.json": json.dumps(PRESET),
         "mise.toml": f'[tools]\n"{name}" = "1.0.0"\n',
     }
-    status, out, _ = run_tree(tree)
+    lay_out(tree)
+    status = sb.main([])
+    out = capfd.readouterr().out
     assert status == 0
     assert "fits 72 columns" in out
 
@@ -1700,12 +1695,16 @@ def test_a_repo_rule_reaches_the_end_to_end_verdict() -> None:
             },
         ],
     }
-    status, _, err = run_tree({**tree, "renovate.json": json.dumps(widen)})
+    lay_out({**tree, "renovate.json": json.dumps(widen)})
+    status = sb.main([])
+    err = capfd.readouterr().err
     assert status == 1
     assert "would mint a subject past 72 columns" in err
 
 
-def test_the_advisory_subject_reaches_the_end_to_end_verdict() -> None:
+def test_the_advisory_subject_reaches_the_end_to_end_verdict(
+    lay_out: Callable[[dict[str, str]], None], capfd: pytest.CaptureFixture[str]
+) -> None:
     """A dependency that fits ordinarily and not with the suffix.
 
     The whole of #686 driven through main(): the tree is green under
@@ -1718,7 +1717,9 @@ def test_the_advisory_subject_reaches_the_end_to_end_verdict() -> None:
         "default.json": json.dumps(PRESET),
         "mise.toml": f'[tools]\n"{name}" = "1.0.0"\n',
     }
-    status, _, err = run_tree(tree)
+    lay_out(tree)
+    status = sb.main([])
+    err = capfd.readouterr().err
     assert status == 1
     assert SUFFIX in err
     assert "would mint a subject past 72 columns" in err
@@ -1728,12 +1729,16 @@ def test_the_advisory_subject_reaches_the_end_to_end_verdict() -> None:
         "commitMessageTopic": "n" * 29,
     }
     doc: dict[str, object] = {**PRESET, "packageRules": [short]}
-    status, out, _ = run_tree({**tree, "default.json": json.dumps(doc)})
+    lay_out({**tree, "default.json": json.dumps(doc)})
+    status = sb.main([])
+    out = capfd.readouterr().out
     assert status == 0
     assert "fits 72 columns" in out
 
 
-def test_a_file_names_rule_reaches_a_regex_managed_dependency() -> None:
+def test_a_file_names_rule_reaches_a_regex_managed_dependency(
+    lay_out: Callable[[dict[str, str]], None], capfd: pytest.CaptureFixture[str]
+) -> None:
     """#724 end to end: the origin fix and the matcher, together.
 
     A repo rule selected by FILE reaches the dependency a custom
@@ -1753,7 +1758,9 @@ def test_a_file_names_rule_reaches_a_regex_managed_dependency() -> None:
         "default.json": json.dumps(doc),
         "docker/images.toml": '"18" = "postgres:18.1-bookworm"\n',
     }
-    status, out, _ = run_tree(tree)
+    lay_out(tree)
+    status = sb.main([])
+    out = capfd.readouterr().out
     assert status == 0
     assert "fits 72 columns" in out
 
@@ -1765,12 +1772,16 @@ def test_a_file_names_rule_reaches_a_regex_managed_dependency() -> None:
             },
         ],
     }
-    status, _, err = run_tree({**tree, "renovate.json": json.dumps(widen)})
+    lay_out({**tree, "renovate.json": json.dumps(widen)})
+    status = sb.main([])
+    err = capfd.readouterr().err
     assert status == 1
     assert "would mint a subject past 72 columns" in err
 
 
-def test_a_repo_top_level_field_reaches_the_end_to_end_verdict() -> None:
+def test_a_repo_top_level_field_reaches_the_end_to_end_verdict(
+    lay_out: Callable[[dict[str, str]], None], capfd: pytest.CaptureFixture[str]
+) -> None:
     """#725 driven through main(), both directions.
 
     The same dependency is green under the preset's `chore` and red
@@ -1785,7 +1796,9 @@ def test_a_repo_top_level_field_reaches_the_end_to_end_verdict() -> None:
         "default.json": json.dumps(PRESET),
         "mise.toml": f'[tools]\n"{name}" = "1.0.0"\n',
     }
-    status, out, _ = run_tree(tree)
+    lay_out(tree)
+    status = sb.main([])
+    out = capfd.readouterr().out
     assert status == 0
     assert "fits 72 columns" in out
 
@@ -1793,37 +1806,45 @@ def test_a_repo_top_level_field_reaches_the_end_to_end_verdict() -> None:
         "extends": ["github>monumental-archive/.github"],
         "semanticCommitType": "refactor",
     }
-    status, _, err = run_tree({**tree, "renovate.json": json.dumps(widen)})
+    lay_out({**tree, "renovate.json": json.dumps(widen)})
+    status = sb.main([])
+    err = capfd.readouterr().err
     assert status == 1
     assert "would mint a subject past 72 columns" in err
     assert "refactor(deps)" in err
 
 
-def test_a_preset_with_no_advisory_suffix_stops_the_task() -> None:
+def test_a_preset_with_no_advisory_suffix_stops_the_task(
+    lay_out: Callable[[dict[str, str]], None], capfd: pytest.CaptureFixture[str]
+) -> None:
     """The sixth field answers the same law as the other five."""
     thin = {k: v for k, v in PRESET.items() if k != "vulnerabilityAlerts"}
-    status, _, err = run_tree(
-        {
-            "renovate.json": "{}\n",
-            "default.json": json.dumps(thin),
-            "mise.toml": '[tools]\nruff = "0.16.2"\n',
-        },
-    )
-    assert status == 1
+    lay_out({
+        "renovate.json": "{}\n",
+        "default.json": json.dumps(thin),
+        "mise.toml": '[tools]\nruff = "0.16.2"\n',
+    })
+    with pytest.raises(SystemExit) as stop:
+        sb.main([])
+    err = capfd.readouterr().err
+    assert stop.value.code == 1
     assert "commitMessageSuffix" in err
 
 
-def test_an_incomplete_template_stops_the_task() -> None:
+def test_an_incomplete_template_stops_the_task(
+    lay_out: Callable[[dict[str, str]], None], capfd: pytest.CaptureFixture[str]
+) -> None:
     """A preset missing a field errors; it does not quietly assume."""
     thin = {k: v for k, v in PRESET.items() if k != "commitMessageAction"}
-    status, _, err = run_tree(
-        {
-            "renovate.json": "{}\n",
-            "default.json": json.dumps(thin),
-            "mise.toml": '[tools]\nruff = "0.16.2"\n',
-        },
-    )
-    assert status == 1
+    lay_out({
+        "renovate.json": "{}\n",
+        "default.json": json.dumps(thin),
+        "mise.toml": '[tools]\nruff = "0.16.2"\n',
+    })
+    with pytest.raises(SystemExit) as stop:
+        sb.main([])
+    err = capfd.readouterr().err
+    assert stop.value.code == 1
     assert "commitMessageAction" in err
 
 

@@ -872,18 +872,17 @@ def answer(command: str, text: str) -> str:
     return out.getvalue().replace(str(path), "DOC")
 
 
-def test_a_missing_seeded_list_is_red() -> None:
+def test_a_missing_seeded_list_is_red(capfd: pytest.CaptureFixture[str]) -> None:
     """Refuse verify with no seeded list to read: red, named."""
     with tempfile.TemporaryDirectory() as scratch:
         report = Path(scratch, "report.json")
         report.write_text('{"testResults": []}', encoding="utf-8")
         gone = Path(scratch, "seeded")
-        out = io.StringIO()
-        with contextlib.redirect_stdout(out):
-            status = tp.main(["verify", str(report), str(gone), "a.prop.test.ts"])
+        status = tp.main(["verify", str(report), str(gone), "a.prop.test.ts"])
+        out = capfd.readouterr().out
     assert status == 1
     assert (
-        out.getvalue().replace(str(gone), "SEEDED")
+        out.replace(str(gone), "SEEDED")
         == "no seeded list at SEEDED (FileNotFoundError)\n"
     )
 
