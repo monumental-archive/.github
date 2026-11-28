@@ -4426,7 +4426,9 @@ The trigger lives on the issue, not duplicated here:
 [#168](https://github.com/monumental-archive/.github/issues/168)
 (PVTR — recurring Baseline drift),
 [#199](https://github.com/monumental-archive/.github/issues/199)
-(source-tool as cross-check).
+(source-tool as cross-check),
+[#2182](https://github.com/monumental-archive/.github/issues/2182)
+(HypoFuzz — a release that runs on the belt's Python 3.15).
 
 ## Neither adopted nor skipped: unreachable
 

@@ -4,8 +4,10 @@
 
 A split test leg measures each task, and each shard of a task, on a
 runner of its own: every row keeps its run directory (`measured` wrote
-into it, ORG_GATE_COVERAGE_RUN) as an artifact, and the gate's coverage
-job downloads each into a directory of its own under <rows-dir>. This
+into it, ORG_GATE_COVERAGE_RUN) as an artifact that holds it as
+`coverage-run-<index>/`, and the gate's coverage job merges every one
+flat into <rows-dir>, so each row is a directory of its own there for
+one row or many (#2178). This
 makes of them the one run directory coverage:check reads, so the floor
 is judged once, over the data every row kept, as if one runner had run
 the whole suite:

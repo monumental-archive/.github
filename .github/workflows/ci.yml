@@ -609,14 +609,28 @@ jobs:
       # wrote into, with the row's own Rust report beside it
       # (rust-export). coverage.py's data files are dot files, so hidden
       # files are included. One artifact per row, named for its index,
-      # downloaded each into a directory of its own and gathered there
-      # by mise/coverage_merge.py.
+      # and the name is carried INSIDE it (#2178): the run directory is
+      # staged as `coverage-run-<index>/` under a parent, and the parent
+      # is what uploads. download-artifact gives each artifact a
+      # directory of its own only when its pattern matches two or more,
+      # so the coverage job merges every match flat and the row's
+      # directory comes from the artifact, the same for one row or
+      # many; mise/coverage_merge.py reads one directory per row. A row
+      # that measured nothing stages nothing and uploads none.
+      - name: Stage this test row's coverage data under its artifact's name
+        if: ${{ matrix.leg == 'test' && matrix.task != 'ci:test' }}
+        env:
+          SOURCE: ${{ runner.temp }}/coverage-run
+          STAGE: ${{ runner.temp }}/coverage-rows-up
+          ARTIFACT: coverage-run-${{ strategy.job-index }}
+        run: |
+          [[ ! -d ${SOURCE} ]] || { mkdir -p "${STAGE}/${ARTIFACT}" && cp -a "${SOURCE}/." "${STAGE}/${ARTIFACT}/"; }
       - name: Keep this test row's coverage data
         if: ${{ matrix.leg == 'test' && matrix.task != 'ci:test' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: coverage-run-${{ strategy.job-index }}
-          path: ${{ runner.temp }}/coverage-run
+          path: ${{ runner.temp }}/coverage-rows-up
           include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 1
@@ -997,6 +1011,9 @@ jobs:
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: coverage-run-*
+          # Flat, whatever the match count: each artifact holds its own
+          # `coverage-run-<index>/` (#2178).
+          merge-multiple: true
           path: ${{ runner.temp }}/coverage-rows
 
       - name: Merge the rows into one run

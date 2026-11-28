@@ -532,6 +532,10 @@ jobs:
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: sbom-plan-*
+          # Flat, whatever the match count: each leg's artifact holds
+          # its own `sbom-plan-<suffix>/plan.json` (#2178), so the glob
+          # below reads one plan or many the same way.
+          merge-multiple: true
           path: plans
 
       # Per-artifact inventories, aggregated into the release view
