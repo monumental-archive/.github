@@ -30,11 +30,12 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+from typing import NamedTuple
 
 import pytest
 
 from belt import decoded, findings
-from belt.typed_pytest import fixture
+from belt.typed_pytest import Requested, fixture
 from tests import support
 
 MISE = support.MISE
@@ -61,553 +62,87 @@ AWKWARD = 'say "hi" \\ there\tnaïve ✓'
 
 
 @dataclass(frozen=True)
-class Ran:
-    """What one writer's run answered."""
-
-    returncode: int
-    stdout: str
-    stderr: str
-
-
 class Writer:
-    """One writer, run the way a task runs it.
+    """One writer of findings, reporting as a task's script does.
 
-    The Python writer is belt Python, so it is called in this process
-    with the environment a task would give it; the shell writers are
-    started as the task starts them.
+    The Python writer is belt Python, called in this process; a shell
+    writer is the reporter script under its bash, a child whose streams
+    are this process's own.
     """
 
-    def __init__(
-        self,
-        name: str,
-        interpreter: list[str] | None,
-        script: str,
-        suffix: str,
-        *,
-        env: support.Env,
-    ) -> None:
-        """Hold the writer's interpreter and its reporter script."""
-        self.make_env = env
-        self.name = name
-        self.interpreter = interpreter
-        self.script = script
-        self.suffix = suffix
+    name: str
+    bash: str | None
+    # The Python writer's records-file draw, patched in for the row.
+    drawn: list[str]
 
-    def run(
-        self,
-        root: Path,
-        entry: str,
-        *args: str,
-        capfd: pytest.CaptureFixture[str],
-        monkeypatch: pytest.MonkeyPatch,
-        **env: str,
-    ) -> Ran:
-        """Run the reporter once.
+    @property
+    def script(self) -> str:
+        """Name the reporter script a finding without a task names.
 
         Returns:
-            Its status and both streams.
+            Its file name.
 
         """
-        reporter = root / f"reporter{self.suffix}"
-        if self.interpreter is None:
-            return self.called(reporter, entry, args, env, capfd, monkeypatch)
-        reporter.write_text(self.script, encoding="utf-8")
-        overrides = {"PYTHONUTF8": "1", **env}
-        child = self.make_env(**overrides)
-        for name in ("MISE_TASK_NAME", "ORG_FINDINGS"):
-            if name not in env:
-                child.pop(name, None)
-        done = subprocess.run(
-            [*self.interpreter, str(reporter), entry, *args],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            env=child,
-            check=False,
-            cwd=root,
-        )
-        return Ran(done.returncode, done.stdout, done.stderr)
+        return "reporter.py" if self.bash is None else "reporter.sh"
 
-    @staticmethod
-    def called(
-        reporter: Path,
-        entry: str,
-        args: tuple[str, ...],
-        env: dict[str, str],
-        capfd: pytest.CaptureFixture[str],
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> Ran:
-        """Call the Python writer as the shell reporter calls its own.
+    def report(self, entry: str, *args: str) -> int:
+        """Report one finding, as the reporter script given `args` does.
+
+        Each report is one process: the Python writer's records file is
+        drawn afresh, as a new process draws it.
 
         Returns:
-            Its status and both streams.
+            The status.
 
         """
+        if self.bash is not None:
+            argv = [self.bash, str(Path.cwd() / self.script), entry, *args]
+            return subprocess.run(argv, check=False).returncode
         subject, message, *detail = args
-        for name in ("MISE_TASK_NAME", "ORG_FINDINGS"):
-            if name not in env:
-                monkeypatch.delenv(name, raising=False)
-        for name, value in env.items():
-            monkeypatch.setenv(name, value)
-        monkeypatch.chdir(reporter.parent)
-        # The running program's name, which a finding falls back to.
-        monkeypatch.setattr(sys, "argv", [str(reporter)])
-        # Each call is one process: its records file is drawn afresh.
-        monkeypatch.setattr(findings, "_drawn", [])
+        self.drawn.clear()
         findings.finding(subject, message, detail, annotate=entry == "annotated")
         if entry == "twice":
             findings.finding(subject, message, detail)
-        out, err = capfd.readouterr()
-        return Ran(0, out, err)
+        return 0
 
 
-def writers() -> list[Writer]:
-    """List every writer the rows hold: Python, the belt's bash, /bin/bash.
-
-    Returns:
-        The writers.
-
-    """
-    out = [
-        Writer("python", None, "", ".py", env=support.environment),
-        Writer(
-            "belt bash",
-            [support.tool("bash")],
-            SHELL_REPORTER,
-            ".sh",
-            env=support.environment,
-        ),
-    ]
-    if SYSTEM_BASH.exists():
-        out.append(
-            Writer(
-                "/bin/bash",
-                [str(SYSTEM_BASH)],
-                SHELL_REPORTER,
-                ".sh",
-                env=support.environment,
-            )
-        )
-    return out
-
-
-class FindingRows:
-    """What each writer prints and records."""
-
-    def __init__(self, tmp_path: Path) -> None:
-        """Give each row a directory of its own."""
-        self.root = Path(str(tmp_path))
-        self.file = self.root / "out" / "job.jsonl"
-
-    def records(self) -> list[dict[str, object]]:
-        """Read back every record the row appended.
-
-        Returns:
-            The records, in order.
-
-        """
-        text = self.file.read_text(encoding="utf-8")
-        return [
-            decoded.as_object(decoded.load_json(line), "a record")
-            for line in text.splitlines()
-        ]
-
-    def found(
-        self,
-        writer: Writer,
-        subject: str,
-        message: str,
-        detail: list[str],
-        printed: str,
-        *,
-        capfd: pytest.CaptureFixture[str],
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        """Run one finding and hold its printed form and its record."""
-        done = writer.run(
-            self.root,
-            "plain",
-            subject,
-            message,
-            *detail,
-            MISE_TASK_NAME="lint:demo",
-            ORG_FINDINGS=str(self.file),
-            capfd=capfd,
-            monkeypatch=monkeypatch,
-        )
-        assert done.returncode == 0, done.stderr
-        assert done.stdout == ""
-        assert done.stderr == printed
-        expected: list[dict[str, object]] = [
-            {
-                "v": 1,
-                "task": "lint:demo",
-                "subject": subject,
-                "message": message,
-                "detail": detail,
-            }
-        ]
-        assert self.records() == expected
-        assert self.file.read_text(encoding="utf-8").count("\n") == 1
+WRITERS = ["python", "belt bash", *(["/bin/bash"] if SYSTEM_BASH.exists() else [])]
 
 
 @fixture
-def finding_rows(tmp_path: Path) -> FindingRows:
-    """Give each row its own FindingRows."""
-    return FindingRows(tmp_path)
-
-
-@pytest.mark.parametrize("writer", writers())
-def test_a_finding_with_a_subject(
-    finding_rows: FindingRows,
-    writer: object,
-    capfd: pytest.CaptureFixture[str],
-    monkeypatch: pytest.MonkeyPatch,
+def _as_a_task(
+    tmp_path: Path, env: support.Env, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The form is `<task>: <subject>: <message>`."""
-    finding_rows.file.unlink(missing_ok=True)
-    finding_rows.found(
-        writer,
-        "Cargo.toml",
-        "a pin is loose",
-        [],
-        "lint:demo: Cargo.toml: a pin is loose\n",
-        capfd=capfd,
-        monkeypatch=monkeypatch,
-    )
+    """Give the row a task's world.
+
+    The environment is a started process's, with no task named and no
+    records file; the directory is the row's, holding the shell
+    reporter; the running program is the Python reporter.
+    """
+    for name in list(os.environ):
+        monkeypatch.delenv(name)
+    for name, value in env(PYTHONUTF8="1").items():
+        if name not in {"MISE_TASK_NAME", "ORG_FINDINGS"}:
+            monkeypatch.setenv(name, value)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "reporter.sh").write_text(SHELL_REPORTER, encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", [str(tmp_path / "reporter.py")])
 
 
-@pytest.mark.parametrize("writer", writers())
-def test_a_finding_without_a_subject(
-    finding_rows: FindingRows,
-    writer: object,
-    capfd: pytest.CaptureFixture[str],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """An empty subject leaves `<task>: <message>`, and is recorded empty."""
-    finding_rows.file.unlink(missing_ok=True)
-    finding_rows.found(
-        writer,
-        "",
-        "nothing is tracked",
-        [],
-        "lint:demo: nothing is tracked\n",
-        capfd=capfd,
-        monkeypatch=monkeypatch,
-    )
-
-
-@pytest.mark.parametrize("writer", writers())
-def test_two_detail_lines_are_indented_two_spaces(
-    finding_rows: FindingRows,
-    writer: object,
-    capfd: pytest.CaptureFixture[str],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Each detail line follows the first, indented two spaces."""
-    finding_rows.file.unlink(missing_ok=True)
-    finding_rows.found(
-        writer,
-        "chrono@0.4.45",
-        "RUSTSEC-2026-0543 is undecided",
-        ["reached through object_store 0.14.2", "and through arrow 57.0.0"],
-        "lint:demo: chrono@0.4.45: RUSTSEC-2026-0543 is undecided\n"
-        "  reached through object_store 0.14.2\n"
-        "  and through arrow 57.0.0\n",
-        capfd=capfd,
-        monkeypatch=monkeypatch,
-    )
-
-
-@pytest.mark.parametrize("writer", writers())
-def test_a_quote_a_backslash_a_tab_and_non_ascii_survive(
-    finding_rows: FindingRows,
-    writer: object,
-    capfd: pytest.CaptureFixture[str],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The record reads back to the same characters the call was given."""
-    finding_rows.file.unlink(missing_ok=True)
-    finding_rows.found(
-        writer,
-        "a\tb",
-        AWKWARD,
-        [AWKWARD],
-        f"lint:demo: a\tb: {AWKWARD}\n  {AWKWARD}\n",
-        capfd=capfd,
-        monkeypatch=monkeypatch,
-    )
-
-
-@pytest.mark.parametrize("writer", writers())
-def test_unset_records_nothing(
-    finding_rows: FindingRows,
-    writer: object,
-    capfd: pytest.CaptureFixture[str],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Without ORG_FINDINGS the finding is printed and nothing is written."""
-    done = writer.run(
-        finding_rows.root,
-        "plain",
-        "x",
-        "y",
-        MISE_TASK_NAME="lint:demo",
-        capfd=capfd,
-        monkeypatch=monkeypatch,
-    )
-    assert done.returncode == 0, done.stderr
-    assert done.stderr == "lint:demo: x: y\n"
-    assert not any(finding_rows.root.rglob("*.jsonl"))
-
-
-@pytest.mark.parametrize("writer", writers())
-def test_empty_records_nothing(
-    finding_rows: FindingRows,
-    writer: object,
-    capfd: pytest.CaptureFixture[str],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """An empty ORG_FINDINGS records nothing, on a runner too."""
-    done = writer.run(
-        finding_rows.root,
-        "plain",
-        "x",
-        "y",
-        MISE_TASK_NAME="lint:demo",
-        ORG_FINDINGS="",
-        RUNNER_TEMP=str(finding_rows.root / "runner"),
-        GITHUB_JOB="mutants-rust",
-        capfd=capfd,
-        monkeypatch=monkeypatch,
-    )
-    assert done.returncode == 0, done.stderr
-    assert done.stderr == "lint:demo: x: y\n"
-    assert not any(finding_rows.root.rglob("*.jsonl"))
-
-
-@pytest.mark.parametrize("writer", writers())
-def test_a_failed_append_is_said_and_is_not_fatal(
-    finding_rows: FindingRows,
-    writer: object,
-    capfd: pytest.CaptureFixture[str],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A path under a file: printed, one more line names it, status 0."""
-    blocker = finding_rows.root / "a-file"
-    blocker.write_text("", encoding="utf-8")
-    target = blocker / "out" / "job.jsonl"
-    done = writer.run(
-        finding_rows.root,
-        "plain",
-        "x",
-        "y",
-        "z",
-        MISE_TASK_NAME="lint:demo",
-        ORG_FINDINGS=str(target),
-        capfd=capfd,
-        monkeypatch=monkeypatch,
-    )
-    assert done.returncode == 0, done.stderr
-    lines = done.stderr.splitlines()
-    expected: list[str] = ["lint:demo: x: y", "  z"]
-    assert lines[:2] == expected
-    assert len(lines) == 3, done.stderr
-    assert lines[2].startswith(
-        f"lint:demo: the finding was not recorded in {target}: "
-    ), lines[2]
-    assert not target.exists()
-
-
-@pytest.mark.parametrize("writer", writers())
-def test_the_annotated_entry_escapes_as_the_runner_reads(
-    finding_rows: FindingRows,
-    writer: object,
-    capfd: pytest.CaptureFixture[str],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """`::error::`, with `%`, CR and LF escaped; the record is the same."""
-    message = "50% done\nnext"
-    finding_rows.file.unlink(missing_ok=True)
-    done = writer.run(
-        finding_rows.root,
-        "annotated",
-        "s",
-        message,
-        "one detail",
-        MISE_TASK_NAME="lint:demo",
-        ORG_FINDINGS=str(finding_rows.file),
-        capfd=capfd,
-        monkeypatch=monkeypatch,
-    )
-    assert done.returncode == 0, done.stderr
-    assert done.stderr == "::error::lint:demo: s: 50%25 done%0Anext\n  one detail\n"
-    assert finding_rows.records()[0]["message"] == message
-
-
-@pytest.mark.parametrize("writer", writers())
-def test_a_plain_line_cannot_open_a_command(
-    finding_rows: FindingRows,
-    writer: object,
-    capfd: pytest.CaptureFixture[str],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A message of a newline and a command prints one line, the command escaped."""
-    done = writer.run(
-        finding_rows.root,
-        "plain",
-        "",
-        "x\n::error::forged",
-        "::warning::w",
-        capfd=capfd,
-        monkeypatch=monkeypatch,
-    )
-    assert done.returncode == 0, done.stderr
-    lines = done.stderr.splitlines()
-    assert len(lines) == 2, done.stderr
-    assert lines[0].endswith(": x\\n::error::forged"), lines[0]
-    assert lines[1] == "  \\::warning::w"
-
-
-@pytest.mark.parametrize("writer", writers())
-def test_the_task_is_mise_s_name_when_set(
-    finding_rows: FindingRows,
-    writer: object,
-    capfd: pytest.CaptureFixture[str],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """MISE_TASK_NAME names the task in the line and the record."""
-    finding_rows.file.unlink(missing_ok=True)
-    done = writer.run(
-        finding_rows.root,
-        "plain",
-        "s",
-        "m",
-        MISE_TASK_NAME="audit:deny",
-        ORG_FINDINGS=str(finding_rows.file),
-        capfd=capfd,
-        monkeypatch=monkeypatch,
-    )
-    assert done.stderr == "audit:deny: s: m\n"
-    assert finding_rows.records()[0]["task"] == "audit:deny"
-
-
-@pytest.mark.parametrize("writer", writers())
-def test_the_task_is_the_script_s_name_when_unset(
-    finding_rows: FindingRows,
-    writer: object,
-    capfd: pytest.CaptureFixture[str],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Where mise named no task, the running script's file name does."""
-    finding_rows.file.unlink(missing_ok=True)
-    name = f"reporter{writer.suffix}"
-    done = writer.run(
-        finding_rows.root,
-        "plain",
-        "s",
-        "m",
-        ORG_FINDINGS=str(finding_rows.file),
-        capfd=capfd,
-        monkeypatch=monkeypatch,
-    )
-    assert done.stderr == f"{name}: s: m\n"
-    assert finding_rows.records()[0]["task"] == name
-
-
-@pytest.mark.parametrize("writer", writers())
-def test_a_step_script_s_finding_names_the_job(
-    finding_rows: FindingRows,
-    writer: object,
-    capfd: pytest.CaptureFixture[str],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The runner's step script, directly under RUNNER_TEMP: GITHUB_JOB."""
-    finding_rows.file.unlink(missing_ok=True)
-    done = writer.run(
-        finding_rows.root,
-        "plain",
-        "s",
-        "m",
-        ORG_FINDINGS=str(finding_rows.file),
-        RUNNER_TEMP=str(finding_rows.root),
-        GITHUB_JOB="attach",
-        capfd=capfd,
-        monkeypatch=monkeypatch,
-    )
-    assert done.stderr == "attach: s: m\n"
-    assert finding_rows.records()[0]["task"] == "attach"
-
-
-def test_a_script_elsewhere_keeps_its_name_in_a_job(
-    finding_rows: FindingRows,
-    capfd: pytest.CaptureFixture[str],
-    env: support.Env,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Not directly under RUNNER_TEMP, or no job: the script's name."""
-    cases = {
-        "elsewhere": {"RUNNER_TEMP": "/elsewhere", "GITHUB_JOB": "attach"},
-        "below it": {"RUNNER_TEMP": "/", "GITHUB_JOB": "attach"},
-        "no job": {"RUNNER_TEMP": "", "GITHUB_JOB": ""},
-    }
-    for writer in writers(env=env):
-        name = f"reporter{writer.suffix}"
-        for case, environ in cases.items():
-            finding_rows.file.unlink(missing_ok=True)
-            planted = dict(environ)
-            if case == "no job":
-                planted["RUNNER_TEMP"] = str(finding_rows.root)
-            done = writer.run(
-                finding_rows.root,
-                "plain",
-                "s",
-                "m",
-                ORG_FINDINGS=str(finding_rows.file),
-                **planted,
-                capfd=capfd,
-                monkeypatch=monkeypatch,
-            )
-            assert done.stderr == f"{name}: s: m\n"
-            assert finding_rows.records()[0]["task"] == name
-
-
-@pytest.mark.parametrize("writer", writers())
-def test_findings_append(
-    finding_rows: FindingRows,
-    writer: object,
-    capfd: pytest.CaptureFixture[str],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A second finding is a second line of the same file."""
-    finding_rows.file.unlink(missing_ok=True)
-    for message in ("one", "two"):
-        writer.run(
-            finding_rows.root,
-            "plain",
-            "",
-            message,
-            MISE_TASK_NAME="t",
-            ORG_FINDINGS=str(finding_rows.file),
-            capfd=capfd,
-            monkeypatch=monkeypatch,
-        )
-    messages: list[object] = [r["message"] for r in finding_rows.records()]
-    expected: list[object] = ["one", "two"]
-    assert messages == expected
-
-
-def bashes() -> list[tuple[str, str]]:
-    """List the shell writer's bashes: the belt's, and /bin/bash.
+@fixture(params=WRITERS)
+def writer(
+    request: Requested[str], _as_a_task: None, monkeypatch: pytest.MonkeyPatch
+) -> Writer:
+    """Give the row each writer in turn, in a task's world.
 
     Returns:
-        Each bash's label and path.
+        The writer.
 
     """
-    out = [("belt bash", support.tool("bash"))]
-    if SYSTEM_BASH.exists():
-        out.append(("/bin/bash", str(SYSTEM_BASH)))
-    return out
+    drawn: list[str] = []
+    monkeypatch.setattr(findings, "_drawn", drawn)
+    bashes = {"belt bash": support.tool("bash"), "/bin/bash": str(SYSTEM_BASH)}
+    return Writer(request.param, bashes.get(request.param), drawn)
 
 
 def records(file: Path) -> list[dict[str, object]]:
@@ -623,69 +158,269 @@ def records(file: Path) -> list[dict[str, object]]:
     ]
 
 
-class RunnerRows:
-    """Where each writer records on a runner, ORG_FINDINGS unset (#1976)."""
-
-    def __init__(self, tmp_path: Path) -> None:
-        """Give each row a directory of its own."""
-        self.root = Path(str(tmp_path))
-
-    def on_a_runner(
-        self,
-        writer: Writer,
-        entry: str,
-        *,
-        capfd: pytest.CaptureFixture[str],
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> list[Path]:
-        """Run one call as a job's step does, ORG_FINDINGS unset (#1976).
-
-        Returns:
-            Every file under the runner's temp, the findings directory's.
-
-        """
-        temp = self.root / "runner"
-        temp.mkdir(exist_ok=True)
-        for old in temp.rglob("*.jsonl"):
-            old.unlink()
-        done = writer.run(
-            self.root,
-            entry,
-            "s",
-            "m",
-            "d",
-            MISE_TASK_NAME="lint:demo",
-            RUNNER_TEMP=str(temp),
-            GITHUB_JOB="mutants-rust",
-            capfd=capfd,
-            monkeypatch=monkeypatch,
-        )
-        assert done.returncode == 0, done.stderr
-        files = sorted(p for p in temp.rglob("*") if p.is_file())
-        for file in files:
-            assert file.parent == temp / "findings"
-            assert re.search(JOB_FILE, file.name)
-        return files
-
-
 @fixture
-def runner_rows(tmp_path: Path) -> RunnerRows:
-    """Give each row its own RunnerRows."""
-    return RunnerRows(tmp_path)
+def recording(writer: Writer, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Name the task `lint:demo` and the records file, for `writer`.
+
+    Returns:
+        The records file, not yet written.
+
+    """
+    file = tmp_path / "out" / "job.jsonl"
+    monkeypatch.setenv("MISE_TASK_NAME", "lint:demo")
+    monkeypatch.setenv("ORG_FINDINGS", str(file))
+    return file
 
 
-@pytest.mark.parametrize("writer", writers())
-def test_on_a_runner_the_writer_names_the_file(
-    runner_rows: RunnerRows,
-    writer: object,
+class Found(NamedTuple):
+    """A row: the finding's words, what it prints, and the row's name."""
+
+    subject: str
+    message: str
+    detail: list[str]
+    printed: str
+    name: str
+
+
+FOUND = [
+    Found(
+        "Cargo.toml",
+        "a pin is loose",
+        [],
+        "lint:demo: Cargo.toml: a pin is loose\n",
+        "the form is task, subject, message",
+    ),
+    Found(
+        "",
+        "nothing is tracked",
+        [],
+        "lint:demo: nothing is tracked\n",
+        "an empty subject is left out and recorded empty",
+    ),
+    Found(
+        "chrono@0.4.45",
+        "RUSTSEC-2026-0543 is undecided",
+        ["reached through object_store 0.14.2", "and through arrow 57.0.0"],
+        "lint:demo: chrono@0.4.45: RUSTSEC-2026-0543 is undecided\n"
+        "  reached through object_store 0.14.2\n"
+        "  and through arrow 57.0.0\n",
+        "each detail line is indented two spaces",
+    ),
+    Found(
+        "a\tb",
+        AWKWARD,
+        [AWKWARD],
+        f"lint:demo: a\tb: {AWKWARD}\n  {AWKWARD}\n",
+        "a quote, a backslash, a tab and non-ASCII survive",
+    ),
+]
+
+
+@pytest.mark.parametrize("row", FOUND, ids=[row.name for row in FOUND])
+def test_a_finding_is_printed_and_recorded(
+    writer: Writer, recording: Path, capfd: pytest.CaptureFixture[str], row: Found
+) -> None:
+    """The belt's form on stderr; one record reading back the same values."""
+    status = writer.report("plain", row.subject, row.message, *row.detail)
+    out, err = capfd.readouterr()
+    assert (status, out, err) == (0, "", row.printed)
+    expected: list[dict[str, object]] = [
+        {
+            "v": 1,
+            "task": "lint:demo",
+            "subject": row.subject,
+            "message": row.message,
+            "detail": row.detail,
+        }
+    ]
+    assert records(recording) == expected
+    assert recording.read_text(encoding="utf-8").count("\n") == 1
+
+
+@pytest.mark.parametrize(
+    "planted",
+    [
+        pytest.param({}, id="unset off a runner"),
+        pytest.param(
+            {"ORG_FINDINGS": "", "RUNNER_TEMP": "runner", "GITHUB_JOB": "mutants-rust"},
+            id="empty, on a runner too",
+        ),
+    ],
+)
+def test_no_records_file_records_nothing(
+    writer: Writer,
+    tmp_path: Path,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    planted: dict[str, str],
+) -> None:
+    """Without a records file the finding is printed and nothing is written."""
+    monkeypatch.setenv("MISE_TASK_NAME", "lint:demo")
+    for name, value in planted.items():
+        monkeypatch.setenv(name, value)
+    status = writer.report("plain", "x", "y")
+    out, err = capfd.readouterr()
+    assert (status, out, err) == (0, "", "lint:demo: x: y\n")
+    assert not any(tmp_path.rglob("*.jsonl"))
+
+
+def test_a_failed_append_is_said_and_is_not_fatal(
+    writer: Writer,
+    tmp_path: Path,
     capfd: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Unset on a runner: one record in findings/<job>-<16 hex>.jsonl."""
-    files = runner_rows.on_a_runner(
-        writer, "plain", capfd=capfd, monkeypatch=monkeypatch
+    """A path under a file: printed, one more line names it, status 0."""
+    blocker = tmp_path / "a-file"
+    blocker.write_text("", encoding="utf-8")
+    target = blocker / "out" / "job.jsonl"
+    monkeypatch.setenv("MISE_TASK_NAME", "lint:demo")
+    monkeypatch.setenv("ORG_FINDINGS", str(target))
+    status = writer.report("plain", "x", "y", "z")
+    out, err = capfd.readouterr()
+    assert (status, out) == (0, "")
+    first, second, failed = err.splitlines()
+    assert (first, second) == ("lint:demo: x: y", "  z")
+    assert failed.startswith(f"lint:demo: the finding was not recorded in {target}: ")
+    assert not target.exists()
+
+
+def test_the_annotated_entry_escapes_as_the_runner_reads(
+    writer: Writer, recording: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """`::error::`, with `%`, CR and LF escaped; the record is the same."""
+    message = "50% done\nnext"
+    status = writer.report("annotated", "s", message, "one detail")
+    out, err = capfd.readouterr()
+    assert (status, out, err) == (
+        0,
+        "",
+        "::error::lint:demo: s: 50%25 done%0Anext\n  one detail\n",
     )
-    assert len(files) == 1, files
+    assert records(recording)[0]["message"] == message
+
+
+def test_a_plain_line_cannot_open_a_command(
+    writer: Writer, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A message of a newline and a command prints one line, the command escaped."""
+    status = writer.report("plain", "", "x\n::error::forged", "::warning::w")
+    out, err = capfd.readouterr()
+    assert (status, out) == (0, "")
+    first, second = err.splitlines()
+    assert first.endswith(": x\\n::error::forged"), first
+    assert second == "  \\::warning::w"
+
+
+def test_the_task_is_mise_s_name_when_set(
+    writer: Writer,
+    recording: Path,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """MISE_TASK_NAME names the task in the line and the record."""
+    monkeypatch.setenv("MISE_TASK_NAME", "audit:deny")
+    status = writer.report("plain", "s", "m")
+    out, err = capfd.readouterr()
+    assert (status, out, err) == (0, "", "audit:deny: s: m\n")
+    assert records(recording)[0]["task"] == "audit:deny"
+
+
+@pytest.mark.parametrize(
+    "planted",
+    [
+        pytest.param({}, id="no task, off a runner"),
+        pytest.param(
+            {"RUNNER_TEMP": "/elsewhere", "GITHUB_JOB": "attach"},
+            id="a runner's temp elsewhere",
+        ),
+        pytest.param(
+            {"RUNNER_TEMP": "/", "GITHUB_JOB": "attach"}, id="below the runner's temp"
+        ),
+        pytest.param({"RUNNER_TEMP": "{tmp}", "GITHUB_JOB": ""}, id="no job"),
+    ],
+)
+def test_the_task_is_the_script_s_name_otherwise(
+    writer: Writer,
+    recording: Path,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    planted: dict[str, str],
+) -> None:
+    """Where mise named no task and no step script ran, the script's file name."""
+    monkeypatch.delenv("MISE_TASK_NAME")
+    for name, value in planted.items():
+        monkeypatch.setenv(name, value.format(tmp=Path.cwd()))
+    status = writer.report("plain", "s", "m")
+    out, err = capfd.readouterr()
+    assert (status, out, err) == (0, "", f"{writer.script}: s: m\n")
+    assert records(recording)[0]["task"] == writer.script
+
+
+def test_a_step_script_s_finding_names_the_job(
+    writer: Writer,
+    recording: Path,
+    tmp_path: Path,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The runner's step script, directly under RUNNER_TEMP: GITHUB_JOB."""
+    monkeypatch.delenv("MISE_TASK_NAME")
+    monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
+    monkeypatch.setenv("GITHUB_JOB", "attach")
+    status = writer.report("plain", "s", "m")
+    out, err = capfd.readouterr()
+    assert (status, out, err) == (0, "", "attach: s: m\n")
+    assert records(recording)[0]["task"] == "attach"
+
+
+def test_findings_append(writer: Writer, recording: Path) -> None:
+    """A second finding is a second line of the same file."""
+    assert writer.report("plain", "", "one") == 0
+    assert writer.report("plain", "", "two") == 0
+    messages: list[object] = [r["message"] for r in records(recording)]
+    expected: list[object] = ["one", "two"]
+    assert messages == expected
+
+
+@fixture
+def on_a_runner(
+    _as_a_task: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Path:
+    """Make the row a job's step, ORG_FINDINGS unset (#1976), in a task's world.
+
+    Returns:
+        The runner's temp directory.
+
+    """
+    temp = tmp_path / "runner"
+    temp.mkdir()
+    monkeypatch.setenv("MISE_TASK_NAME", "lint:demo")
+    monkeypatch.setenv("RUNNER_TEMP", str(temp))
+    monkeypatch.setenv("GITHUB_JOB", "mutants-rust")
+    return temp
+
+
+def job_files(temp: Path) -> list[Path]:
+    """List the files under a runner's temp, each a job's records file.
+
+    Returns:
+        The files, sorted.
+
+    """
+    files = sorted(p for p in temp.rglob("*") if p.is_file())
+    for file in files:
+        assert file.parent == temp / "findings"
+        assert re.search(JOB_FILE, file.name)
+    return files
+
+
+def test_on_a_runner_the_writer_names_the_file(
+    writer: Writer, on_a_runner: Path
+) -> None:
+    """Unset on a runner: one record in findings/<job>-<16 hex>.jsonl."""
+    assert writer.report("plain", "s", "m", "d") == 0
+    (file,) = job_files(on_a_runner)
     expected: list[dict[str, object]] = [
         {
             "v": 1,
@@ -695,51 +430,37 @@ def test_on_a_runner_the_writer_names_the_file(
             "detail": ["d"],
         }
     ]
-    assert records(files[0]) == expected
+    assert records(file) == expected
 
 
-@pytest.mark.parametrize("writer", writers())
-def test_one_process_writes_one_file(
-    runner_rows: RunnerRows,
-    writer: object,
-    capfd: pytest.CaptureFixture[str],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_one_process_writes_one_file(writer: Writer, on_a_runner: Path) -> None:
     """Two findings of one process land in one file, in order."""
-    files = runner_rows.on_a_runner(
-        writer, "twice", capfd=capfd, monkeypatch=monkeypatch
-    )
-    assert len(files) == 1, files
-    assert len(records(files[0])) == 2
+    assert writer.report("twice", "s", "m", "d") == 0
+    (file,) = job_files(on_a_runner)
+    messages = [r["message"] for r in records(file)]
+    expected: list[object] = ["m", "m"]
+    assert messages == expected
 
 
-@pytest.mark.parametrize("writer", writers())
-def test_two_processes_write_two_files(
-    runner_rows: RunnerRows,
-    writer: object,
-    capfd: pytest.CaptureFixture[str],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_two_processes_write_two_files(writer: Writer, on_a_runner: Path) -> None:
     """Two legs of one matrix share GITHUB_JOB and never a file."""
-    first = runner_rows.on_a_runner(
-        writer, "plain", capfd=capfd, monkeypatch=monkeypatch
-    )
-    temp = runner_rows.root / "runner"
-    done = writer.run(
-        runner_rows.root,
-        "plain",
-        "s",
-        "m",
-        MISE_TASK_NAME="lint:demo",
-        RUNNER_TEMP=str(temp),
-        GITHUB_JOB="mutants-rust",
-        capfd=capfd,
-        monkeypatch=monkeypatch,
-    )
-    assert done.returncode == 0, done.stderr
-    both = sorted(temp.rglob("*.jsonl"))
-    assert len(both) == 2, both
-    assert first[0] in both
+    assert writer.report("plain", "s", "m", "d") == 0
+    assert writer.report("plain", "s", "m") == 0
+    first, second = job_files(on_a_runner)
+    assert first != second
+
+
+def bashes() -> list[tuple[str, str]]:
+    """List the shell writer's bashes: the belt's, and /bin/bash.
+
+    Returns:
+        Each bash's label and path.
+
+    """
+    out = [("belt bash", support.tool("bash"))]
+    if SYSTEM_BASH.exists():
+        out.append(("/bin/bash", str(SYSTEM_BASH)))
+    return out
 
 
 # Sourcing the shell writer runs no command (#1934).
@@ -825,9 +546,7 @@ def lines_rows(tmp_path: Path, env: support.Env) -> LinesRows:
 
 
 @pytest.mark.parametrize(("label", "bash"), bashes())
-def test_each_line_is_one_finding(
-    lines_rows: LinesRows, label: object, bash: object
-) -> None:
+def test_each_line_is_one_finding(lines_rows: LinesRows, label: str, bash: str) -> None:
     """Empty subject, detail, a tab in the message: printed and recorded."""
     text = f"{US}no subject\nf.yml{US}is wrong{US}first{US}second\ns{US}a\tb\n"
     printed = (
@@ -867,7 +586,7 @@ def test_each_line_is_one_finding(
 
 @pytest.mark.parametrize(("label", "bash"), bashes())
 def test_a_line_with_no_separator_is_passed_through(
-    lines_rows: LinesRows, label: object, bash: object
+    lines_rows: LinesRows, label: str, bash: str
 ) -> None:
     """A program's own summary goes to stdout and records nothing."""
     done = lines_rows.feed(bash, "all clean\n")
@@ -877,7 +596,7 @@ def test_a_line_with_no_separator_is_passed_through(
 
 @pytest.mark.parametrize(("label", "bash"), bashes())
 def test_a_last_line_without_a_newline_is_read(
-    lines_rows: LinesRows, label: object, bash: object
+    lines_rows: LinesRows, label: str, bash: str
 ) -> None:
     """The final finding is not lost for want of a newline."""
     done = lines_rows.feed(bash, f"{US}last")
@@ -895,11 +614,10 @@ def test_a_lone_surrogate_is_recorded_as_printed(
         monkeypatch.setenv("MISE_TASK_NAME", "t")
         monkeypatch.setenv("ORG_FINDINGS", str(file))
         findings.finding(os.fsdecode(b"bad\xffname"), "x\ud800y")
-        done = Ran(0, *capfd.readouterr())
-        assert done.returncode == 0, done.stderr
+        out, err = capfd.readouterr()
         lines = file.read_text(encoding="utf-8").splitlines()
         assert len(lines) == 1
         got = decoded.as_object(decoded.load_json(lines[0]), "a record")
         assert got["message"] == "x\\ud800y"
         assert got["subject"] == "bad\\udcffname"
-        assert done.stderr == "t: bad\\udcffname: x\\ud800y\n"
+        assert (out, err) == ("", "t: bad\\udcffname: x\\ud800y\n")

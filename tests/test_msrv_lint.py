@@ -163,7 +163,6 @@ class Planted:
     def __init__(
         self,
         tmp_path: Path,
-        capfd: pytest.CaptureFixture[str],
         *,
         belt: support.Belt,
         env: support.Env,
@@ -172,7 +171,6 @@ class Planted:
         self.plant_belt = belt
         self.make_env = env
         self.tmp = tmp_path
-        self.capfd = capfd
         self.bins = self.tmp / "bin"
         self.bins.mkdir()
         for name, text in {
@@ -226,10 +224,8 @@ class Planted:
 
         `roots` is what rust_workspaces.resolved answers, None for a tree
         it refused: the root manifest alone unless a row says otherwise
-        (mise/test_msrv_roots.py runs the real one). What planting printed
-        is dropped, so the row reads only what the helper says.
+        (mise/test_msrv_roots.py runs the real one).
         """
-        self.capfd.readouterr()
         monkeypatch.chdir(self.tree)
         for name in list(os.environ):
             monkeypatch.delenv(name)
@@ -263,8 +259,15 @@ def planted(
     belt: support.Belt,
     env: support.Env,
 ) -> Planted:
-    """Give each row its own Planted."""
-    return Planted(tmp_path, capfd, belt=belt, env=env)
+    """Give each row its own Planted, dropping what planting printed.
+
+    Returns:
+        The planted world.
+
+    """
+    world = Planted(tmp_path, belt=belt, env=env)
+    capfd.readouterr()
+    return world
 
 
 def planned(pgrx: str = "") -> list[str]:
@@ -608,8 +611,15 @@ def fuzzing(
     belt: support.Belt,
     env: support.Env,
 ) -> Fuzzing:
-    """Give each row its own Fuzzing."""
-    return Fuzzing(tmp_path, capfd, belt=belt, env=env)
+    """Give each row its own Fuzzing, dropping what planting printed.
+
+    Returns:
+        The planted world.
+
+    """
+    world = Fuzzing(tmp_path, belt=belt, env=env)
+    capfd.readouterr()
+    return world
 
 
 def compile_at(root: str, flags: str | None) -> str:

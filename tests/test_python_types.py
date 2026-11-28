@@ -728,13 +728,19 @@ FIXTURES = """\
 
 from collections.abc import Iterator
 
-from belt.typed_pytest import fixture
+from belt.typed_pytest import Requested, fixture
 
 
 @fixture
 def word() -> str:
     \"\"\"A word.\"\"\"
     return "a"
+
+
+@fixture(params=["a", "b"])
+def letter(request: Requested[str], word: str) -> str:
+    \"\"\"Each letter in turn, after a word.\"\"\"
+    return request.param + word
 
 
 @fixture
@@ -759,7 +765,7 @@ class TestShared:
 
 @pytest.mark.usefixtures("_real_mypy")
 def test_the_typed_fixture_is_clean(belt: support.Belt, env: support.Env) -> None:
-    """Bare, generator and class-scoped fixtures, no finding (#2177)."""
+    """Bare, generator, class-scoped and parametrized fixtures, no finding."""
     done = run({"test_a.py": FIXTURES}, belt=belt, env=env)
     assert done.returncode == 0, done.stdout + done.stderr
     assert f"{LABEL}: 1 file(s) clean under mypy" in done.stdout
@@ -786,11 +792,26 @@ def test_a_fixture_called_directly_is_red(belt: support.Belt, env: support.Env) 
 
 
 @pytest.mark.usefixtures("_real_mypy")
+def test_a_parametrized_fixture_s_value_is_typed_by_its_params(
+    belt: support.Belt, env: support.Env
+) -> None:
+    """A request typed for ints, given strings, is red (#2177)."""
+    text = FIXTURES.replace("request: Requested[str]", "request: Requested[int]")
+    assert text != FIXTURES
+    done = run({"test_a.py": text}, belt=belt, env=env)
+    assert done.returncode == 1
+    assert (
+        'test_a.py:14: error: Argument 1 has incompatible type "Callable[[Requested'
+        '[int], str], str]"; expected "Callable[[Requested[str], str], object]"'
+    ) in done.stdout
+
+
+@pytest.mark.usefixtures("_real_mypy")
 def test_a_form_the_belt_does_not_type_is_red(
     belt: support.Belt, env: support.Env
 ) -> None:
-    """A scope no overload names is no overload variant, not `Any`."""
-    text = FIXTURES.replace('scope="class"', 'scope="session"')
+    """A form no overload names is no overload variant, not `Any`."""
+    text = FIXTURES.replace('scope="class"', "autouse=True")
     done = run({"test_a.py": text}, belt=belt, env=env)
     assert done.returncode == 1
     assert 'error: No overload variant of "fixture" matches' in done.stdout

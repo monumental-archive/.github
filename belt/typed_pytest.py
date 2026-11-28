@@ -13,13 +13,18 @@ form the org's tests use:
 - `@fixture(scope="module")`, one value for a module's rows, for a
   fixture as costly as a real run of the thing under test;
 - `@fixture(scope="session")`, a factory with nothing to set up or tear
-  down, which a Hypothesis property may take as well.
+  down, which a Hypothesis property may take as well;
+- `@fixture(params=[...])`, one fixture per value, every row that takes
+  it run once for each. Its first parameter is `request`, typed
+  `Requested[T]` for the values' own `T`: pytest's `FixtureRequest`
+  declares no `param`, so the value it carries would be untyped, and
+  the overload ties it to the list it came from.
 
 Each overload takes the fixture function by its own parameters, so its
 body is checked as written, and the decorated name is an `object`: pytest
 replaces it with a definition that fails when called, so a row calling a
 fixture directly is a type error here, as it is a failure at run time.
-A form no overload names (another scope, `params=`, `autouse=`) is "no
+A form no overload names (`autouse=`, `params=` with a scope) is "no
 overload variant", red until an overload is added here.
 
 The tree the belt package sits in is on pytest's path for a run and on
@@ -27,12 +32,21 @@ mypy's (`mise/python-types.sh`), so a repository's test file needs one
 line, `from belt.typed_pytest import fixture`.
 """
 
-from typing import TYPE_CHECKING, Literal, cast, overload
+from typing import TYPE_CHECKING, Concatenate, Literal, Protocol, cast, overload
 
 import pytest
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
+
+
+class Requested[T](Protocol):
+    """The `request` a parametrized fixture is given: its value, typed."""
+
+    @property
+    def param(self) -> T:
+        """The value this instance of the fixture is for."""
+        ...
 
 
 @overload
@@ -45,17 +59,24 @@ def fixture[**P](
 ) -> Callable[[Callable[P, object]], object]: ...
 
 
+@overload
+def fixture[T, **P](
+    *, params: Sequence[T]
+) -> Callable[[Callable[Concatenate[Requested[T], P], object]], object]: ...
+
+
 def fixture[**P](
     function: Callable[P, object] | None = None,
     /,
     *,
     scope: Literal["function", "class", "module", "session"] = "function",
+    params: Sequence[object] | None = None,
 ) -> object:
     """Apply pytest's `fixture`; the overloads above are its type.
 
     Returns:
-        pytest's fixture definition, or its marker when a scope is
-        named. Callers see the overloads only.
+        pytest's fixture definition, or its marker when a scope or
+        params are named. Callers see the overloads only.
 
     """
     # THE ONE CAST, and the one place it can be: pytest's own type for
@@ -64,5 +85,5 @@ def fixture[**P](
     # overload's return is one); the overloads, checked against each
     # call, are the type callers get.
     if function is None:
-        return cast("object", pytest.fixture(scope=scope))
+        return cast("object", pytest.fixture(scope=scope, params=params))
     return cast("object", pytest.fixture(function))
