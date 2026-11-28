@@ -24,17 +24,6 @@
 # has neither. `lint:belt-shell` reds any config that defines tasks and
 # leaves the shell to whatever layer happens to be in play — mise's own
 # default is `sh`, which is dash on an Ubuntu runner.
-# The toolchains the belt's real-tool mutation fixture rows run (#1432,
-# the owner's ruling): cargo-mutants needs cargo, gomu the repository's
-# own go, StrykerJS node and pnpm. LAZY, so a bare `mise install` — every
-# gate row — skips them; only the test rows whose fixture rows run a
-# tool install it by name (mise/mutation-install.sh), from mise.lock.
-[tools]
-rust = { version = "1.100.0", lazy = true }
-go = { version = "1.27.4", lazy = true }
-node = { version = "26.13.1", lazy = true }
-pnpm = { version = "12.23.0", lazy = true }
-
 [task_config]
 shell = "bash -euo pipefail -c"
 

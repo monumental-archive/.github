@@ -968,6 +968,214 @@ class OffRunner(Planted):
         self.assertEqual(list[str](), log)
 
 
+# ON WHAT A CHANGE TOUCHES (#1432): the leg's diff mode, with a
+# stand-in for StrykerJS (the owner's ruling: real tools for Python
+# only). The share keeps the files the change touched and spells each
+# run of changed lines as StrykerJS's own mutation range,
+# `file:first-last`, in `--mutate`. Measured on monumental-archive with
+# StrykerJS 10.1.1 (#1432's fork-3 probe): `--mutate <one file>` judged
+# that file alone, {Killed: 2, Survived: 1}, into
+# reports/mutation/mutation.json. The range form is StrykerJS's
+# documented `--mutate` syntax; the stand-in keeps a planted mutant
+# when its line falls in a range named for its file (a bare file keeps
+# all of that file's), and marks one Ignored, with its reason, under a
+# `// Stryker disable next-line <Mutator>: <reason>` on the line above,
+# as 10.1.1 reports it.
+DIFF_SOURCE = (
+    "export const add = (a: number, b: number): number => a + b;\n"
+    "export const sub = (a: number, b: number): number => a - b;\n"
+    "export const spin = (): void => { while (true) { break; } };\n"
+)
+# (text on the mutant's line, mutator, status) for each planted mutant.
+DIFF_MUTANTS = [
+    ("a + b", "ArithmeticOperator", "Killed"),
+    ("a - b", "ArithmeticOperator", "Survived"),
+    ("break;", "BlockStatement", "Timeout"),
+]
+DIFF_STRYKER = """#!{python}
+import json
+import re
+import sys
+from pathlib import Path
+
+args = sys.argv[1:]
+with open({log!r}, "a", encoding="utf-8") as log:
+    log.write("stryker " + " ".join(args) + "\\n")
+mutate = args[args.index("--mutate") + 1]
+ranges = {{}}
+for entry in mutate.split(","):
+    found = re.fullmatch(r"(.*):([0-9]+)-([0-9]+)", entry)
+    name, span = entry, None
+    if found:
+        name, span = found[1], range(int(found[2]), int(found[3]) + 1)
+    ranges.setdefault(name.replace("\\\\", ""), []).append(span)
+mutants = []
+for text, mutator, status in json.loads(Path({table!r}).read_text(encoding="utf-8")):
+    lines = Path("src/add.ts").read_text(encoding="utf-8").splitlines()
+    at = next(i for i, x in enumerate(lines, 1) if text in x)
+    spans = ranges.get("src/add.ts")
+    if spans is None or not any(s is None or at in s for s in spans):
+        continue
+    above = lines[at - 2] if at > 1 else ""
+    mark = re.search(r"Stryker disable next-line " + mutator + r": (.+)$", above)
+    mutants.append({{
+        "id": str(len(mutants)),
+        "mutatorName": mutator,
+        "replacement": "",
+        "status": "Ignored" if mark else status,
+        "statusReason": mark[1] if mark else "",
+        "location": {{
+            "start": {{"line": at, "column": 1}},
+            "end": {{"line": at, "column": 2}},
+        }},
+    }})
+Path("reports/mutation").mkdir(parents=True, exist_ok=True)
+Path("reports/mutation/mutation.json").write_text(json.dumps({{
+    "schemaVersion": "1.0",
+    "thresholds": {{"high": 80, "low": 60, "break": None}},
+    "files": {{
+        "src/add.ts": {{"language": "typescript", "source": "", "mutants": mutants}},
+    }},
+}}), encoding="utf-8")
+"""
+
+
+class Diff(Planted):
+    """The leg's diff mode, by line ranges, on a StrykerJS stand-in (#1432)."""
+
+    @override
+    def setUp(self) -> None:
+        """Adopt, install the stand-in and commit the base."""
+        super().setUp()
+        self.git("config", "commit.gpgsign", "false")
+        self.track("src/add.ts", DIFF_SOURCE)
+        self.track("stryker.config.json", json.dumps(CONFIG))
+        table = self.tmp / "mutants.json"
+        table.write_text(json.dumps(DIFF_MUTANTS), encoding="utf-8")
+        stub = self.tree / "node_modules" / ".bin" / "stryker"
+        stub.parent.mkdir(parents=True)
+        text = DIFF_STRYKER.format(
+            python=sys.executable, log=str(self.log), table=str(table)
+        )
+        stub.write_text(text, encoding="utf-8")
+        stub.chmod(0o755)
+        self.git("commit", "-q", "-m", "base")
+        self.base = self.head()
+        self.env |= {
+            "MUTANTS_DIFF": "1",
+            "MISE_TASK_NAME": "ci:mutants",
+            "ORG_PYTHON": sys.executable,
+        }
+
+    def head(self) -> str:
+        """Read HEAD.
+
+        Returns:
+            The commit.
+
+        """
+        return subprocess.run(
+            [GIT, "rev-parse", "HEAD"],
+            cwd=self.tree,
+            env=hermetic.env(),
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+
+    def change(self, old: str, new: str) -> None:
+        """Commit one edit of the source on top of the base."""
+        self.track("src/add.ts", DIFF_SOURCE.replace(old, new, 1))
+        self.git("commit", "-q", "-m", "change")
+
+    def leg(
+        self, base: str | None = None
+    ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+        """Run the leg on what the change touched.
+
+        Returns:
+            The finished leg and the stand-in's calls.
+
+        """
+        return self.run_leg(ORG_MUTANTS_BASE=self.base if base is None else base)
+
+    @staticmethod
+    def summary_of(done: subprocess.CompletedProcess[str]) -> str:
+        """Read the leg's summary line.
+
+        Returns:
+            The line, or "" when it printed none.
+
+        """
+        lines = [x for x in done.stdout.splitlines() if " mutants, " in x]
+        return lines[-1] if lines else ""
+
+    def test_a_survivor_on_a_changed_line_is_red_by_file_line_and_mutator(
+        self,
+    ) -> None:
+        """Line 2 touched: `--mutate src/add.ts:2-2`, its survivor red."""
+        self.change("a - b;", "a - b; // touched")
+        done, log = self.leg()
+        self.assertEqual(1, done.returncode, done.stderr)
+        self.assertIn("--mutate src/add.ts:2-2 --timeoutMS 5000", log[0])
+        survived = f"{LABEL}: survived: src/add.ts:2:1: ArithmeticOperator"
+        self.assertIn(survived, done.stdout)
+        self.assertIn("1 mutants, 0 killed, 1 survived", self.summary_of(done))
+
+    def test_a_survivor_on_an_untouched_line_is_not_judged(self) -> None:
+        """Only line 1 touched: line 2's survivor is never judged."""
+        self.change("a + b;", "a + b; // touched")
+        done, log = self.leg()
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertIn("--mutate src/add.ts:1-1 ", log[0])
+        self.assertNotIn("src/add.ts:2", done.stdout)
+        self.assertIn("1 mutants, 1 killed, 0 survived", self.summary_of(done))
+
+    def test_an_explained_survivor_on_a_changed_line_is_green(self) -> None:
+        """The disable comment above the touched line: excluded, green."""
+        self.change(
+            "export const sub = (a: number, b: number): number => a - b;",
+            "// Stryker disable next-line ArithmeticOperator: the fixture's survivor\n"
+            "export const sub = (a: number, b: number): number => a - b; // touched",
+        )
+        done, log = self.leg()
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertIn("--mutate src/add.ts:2-3 ", log[0])
+        self.assertIn("1 excluded", self.summary_of(done))
+
+    def test_a_changed_adoption_file_judges_the_whole_population(self) -> None:
+        """stryker.config.json touched: the whole file, its survivor red."""
+        self.track("stryker.config.json", json.dumps(CONFIG, indent=1))
+        self.git("commit", "-q", "-m", "adoption")
+        done, log = self.leg()
+        self.assertEqual(1, done.returncode, done.stderr)
+        self.assertIn(
+            "ci:mutants: typescript: judging the whole population:"
+            " the change touches stryker.config.json",
+            done.stdout,
+        )
+        self.assertIn("--mutate src/add.ts --timeoutMS", log[0])
+        self.assertIn("3 mutants, 2 killed, 1 survived", self.summary_of(done))
+
+    def test_a_mutant_that_times_out_counts_as_caught(self) -> None:
+        """Line 3 touched: its mutant times out, which is killed: green."""
+        self.change("break;", "break; /* touched */")
+        done, _ = self.leg()
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertIn("1 mutants, 1 killed, 0 survived", self.summary_of(done))
+
+    def test_no_base_judges_the_whole_population(self) -> None:
+        """An empty base: the whole file, its survivor red."""
+        done, log = self.leg(base="")
+        self.assertEqual(1, done.returncode, done.stderr)
+        self.assertIn(
+            "ci:mutants: typescript: judging the whole population:"
+            " no base to diff against",
+            done.stdout,
+        )
+        self.assertIn("--mutate src/add.ts --timeoutMS", log[0])
+
+
 class Run(Planted):
     """In place, on a clean tree, from the repository's own StrykerJS."""
 

@@ -841,6 +841,145 @@ class Shards(Planted):
         )
 
 
+def files(*names: str) -> list[str]:
+    """Type a row's expected list of mutated files.
+
+    Returns:
+        The names, in order.
+
+    """
+    return list(names)
+
+
+class Diff(Planted):
+    """The leg's diff mode, by file, on the measured gomu (#1432).
+
+    gomu selects only by file (v0.3.0's `--base-sha` names changed
+    files, never lines), so the leg picks the files a change touched
+    and runs gomu on each, as it always does. Measured, 2026-11-28, on
+    a two-package fixture with the real gomu v0.3.0 under go 1.27.4: a
+    change to one package's file measured that package alone
+    ("measuring coverage of 1 package(s)") and judged that file's
+    mutants only ("4 mutants, 3 killed, 0 survived, 0 not covered,
+    1 not viable, 0 excluded"). The stand-in gomu answers each file
+    with its planted report, as in every row above.
+    """
+
+    @override
+    def setUp(self) -> None:
+        """Adopt and commit the base the change sits on."""
+        super().setUp()
+        self.git("config", "commit.gpgsign", "false")
+        self.adopt()
+        self.git("commit", "-q", "-m", "base")
+        self.base = subprocess.run(
+            [GIT, "rev-parse", "HEAD"],
+            cwd=self.tree,
+            env=clean_env(),
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        self.env |= {"MUTANTS_DIFF": "1", "MISE_TASK_NAME": "ci:mutants"}
+
+    def change(self, name: str, text: str) -> None:
+        """Commit one file's new text on top of the base."""
+        self.write(name, text)
+        self.git("commit", "-q", "-m", "change")
+
+    def leg(self, base: str | None = None) -> subprocess.CompletedProcess[str]:
+        """Run the leg on what the change touched.
+
+        Returns:
+            The completed process.
+
+        """
+        self.env["ORG_MUTANTS_BASE"] = self.base if base is None else base
+        return self.run_leg()
+
+    def mutated(self) -> list[str]:
+        """Name the files gomu was run on.
+
+        Returns:
+            Each file, relative to the tree.
+
+        """
+        return [
+            line.split()[2].removeprefix(f"{self.root}/")
+            for line in self.calls("gomu run ")
+        ]
+
+    def test_a_survivor_on_a_changed_line_is_red_by_file_line_and_mutator(
+        self,
+    ) -> None:
+        """a/a.go touched: its survivor is red, named; b is never run."""
+        self.change("a/a.go", A_GO.replace("x + y", "x + y // touched"))
+        self.report("a", ("KILLED", 4, "arithmetic"), ("SURVIVED", 8, "boundary_value"))
+        self.report("b", ("SURVIVED", 4, "arithmetic"))
+        got = self.leg()
+        self.assertEqual(got.returncode, 1)
+        self.assertIn(f"{LABEL}: survived: a/a.go:8:9 boundary_value\n", got.stdout)
+        self.assertIn(measuring(1), got.stdout)
+        self.assertEqual(files("a/a.go"), self.mutated())
+
+    def test_a_survivor_in_an_untouched_file_is_not_judged(self) -> None:
+        """Only b/b.go touched: a's survivor is never judged."""
+        self.change("b/b.go", B_GO.replace("x * 2", "x * 2 // touched"))
+        self.report("a", ("SURVIVED", 8, "boundary_value"))
+        self.report("b", ("KILLED", 4, "arithmetic"))
+        got = self.leg()
+        self.assertEqual(got.returncode, 0, got.stderr)
+        self.assertEqual(files("b/b.go"), self.mutated())
+        self.assertTrue(got.stdout.endswith(summary_line((1, 1, 0, 0, 0, 0))))
+
+    def test_an_explained_survivor_on_a_changed_line_is_green(self) -> None:
+        """The touched line carries its record above it: excluded, green."""
+        self.change("a/a.go", A_GO.replace(IF_LINE, ABOVE))
+        self.survive_at(9)
+        got = self.leg()
+        self.assertEqual(got.returncode, 0, got.stderr)
+        self.assertEqual(files("a/a.go"), self.mutated())
+        self.assertTrue(got.stdout.endswith(summary_line((2, 1, 0, 0, 0, 1))))
+
+    def survive_at(self, line: int) -> None:
+        """Plant one covered conditional survivor in a/a.go."""
+        self.report("a", ("KILLED", 4, "arithmetic"), ("SURVIVED", line, "conditional"))
+        self.report("b", ("KILLED", 4, "arithmetic"))
+
+    def test_a_changed_adoption_file_judges_the_whole_population(self) -> None:
+        """.gomuignore touched: every file is run, the survivor red."""
+        self.change(".gomuignore", "# no patterns, touched\n")
+        self.report("a", ("KILLED", 4, "arithmetic"), ("SURVIVED", 8, "boundary_value"))
+        self.report("b", ("KILLED", 4, "arithmetic"))
+        got = self.leg()
+        self.assertEqual(got.returncode, 1)
+        self.assertIn(
+            "ci:mutants: go: judging the whole population:"
+            " the change touches .gomuignore\n",
+            got.stdout,
+        )
+        self.assertEqual(files("a/a.go", "b/b.go"), self.mutated())
+
+    def test_a_mutant_that_times_out_counts_as_caught(self) -> None:
+        """A timed-out mutant in the touched file is killed: green."""
+        self.change("a/a.go", A_GO.replace("x + y", "x + y // touched"))
+        self.report("a", ("KILLED", 4, "arithmetic"), ("TIMED_OUT", 8, "conditional"))
+        got = self.leg()
+        self.assertEqual(got.returncode, 0, got.stderr)
+        self.assertTrue(got.stdout.endswith(summary_line((2, 2, 0, 0, 0, 0))))
+
+    def test_no_base_judges_the_whole_population(self) -> None:
+        """An empty base: every file is run."""
+        self.clean_reports()
+        got = self.leg(base="")
+        self.assertEqual(got.returncode, 0, got.stderr)
+        self.assertIn(
+            "ci:mutants: go: judging the whole population: no base to diff against\n",
+            got.stdout,
+        )
+        self.assertEqual(files("a/a.go", "b/b.go"), self.mutated())
+
+
 class BuildGo(unittest.TestCase):
     """The comparison `build-go` makes: older or unreadable is refused."""
 

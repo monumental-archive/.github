@@ -127,7 +127,7 @@ default = 2
 "release/test_generate_pgrx_upgrade.py" = 29
 "mise/test_measured.py" = 27
 "mise/test_mutants_go.py" = 25
-"mise/test_mutants_rust.py" = 129
+"mise/test_mutants_rust.py" = 31
 "mise/test_coverage_go_rust.py" = 22
 # PR #2174's gate run 46082363673 (test 2/4): its rows on a real
 # database (#2163); unittest's durations leave out the image start.

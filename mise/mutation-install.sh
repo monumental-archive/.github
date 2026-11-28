@@ -8,9 +8,9 @@
 # One argument or several, each word a language.
 # The belt pins cargo-mutants, gomu and cosmic-ray lazy, so the gate's
 # bare `mise install` skips them. A `ci:mutants` row installs its own
-# language's (and its toolchain, where the tree pins it lazy), from
-# the lock, as repo-mutants.yml's jobs do. StrykerJS is the repository's, from its
-# own tracked lockfile (#1358): pnpm's or npm's frozen install, and
+# language's, from the lock, as repo-mutants.yml's jobs do. StrykerJS is
+# the repository's, from its own tracked lockfile (#1358): pnpm's or
+# npm's frozen install, and
 # nothing where neither is tracked (the leg then names what is
 # missing). Any other language is red.
 set -euo pipefail
@@ -22,8 +22,8 @@ read -r -a languages <<< "$*"
 }
 for language in "${languages[@]}"; do
   case "${language}" in
-    rust) mise install rust cargo:cargo-mutants ;;
-    go) mise install go go:github.com/sivchari/gomu/cmd/gomu ;;
+    rust) mise install cargo:cargo-mutants ;;
+    go) mise install go:github.com/sivchari/gomu/cmd/gomu ;;
     python) mise install pipx:cosmic-ray ;;
     typescript)
       if [[ -f pnpm-lock.yaml ]]; then
