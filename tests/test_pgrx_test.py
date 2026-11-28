@@ -135,7 +135,9 @@ org_pgrx_major_env() {
   export CFLAGS="-Iicu-pg$1 ${CFLAGS:-}"
 }
 """ + WITH_MAJOR.group(0)
-PGRX_POSTGRES_STUB = "print('plan')\n"
+# The command's stand-in, a belt module the launcher finds: the shell
+# body under test calls it, and its own rows are test_pgrx_postgres.py's.
+PGRX_POSTGRES_STUB = "def main(argv):\n    print('plan')\n    return 0\n"
 
 MAJORS = [17, 18]
 
@@ -206,7 +208,7 @@ class TestPlanted:
             self.tmp / "belt",
             stubs={
                 "pgrx-env.sh": PGRX_ENV_STUB,
-                "pgrx_postgres.py": PGRX_POSTGRES_STUB,
+                "belt/pgrx_postgres.py": PGRX_POSTGRES_STUB,
             },
         )
         self.log = self.tmp / "log"
