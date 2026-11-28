@@ -373,5 +373,3 @@ def test_arguments_other_than_the_canon_are_refused(
     assert (ended.value.code, out) == (2, "")
     assert err.startswith("usage: belt adoption-population "), err
     assert err.splitlines()[-1] == error
-
-
