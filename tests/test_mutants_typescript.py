@@ -416,33 +416,27 @@ class ShareOut:
         subprocess.run([*git, "add", "--", *FILES], env=self.make_env(), check=True)
         monkeypatch.chdir(self.tree)
 
-    def share(
-        self, mutate: list[str], shard: str, *, capfd: pytest.CaptureFixture[str]
-    ) -> tuple[int, str, str]:
-        """Write a config naming `mutate` and share it out.
+    def sharing(self, mutate: list[str], shard: str) -> list[str]:
+        """Write a config naming `mutate`; spell `share`'s argv for it.
 
         Returns:
-            What `main` returned and wrote.
+            The argv, label first.
 
         """
         config = self.tree / "stryker.config.json"
         config.write_text(json.dumps(CONFIG | {"mutate": mutate}), encoding="utf-8")
-        return call(
-            ["share", str(config), "--shard", shard, "--out", str(self.out)],
-            capfd=capfd,
-        )
+        return [
+            *("--label", LABEL, "share", str(config)),
+            *("--shard", shard, "--out", str(self.out)),
+        ]
 
-    def shared(
-        self, mutate: list[str], shard: str, *, capfd: pytest.CaptureFixture[str]
-    ) -> list[str]:
-        """Share out and read the files back from the argument.
+    def files(self) -> list[str]:
+        """Read the shard's files back from the argument it wrote.
 
         Returns:
             The shard's files, unescaped, in order.
 
         """
-        status, _out, err = self.share(mutate, shard, capfd=capfd)
-        assert status == 0, err
         text = self.out.read_text(encoding="utf-8")
         return [re.sub(r"\\(.)", r"\1", f) for f in text.split(",") if f]
 
@@ -468,7 +462,11 @@ def test_three_shards_hold_every_file_exactly_once(
         "src/c.tsx",
         "src/deep/d.ts",
     ]
-    shards = [share_out.shared(mutate, f"{k}/3", capfd=capfd) for k in range(3)]
+    shards = []
+    for k in range(3):
+        status = mutants_typescript.main(share_out.sharing(mutate, f"{k}/3"))
+        assert status == 0, capfd.readouterr().err
+        shards.append(share_out.files())
     want = [every[0::3], every[1::3], every[2::3]]
     assert shards == want
     held = sorted(f for s in shards for f in s)
@@ -479,7 +477,8 @@ def test_the_whole_share_prints_its_count(
     share_out: ShareOut, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """0/1 takes every file, and says how many of how many."""
-    status, out, err = share_out.share(["src/*.ts"], "0/1", capfd=capfd)
+    status = mutants_typescript.main(share_out.sharing(["src/*.ts"], "0/1"))
+    out, err = capfd.readouterr()
     assert (status, out, err) == (0, f"{LABEL}: shard 0/1: 2 of 2 files\n", "")
     assert share_out.out.read_text(encoding="utf-8") == "src/a.ts,src/b.ts"
 
@@ -490,25 +489,30 @@ def test_entries_apply_in_order(
     """An entry after a `!` adds back what the `!` took, as StrykerJS reads it."""
     mutate = ["src/*.ts", "!src/*.ts", "src/a.ts"]
     want = ["src/a.ts"]
-    assert share_out.shared(mutate, "0/1", capfd=capfd) == want
+    status = mutants_typescript.main(share_out.sharing(mutate, "0/1"))
+    assert status == 0, capfd.readouterr().err
+    assert share_out.files() == want
 
 
 def test_a_dotted_name_is_matched_only_by_a_dotted_part(
     share_out: ShareOut, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """Minimatch's `dot: false`: `**` never reaches `.hidden`; `.hidden` does."""
-    assert "src/.hidden/h.ts" not in share_out.shared(
-        ["src/**/*.ts"], "0/1", capfd=capfd
-    )
+    status = mutants_typescript.main(share_out.sharing(["src/**/*.ts"], "0/1"))
+    assert status == 0, capfd.readouterr().err
+    assert "src/.hidden/h.ts" not in share_out.files()
     want = ["src/.hidden/h.ts"]
-    assert share_out.shared(["src/.hidden/*.ts"], "0/1", capfd=capfd) == want
+    status = mutants_typescript.main(share_out.sharing(["src/.hidden/*.ts"], "0/1"))
+    assert status == 0, capfd.readouterr().err
+    assert share_out.files() == want
 
 
 def test_a_file_name_with_glob_syntax_is_escaped(
     share_out: ShareOut, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """`[id]` is named literally, so minimatch matches that file alone."""
-    share_out.share(["src/\\[id\\]/*.ts"], "0/1", capfd=capfd)
+    mutants_typescript.main(share_out.sharing(["src/\\[id\\]/*.ts"], "0/1"))
+    capfd.readouterr()
     assert share_out.out.read_text(encoding="utf-8") == r"src/\[id\]/page.ts"
 
 
@@ -516,9 +520,10 @@ def test_a_ranged_entry_is_red_by_name(
     share_out: ShareOut, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """A range, even under `!`, cannot be shared out by file."""
-    status, out, err = share_out.share(
-        ["src/*.ts", "!src/a.ts:1:2-3:4"], "0/1", capfd=capfd
+    status = mutants_typescript.main(
+        share_out.sharing(["src/*.ts", "!src/a.ts:1:2-3:4"], "0/1")
     )
+    out, err = capfd.readouterr()
     want = (
         f"{LABEL}: `mutate` entry '!src/a.ts:1:2-3:4' carries a mutation"
         " range; a range cannot be shared out by file\n"
@@ -530,7 +535,8 @@ def test_an_extglob_is_red_by_name(
     share_out: ShareOut, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """`full_match` cannot spell an extglob, so it is refused, not misread."""
-    status, out, err = share_out.share(["src/+(a|b).ts"], "0/1", capfd=capfd)
+    status = mutants_typescript.main(share_out.sharing(["src/+(a|b).ts"], "0/1"))
+    out, err = capfd.readouterr()
     want = (
         f"{LABEL}: `mutate` entry 'src/+(a|b).ts' is an extglob, which the"
         " leg cannot expand\n"
@@ -542,7 +548,8 @@ def test_a_list_matching_nothing_is_red(
     share_out: ShareOut, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """No tracked file matched: red, never an empty run."""
-    status, out, err = share_out.share(["untracked.ts"], "0/1", capfd=capfd)
+    status = mutants_typescript.main(share_out.sharing(["untracked.ts"], "0/1"))
+    out, err = capfd.readouterr()
     want = f"{LABEL}: `mutate` matches no tracked file\n"
     assert (status, out, err) == (1, "", want)
 
@@ -553,7 +560,8 @@ def test_a_name_with_a_comma_is_red(
     """--mutate splits on commas, so such a file cannot be named."""
     (share_out.tree / "src/x,y.ts").write_text(SOURCE, encoding="utf-8")
     subprocess.run([GIT, "add", "--", "src/x,y.ts"], env=env(), check=True)
-    status, out, err = share_out.share(["src/x*.ts"], "0/1", capfd=capfd)
+    status = mutants_typescript.main(share_out.sharing(["src/x*.ts"], "0/1"))
+    out, err = capfd.readouterr()
     want = (
         f"{LABEL}: src/x,y.ts: StrykerJS's --mutate cannot name this file"
         " (a comma, or a trailing range)\n"
@@ -566,7 +574,9 @@ def test_a_class_negated_with_a_caret_is_read_as_minimatch_reads_it(
 ) -> None:
     """`[^a]` is every one character but `a`, as `[!a]` is."""
     want = ["src/b.ts"]
-    assert share_out.shared(["src/[^a].ts"], "0/1", capfd=capfd) == want
+    status = mutants_typescript.main(share_out.sharing(["src/[^a].ts"], "0/1"))
+    assert status == 0, capfd.readouterr().err
+    assert share_out.files() == want
 
 
 def test_entries_resolve_against_the_tree(
@@ -580,7 +590,9 @@ def test_entries_resolve_against_the_tree(
         "../elsewhere/*.ts",
     ]
     want = ["lib/l.ts", "src/a.ts", "src/b.ts"]
-    assert share_out.shared(mutate, "0/1", capfd=capfd) == want
+    status = mutants_typescript.main(share_out.sharing(mutate, "0/1"))
+    assert status == 0, capfd.readouterr().err
+    assert share_out.files() == want
 
 
 def test_a_shard_with_files_writes_no_counts(
@@ -591,7 +603,10 @@ def test_a_shard_with_files_writes_no_counts(
     config = share_out.tree / "stryker.config.json"
     config.write_text(json.dumps(CONFIG), encoding="utf-8")
     argv = ["share", str(config), "--out", str(share_out.out)]
-    status, _out, err = call([*argv, "--summary-dir", str(summary)], capfd=capfd)
+    status = mutants_typescript.main(
+        ["--label", LABEL, *[*argv, "--summary-dir", str(summary)]]
+    )
+    err = capfd.readouterr().err
     assert status == 0, err
     assert not summary.exists()
 
@@ -602,7 +617,8 @@ def test_a_name_ending_in_a_range_is_red(
     """--mutate would read the name's tail as a range: red, by name."""
     (share_out.tree / "src/x:1-2").write_text(SOURCE, encoding="utf-8")
     subprocess.run([GIT, "add", "--", "src/x:1-2"], env=env(), check=True)
-    status, out, err = share_out.share(["src/x*"], "0/1", capfd=capfd)
+    status = mutants_typescript.main(share_out.sharing(["src/x*"], "0/1"))
+    out, err = capfd.readouterr()
     want = (
         f"{LABEL}: src/x:1-2: StrykerJS's --mutate cannot name this file"
         " (a comma, or a trailing range)\n"
@@ -615,7 +631,8 @@ def test_each_malformed_shard_is_red(
     share_out: ShareOut, shard: object, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """Not two whole numbers, or k not below n: red, by name."""
-    status, out, err = share_out.share(["src/*.ts"], shard, capfd=capfd)
+    status = mutants_typescript.main(share_out.sharing(["src/*.ts"], shard))
+    out, err = capfd.readouterr()
     want = f"{LABEL}: MUTANTS_SHARD='{shard}' is not k/n with 0 <= k < n\n"
     assert (status, out, err) == (1, "", want)
 
@@ -627,9 +644,10 @@ def test_a_config_with_no_mutate_list_is_red(
     config = share_out.tree / "stryker.config.json"
     bare: dict[str, object] = {"testRunner": "vitest"}
     config.write_text(json.dumps(bare), encoding="utf-8")
-    status, out, err = call(
-        ["share", str(config), "--out", str(share_out.out)], capfd=capfd
+    status = mutants_typescript.main(
+        ["--label", LABEL, *["share", str(config), "--out", str(share_out.out)]]
     )
+    out, err = capfd.readouterr()
     want = f"{LABEL}: {config} names no `mutate` list\n"
     assert (status, out, err) == (1, "", want)
 
@@ -638,10 +656,14 @@ def test_an_unreadable_config_is_red(
     share_out: ShareOut, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """No file: red, never an empty share."""
-    status, _out, err = call(
-        ["share", str(share_out.tree / "none.json"), "--out", str(share_out.out)],
-        capfd=capfd,
+    status = mutants_typescript.main(
+        [
+            "--label",
+            LABEL,
+            *["share", str(share_out.tree / "none.json"), "--out", str(share_out.out)],
+        ]
     )
+    err = capfd.readouterr().err
     assert status == 1
     assert err.startswith(f"{LABEL}: "), err
 
@@ -1050,18 +1072,6 @@ def test_each_field_the_verdict_reads(
         assert err == f"{LABEL}: no readable report at {path}: {why}\n"
 
 
-def call(argv: list[str], *, capfd: pytest.CaptureFixture[str]) -> tuple[int, str, str]:
-    """Call the helper's `main` in this process (#1696).
-
-    Returns:
-        The status `main` returned and what it wrote to each stream.
-
-    """
-    status = mutants_typescript.main(["--label", LABEL, *argv])
-    out, err = capfd.readouterr()
-    return status, out, err
-
-
 # `config` and `verdict` through main, in this process (#1696).
 def write(name: str, value: object, *, tmp_path: Path) -> Path:
     """Write one JSON document into the row's scratch directory.
@@ -1079,13 +1089,14 @@ def test_a_sound_config_passes_silently(
     capfd: pytest.CaptureFixture[str], tmp_path: Path
 ) -> None:
     """No refused setting: exit 0, nothing printed."""
-    status, out, err = call(
+    status = mutants_typescript.main(
         [
-            "config",
-            str(write("stryker.config.json", CONFIG, tmp_path=tmp_path)),
-        ],
-        capfd=capfd,
+            "--label",
+            LABEL,
+            *["config", str(write("stryker.config.json", CONFIG, tmp_path=tmp_path))],
+        ]
     )
+    out, err = capfd.readouterr()
     assert (status, out, err) == (0, "", "")
 
 
@@ -1098,7 +1109,8 @@ def test_main_each_refused_setting_is_red_by_name(
 ) -> None:
     """Each Refusals row's setting, named with the site mark."""
     path = write("stryker.config.json", CONFIG | setting, tmp_path=tmp_path)
-    status, _out, err = call(["config", str(path)], capfd=capfd)
+    status = mutants_typescript.main(["--label", LABEL, *["config", str(path)]])
+    err = capfd.readouterr().err
     assert status == 1
     want = [
         f"{LABEL}: {path} {message}",
@@ -1114,7 +1126,8 @@ def test_main_incremental_is_refused_as_deferred(
     path = write(
         "stryker.config.json", CONFIG | {"incremental": True}, tmp_path=tmp_path
     )
-    status, _out, err = call(["config", str(path)], capfd=capfd)
+    status = mutants_typescript.main(["--label", LABEL, *["config", str(path)]])
+    err = capfd.readouterr().err
     assert status == 1
     assert err == (
         f"{LABEL}: {path} sets `incremental` — a runner has no earlier results,"
@@ -1129,7 +1142,8 @@ def test_main_an_unreadable_config_is_red(
     """Not JSON: named, exit 1."""
     path = write("stryker.config.json", 0, tmp_path=tmp_path)
     path.write_text("{ mutate: [", encoding="utf-8")
-    status, _out, err = call(["config", str(path)], capfd=capfd)
+    status = mutants_typescript.main(["--label", LABEL, *["config", str(path)]])
+    err = capfd.readouterr().err
     assert status == 1
     assert err.startswith(f"{LABEL}: {path} is not readable JSON: "), err
 
@@ -1140,9 +1154,10 @@ def test_a_clean_verdict_writes_its_counts(
     """Killed and timed out: exit 0, the summary line, typescript.tsv."""
     path = write("mutation.json", report(*KILLED), tmp_path=tmp_path)
     summary = path.parent / "summary"
-    status, out, err = call(
-        ["verdict", str(path), "--summary-dir", str(summary)], capfd=capfd
+    status = mutants_typescript.main(
+        ["--label", LABEL, *["verdict", str(path), "--summary-dir", str(summary)]]
     )
+    out, err = capfd.readouterr()
     assert (status, out, err) == (
         0,
         f"{LABEL}: 2 mutants, 2 killed, 0 survived, 0 not covered,"
@@ -1160,17 +1175,14 @@ def test_a_verdict_writes_the_shard_it_was_given(
     """The row names `--shard`, never a fixed 0/1 (#2153)."""
     path = write("mutation.json", report(*KILLED), tmp_path=tmp_path)
     summary = path.parent / "summary"
-    status, _out, err = call(
+    status = mutants_typescript.main(
         [
-            "verdict",
-            str(path),
-            "--shard",
-            "3/8",
-            "--summary-dir",
-            str(summary),
-        ],
-        capfd=capfd,
+            "--label",
+            LABEL,
+            *["verdict", str(path), "--shard", "3/8", "--summary-dir", str(summary)],
+        ]
     )
+    err = capfd.readouterr().err
     assert status == 0, err
     assert (summary / "typescript.tsv").read_text(
         encoding="utf-8"
@@ -1182,7 +1194,8 @@ def test_a_survivor_is_red_and_writes_its_counts(
 ) -> None:
     """A survivor is printed by site, and the red tail follows."""
     path = write("mutation.json", report(mutant("Survived", 3)), tmp_path=tmp_path)
-    status, out, err = call(["verdict", str(path)], capfd=capfd)
+    status = mutants_typescript.main(["--label", LABEL, *["verdict", str(path)]])
+    out, err = capfd.readouterr()
     assert status == 1
     assert (
         out.splitlines()[0]

@@ -874,18 +874,6 @@ def test_an_unreadable_build_is_refused() -> None:
     assert mutants_go.older("devel +abc123", "go1.27.4")
 
 
-def call(argv: list[str], *, capfd: pytest.CaptureFixture[str]) -> tuple[int, str, str]:
-    """Call the helper's `main` in this process (#1696).
-
-    Returns:
-        The status `main` returned and what it wrote to each stream.
-
-    """
-    status = mutants_go.main(argv)
-    out, err = capfd.readouterr()
-    return status, out, err
-
-
 class Main:
     """The verdict half over a planted scratch directory, in this process.
 
@@ -930,30 +918,27 @@ class Main:
         }
         self.write("reports/1.json", json.dumps(body))
 
-    def judge(self, *, capfd: pytest.CaptureFixture[str]) -> tuple[int, str, str]:
-        """Call main as the shell half does, its summary directory planted.
+    def judge(self) -> list[str]:
+        """Spell main's argv as the shell half does, its summary dir planted.
 
         Returns:
-            What main returned and wrote.
+            The argv.
 
         """
-        return call(
-            [
-                "--label",
-                LABEL,
-                "--where",
-                "",
-                "--shard",
-                "whole",
-                "--root",
-                str(self.root),
-                "--scratch",
-                str(self.scratch),
-                "--summary-dir",
-                str(self.summary),
-            ],
-            capfd=capfd,
-        )
+        return [
+            "--label",
+            LABEL,
+            "--where",
+            "",
+            "--shard",
+            "whole",
+            "--root",
+            str(self.root),
+            "--scratch",
+            str(self.scratch),
+            "--summary-dir",
+            str(self.summary),
+        ]
 
 
 @fixture
@@ -981,7 +966,9 @@ def test_a_clean_shard_is_green_and_writes_its_counts(
 ) -> None:
     """Every mutant killed: exit 0, the summary, go.tsv."""
     main_state.results(("KILLED", 4, "arithmetic"), ("TIMED_OUT", 5, "branch"))
-    assert main_state.judge(capfd=capfd) == (0, line(2, 2, 0, 0, 0, 0), "")
+    status = mutants_go.main(main_state.judge())
+    out, err = capfd.readouterr()
+    assert (status, out, err) == (0, line(2, 2, 0, 0, 0, 0), "")
     assert (main_state.summary / "go.tsv").read_text(
         encoding="utf-8"
     ) == "whole\t2\t2\t0\t0\twhole\n"
@@ -992,7 +979,8 @@ def test_a_covered_survivor_and_an_uncovered_one_are_red(
 ) -> None:
     """Survived on line 4 is a survivor; on line 9 it is not covered."""
     main_state.results(("SURVIVED", 4, "arithmetic"), ("SURVIVED", 9, "return"))
-    status, out, err = main_state.judge(capfd=capfd)
+    status = mutants_go.main(main_state.judge())
+    out, err = capfd.readouterr()
     assert status == 1
     assert out == (
         f"{LABEL}: survived: a/a.go:4:9 arithmetic\n"
@@ -1010,7 +998,9 @@ def test_a_record_at_the_site_explains_its_survivor(
         "records.txt",
         "a/a.go:4:\treturn x + y //mutants:equivalent arithmetic same value\n",
     )
-    assert main_state.judge(capfd=capfd) == (0, line(2, 1, 0, 0, 0, 1), "")
+    status = mutants_go.main(main_state.judge())
+    out, err = capfd.readouterr()
+    assert (status, out, err) == (0, line(2, 1, 0, 0, 0, 1), "")
 
 
 def test_a_malformed_and_a_stale_record_are_red_by_name(
@@ -1023,7 +1013,8 @@ def test_a_malformed_and_a_stale_record_are_red_by_name(
         "a/a.go:3://mutants:equivalent arithmetic\n"
         "a/a.go:5:\tx++ //mutants:equivalent branch why\n",
     )
-    status, _out, err = main_state.judge(capfd=capfd)
+    status = mutants_go.main(main_state.judge())
+    err = capfd.readouterr().err
     assert status == 1
     assert err == (
         f"{LABEL}: a/a.go:3: //mutants:equivalent arithmetic gives no reason\n"
@@ -1039,7 +1030,8 @@ def test_a_skipped_file_and_a_failed_run_are_not_judged(
     main_state.results(("KILLED", 4, "arithmetic"))
     main_state.write("gomu.log", "  a.go (error: no package)\n")
     main_state.write("runs.log", "a/a.go: gomu exited 2\n")
-    status, _out, err = main_state.judge(capfd=capfd)
+    status = mutants_go.main(main_state.judge())
+    err = capfd.readouterr().err
     assert status == 1
     assert err == (
         f"{LABEL}: not judged: a.go (error: no package)\n"
@@ -1051,7 +1043,7 @@ def test_a_skipped_file_and_a_failed_run_are_not_judged(
 @pytest.mark.usefixtures("main_state")
 def test_build_go_refuses_an_older_gomu(capfd: pytest.CaptureFixture[str]) -> None:
     """`build-go` names the gomu, both Go releases and the rebuild."""
-    status, _out, err = call(
+    status = mutants_go.main(
         [
             "build-go",
             "--label",
@@ -1062,9 +1054,9 @@ def test_build_go_refuses_an_older_gomu(capfd: pytest.CaptureFixture[str]) -> No
             "go1.24.13",
             "--running",
             "go1.27.4",
-        ],
-        capfd=capfd,
+        ]
     )
+    err = capfd.readouterr().err
     assert status == 1
     assert err == (
         f"{LABEL}: /bin/gomu was built with go1.24.13, older than the go1.27.4"
@@ -1081,4 +1073,6 @@ def test_build_go_passes_an_equal_gomu_silently(
 ) -> None:
     """The same release: exit 0, nothing printed."""
     argv = ["build-go", "--label", LABEL, "--gomu", "g", "--built", "go1.27"]
-    assert call([*argv, "--running", "go1.27.0"], capfd=capfd) == (0, "", "")
+    status = mutants_go.main([*argv, "--running", "go1.27.0"])
+    out, err = capfd.readouterr()
+    assert (status, out, err) == (0, "", "")
