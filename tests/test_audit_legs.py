@@ -30,9 +30,7 @@ the same name on every step that runs `mise run`. A secret added to the
 gate and not to them is named here.
 """
 
-import contextlib
 import copy
-import io
 import re
 import subprocess
 import sys
@@ -575,19 +573,12 @@ def test_a_step_without_the_export_is_named() -> None:
 STEP = "audit_legs.py"
 
 
-def as_step() -> contextlib.ExitStack:
-    """Run as a workflow step does: no task name, no findings file.
-
-    Returns:
-        The patches, entered by the caller's `with`.
-
-    """
-    stack = contextlib.ExitStack()
-    named = stack.enter_context(pytest.MonkeyPatch.context())
-    named.setenv("MISE_TASK_NAME", "")
-    named.setenv("ORG_FINDINGS", "")
-    stack.enter_context(pytest.MonkeyPatch.context()).setattr(sys, "argv", [STEP])
-    return stack
+@fixture
+def _step(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run as a workflow step does: no task name, no findings file."""
+    monkeypatch.setenv("MISE_TASK_NAME", "")
+    monkeypatch.setenv("ORG_FINDINGS", "")
+    monkeypatch.setattr(sys, "argv", [STEP])
 
 
 def git_tree(files: dict[str, str], *, env: support.Env) -> Path:
@@ -620,56 +611,25 @@ def floor_file(*legs: str) -> str:
     )
 
 
-def raw_outputs(root: Path, workflow: str) -> dict[str, str]:
-    """Run the helper's CLI over a tree.
+def applies(out: str) -> dict[str, bool]:
+    """Read what the helper wrote, as $GITHUB_OUTPUT would read it.
 
     Returns:
-        Each output to its value, as $GITHUB_OUTPUT would read it.
-
-    Raises:
-        AssertionError: the helper exited non-zero.
+        Job id to whether it applies.
 
     """
-    out = io.StringIO()
-    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
-        status = audit_legs.main(["--root", str(root), workflow])
-    if status != 0:
-        msg = f"audit_legs.py {workflow} exited {status}"
-        raise AssertionError(msg)
-    return dict(line.split("=", 1) for line in out.getvalue().splitlines())
-
-
-def outputs(root: Path, workflow: str) -> dict[str, bool]:
-    """Run the helper's CLI over a tree.
-
-    Returns:
-        Job id to whether it applies, as $GITHUB_OUTPUT would read it.
-
-    Raises:
-        AssertionError: the helper exited non-zero.
-
-    """
-    out = io.StringIO()
-    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
-        status = audit_legs.main(["--root", str(root), workflow])
-    if status != 0:
-        msg = f"audit_legs.py {workflow} exited {status}"
-        raise AssertionError(msg)
-    pairs = [line.split("=", 1) for line in out.getvalue().splitlines()]
+    pairs = [line.split("=", 1) for line in out.splitlines()]
     return {job: value == "true" for job, value in pairs}
 
 
-def every(root: Path) -> dict[str, bool]:
-    """Run the helper for every workflow the table names.
+def written(out: str) -> dict[str, str]:
+    """Read what the helper wrote, as $GITHUB_OUTPUT would read it.
 
     Returns:
-        Job id to whether it applies, across workflows.
+        Each output to its value.
 
     """
-    got: dict[str, bool] = {}
-    for workflow in audit_legs.load_table():
-        got.update(outputs(root, workflow))
-    return got
+    return dict(line.split("=", 1) for line in out.splitlines())
 
 
 # edtf's shape (run 44825163551): a Rust workspace with a pgrx crate,
@@ -732,17 +692,29 @@ NOT_EDTF = (
 
 
 # The helper's outputs for the trees the scheduled runs meet.
-def test_an_empty_tree_runs_the_unconditional_jobs_only(env: support.Env) -> None:
+def test_an_empty_tree_runs_the_unconditional_jobs_only(
+    env: support.Env, capfd: pytest.CaptureFixture[str]
+) -> None:
     """Nothing tracked: every conditional job is skipped."""
-    got = every(git_tree({}, env=env))
+    root = git_tree({}, env=env)
+    got: dict[str, bool] = {}
+    for workflow in audit_legs.load_table():
+        assert audit_legs.main(["--root", str(root), workflow]) == 0
+        got.update(applies(capfd.readouterr().out))
     for rows in audit_legs.load_table().values():
         for job, row in rows.items():
             assert (row.when is None) == got[job]
 
 
-def test_a_rust_only_tree_shaped_like_edtf(env: support.Env) -> None:
+def test_a_rust_only_tree_shaped_like_edtf(
+    env: support.Env, capfd: pytest.CaptureFixture[str]
+) -> None:
     """The jobs edtf ran for languages it lacks come out false."""
-    got = every(git_tree(EDTF, env=env))
+    root = git_tree(EDTF, env=env)
+    got: dict[str, bool] = {}
+    for workflow in audit_legs.load_table():
+        assert audit_legs.main(["--root", str(root), workflow]) == 0
+        got.update(applies(capfd.readouterr().out))
     for job in NOT_EDTF:
         assert not got[job]
     for job in (
@@ -770,9 +742,15 @@ def test_a_rust_only_tree_shaped_like_edtf(env: support.Env) -> None:
         ("python-properties", False),
     ],
 )
-def test_a_go_tree(job: object, want: object, env: support.Env) -> None:
+def test_a_go_tree(
+    job: object, want: object, env: support.Env, capfd: pytest.CaptureFixture[str]
+) -> None:
     """go.mod brings the Go jobs and fuzz, and nothing Rust."""
-    got = every(git_tree(GO, env=env))
+    root = git_tree(GO, env=env)
+    got: dict[str, bool] = {}
+    for workflow in audit_legs.load_table():
+        assert audit_legs.main(["--root", str(root), workflow]) == 0
+        got.update(applies(capfd.readouterr().out))
     assert want == got[job]
 
 
@@ -791,9 +769,15 @@ def test_a_go_tree(job: object, want: object, env: support.Env) -> None:
         ("typescript-properties", False),
     ],
 )
-def test_the_canon_tree(job: object, want: object) -> None:
+def test_the_canon_tree(
+    job: object, want: object, capfd: pytest.CaptureFixture[str]
+) -> None:
     """The canon has Python properties, workflows and a lock; no Rust or Go."""
-    got = every(CANON)
+    root = CANON
+    got: dict[str, bool] = {}
+    for workflow in audit_legs.load_table():
+        assert audit_legs.main(["--root", str(root), workflow]) == 0
+        got.update(applies(capfd.readouterr().out))
     assert want == got[job]
 
 
@@ -823,9 +807,17 @@ RAND_LOCK = 'version = 4\n\n[[package]]\nname = "rand"\nversion = "0.9.0"\n'
 
 # The rust-properties job runs where a lock holds proptest (#1930).
 @pytest.mark.parametrize("name", ["Cargo.lock", "crates/a/Cargo.lock"])
-def test_a_lock_holding_proptest_runs_the_job(name: object, env: support.Env) -> None:
+def test_a_lock_holding_proptest_runs_the_job(
+    name: object, env: support.Env, capfd: pytest.CaptureFixture[str]
+) -> None:
     """At the root, or a workspace member's own lock."""
-    got = outputs(git_tree({name: PROPTEST_LOCK}, env=env), "repo-deep-tests")
+    status = audit_legs.main([
+        "--root",
+        str(git_tree({name: PROPTEST_LOCK}, env=env)),
+        "repo-deep-tests",
+    ])
+    assert status == 0
+    got = applies(capfd.readouterr().out)
     assert got["rust-properties"]
 
 
@@ -837,9 +829,17 @@ def test_a_lock_holding_proptest_runs_the_job(name: object, env: support.Env) ->
         {},
     ],
 )
-def test_a_lock_without_proptest_skips_the_job(files: object, env: support.Env) -> None:
+def test_a_lock_without_proptest_skips_the_job(
+    files: object, env: support.Env, capfd: pytest.CaptureFixture[str]
+) -> None:
     """A Cargo.lock alone is not a property, nor a vendored proptest."""
-    got = outputs(git_tree(files, env=env), "repo-deep-tests")
+    status = audit_legs.main([
+        "--root",
+        str(git_tree(files, env=env)),
+        "repo-deep-tests",
+    ])
+    assert status == 0
+    got = applies(capfd.readouterr().out)
     assert not got["rust-properties"]
 
 
@@ -891,23 +891,30 @@ Record = tuple[str, str, str, str, str]
 
 
 # The fuzz job runs one runner per fuzz target (#1899).
-def test_two_bins_and_one_go_target_emit_three_entries(env: support.Env) -> None:
+def test_two_bins_and_one_go_target_emit_three_entries(
+    env: support.Env, capfd: pytest.CaptureFixture[str]
+) -> None:
     """Two [[bin]]s and FuzzLoad in internal/policy: three entries, fuzz on.
 
     Against the helper before #1899 there is no `fuzz-targets`
     output, so this row fails there.
     """
-    got = raw_outputs(
-        git_tree(
-            {
-                "fuzz/Cargo.toml": fuzz_manifest("parse", "roundtrip"),
-                "go.mod": "module example.com/x\n",
-                "internal/policy/x_test.go": GO_FUZZ_TEST,
-            },
-            env=env,
+    status = audit_legs.main([
+        "--root",
+        str(
+            git_tree(
+                {
+                    "fuzz/Cargo.toml": fuzz_manifest("parse", "roundtrip"),
+                    "go.mod": "module example.com/x\n",
+                    "internal/policy/x_test.go": GO_FUZZ_TEST,
+                },
+                env=env,
+            )
         ),
         "repo-deep-tests",
-    )
+    ])
+    assert status == 0
+    got = written(capfd.readouterr().out)
     want: list[audit_legs.Target] = [
         {"kind": "rust", "target": "parse", "leg": "fuzz-parse"},
         {"kind": "rust", "target": "roundtrip", "leg": "fuzz-roundtrip"},
@@ -927,14 +934,22 @@ def test_two_bins_and_one_go_target_emit_three_entries(env: support.Env) -> None
     assert got["fuzz"] == "true"
 
 
-def test_a_tree_with_neither_emits_an_empty_list(env: support.Env) -> None:
+def test_a_tree_with_neither_emits_an_empty_list(
+    env: support.Env, capfd: pytest.CaptureFixture[str]
+) -> None:
     """No fuzz crate and no Go fuzz target: `[]`, and fuzz is off."""
     trees: list[dict[str, str]] = [
         {},
         {**GO, "internal/policy/x_test.go": "package policy\n"},
     ]
     for files in trees:
-        got = raw_outputs(git_tree(files, env=env), "repo-deep-tests")
+        status = audit_legs.main([
+            "--root",
+            str(git_tree(files, env=env)),
+            "repo-deep-tests",
+        ])
+        assert status == 0
+        got = written(capfd.readouterr().out)
         assert got["fuzz-targets"] == "[]"
         assert got["fuzz"] == "false"
 
@@ -954,6 +969,7 @@ def test_a_fuzz_crate_with_no_bin_is_skipped_by_name(env: support.Env) -> None:
     assert len(lists["fuzz-targets"]) == 0
 
 
+@pytest.mark.usefixtures("_step")
 def test_an_unreadable_fuzz_manifest_is_red_naming_it(
     env: support.Env, capfd: pytest.CaptureFixture[str]
 ) -> None:
@@ -963,8 +979,7 @@ def test_an_unreadable_fuzz_manifest_is_red_naming_it(
         ("[[bin]]\npath = 'x.rs'\n", "fuzz/Cargo.toml: [[bin]] 1.name is not"),
     ):
         root = git_tree({"fuzz/Cargo.toml": text}, env=env)
-        with as_step():
-            status = audit_legs.main(["--root", str(root), "repo-deep-tests"])
+        status = audit_legs.main(["--root", str(root), "repo-deep-tests"])
         err = capfd.readouterr().err
         assert status == 1
         assert err.startswith(f"::error::{STEP}: {message}"), err
@@ -1023,30 +1038,16 @@ class Refusals:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path
 
-    def run_main(self, table_text: str, workflow: str = "w") -> tuple[int, str, Path]:
-        """Run the helper in-process over a table written here.
+    def table(self, text: str) -> Path:
+        """Write a table here.
 
         Returns:
-            Exit status, stderr and the table's path.
+            Its path.
 
         """
-        tmp = tempfile.mkdtemp(dir=self.tmp)
-        table = Path(tmp) / "audit-legs.toml"
-        table.write_text(table_text, encoding="utf-8")
-        err = io.StringIO()
-        with (
-            as_step(),
-            contextlib.redirect_stderr(err),
-            contextlib.redirect_stdout(io.StringIO()),
-        ):
-            status = audit_legs.main([
-                "--root",
-                str(CANON),
-                "--table",
-                str(table),
-                workflow,
-            ])
-        return status, err.getvalue(), table
+        table = Path(tempfile.mkdtemp(dir=self.tmp)) / "audit-legs.toml"
+        table.write_text(text, encoding="utf-8")
+        return table
 
 
 @fixture
@@ -1055,7 +1056,10 @@ def refusals(tmp_path: Path) -> Refusals:
     return Refusals(tmp_path)
 
 
-def test_wrong_shapes_in_the_table(refusals: Refusals) -> None:
+@pytest.mark.usefixtures("_step")
+def test_wrong_shapes_in_the_table(
+    refusals: Refusals, capfd: pytest.CaptureFixture[str]
+) -> None:
     """Each shape the decoder refuses, with the field it names."""
     rows = [
         ("[w\n", "Expected ']'"),
@@ -1067,15 +1071,22 @@ def test_wrong_shapes_in_the_table(refusals: Refusals) -> None:
         ('[w.x]\nfor = ["a"]\n', "w.x carries for: a row has `when` and `floor`"),
     ]
     for text, message in rows:
-        status, err, table = refusals.run_main(text)
+        table = refusals.table(text)
+        status = audit_legs.main(["--root", str(CANON), "--table", str(table), "w"])
+        err = capfd.readouterr().err
         assert status == 1
         assert err.startswith(f"::error::{STEP}: {table}: "), err
         assert message in err
 
 
-def test_an_unknown_workflow(refusals: Refusals) -> None:
+@pytest.mark.usefixtures("_step")
+def test_an_unknown_workflow(
+    refusals: Refusals, capfd: pytest.CaptureFixture[str]
+) -> None:
     """A workflow the table has no section for is refused, not run."""
-    status, err, table = refusals.run_main("[w.x]\n", "v")
+    table = refusals.table("[w.x]\n")
+    status = audit_legs.main(["--root", str(CANON), "--table", str(table), "v"])
+    err = capfd.readouterr().err
     assert status == 1
     assert f"::error::{STEP}: {table} has no table for v\n" == err
 
