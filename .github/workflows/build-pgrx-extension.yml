@@ -116,7 +116,7 @@ jobs:
         # One derivation and its tests (#1385), against the mapping that
         # travels at this workflow's SHA.
         run: |
-          "${ORG_PYTHON}" .org-canon/release/matrix.py pgrx-extension \
+          "${ORG_PYTHON}" -I .org-canon/belt matrix pgrx-extension \
             .org-canon/docker/pgrx-base-images.toml \
             "${UNTRUSTED_MAJORS}" >> "${GITHUB_OUTPUT}"
     outputs:
@@ -199,7 +199,7 @@ jobs:
         # of rust versions yields the first, the one mise puts on PATH
         # (.github#445).
         run: |
-          "${ORG_PYTHON}" .org-canon/release/caller_pins.py env \
+          "${ORG_PYTHON}" -I .org-canon/belt caller-pins env \
             --input-of "the pgrx-extension class" \
             RUST_VERSION=rust PGRX_VERSION=cargo-pgrx \
             AUDITABLE_VERSION=cargo-auditable >> "${GITHUB_ENV}"
@@ -217,7 +217,7 @@ jobs:
           UNTRUSTED_CRATE_DIR: ${{ inputs.crate-dir }}
           GH_TOKEN: ${{ github.token }}
         run: |
-          "${ORG_PYTHON}" .org-canon/release/pgrx/previous_release.py guard \
+          "${ORG_PYTHON}" -I .org-canon/belt previous-release guard \
             --repo "${GITHUB_REPOSITORY}" --version "${UNTRUSTED_VERSION}" \
             --crate-dir "${UNTRUSTED_CRATE_DIR}"
       - name: Build, test and package inside the target Postgres
@@ -325,7 +325,7 @@ jobs:
           UNTRUSTED_CRATE_DIR: ${{ inputs.crate-dir }}
           PLAN_DOC_PREFIX: sbom-pgrx-
         run: |
-          "${ORG_PYTHON}" .org-canon/release/pgrx/inventory_plan.py "${UNTRUSTED_CRATE_DIR}" "${PG}"
+          "${ORG_PYTHON}" -I .org-canon/belt inventory-plan "${UNTRUSTED_CRATE_DIR}" "${PG}"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !inputs.repro }}
         with:

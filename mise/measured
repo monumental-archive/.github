@@ -21,10 +21,10 @@
 # merging and never replacing (#1667 item 2), because a variable the
 # command's task set is the repository's:
 #
-#   python   the run's start-up hook is put in front of PYTHONPATH,
-#            beside what is there, and COVERAGE_PROCESS_START names the
-#            run's rc file; every python3 the command starts is
-#            measured into the run's directory.
+#   python   a pytest run (`pytest …` or `<python> -m pytest …`) is
+#            rewritten to run under coverage, from the pytest tool
+#            venv, into the run's directory; any other command
+#            measures no Python (#2177).
 #   plpgsql  ORG_PLPGSQL_COVERAGE names the directory, in the run's,
 #            where each of the suite's teardowns writes its database's
 #            report, one file per database (#2163).
@@ -84,7 +84,7 @@ fi
 if [[ -n ${ORG_SHARD:-} && ${ORG_SHARD} != 1/1 ]]; then
   : "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
   shard_argv=$(mktemp)
-  "${ORG_PYTHON}" "$(dirname "${BASH_SOURCE[0]}")/shard_runner.py" -- "$@" > "${shard_argv}" || {
+  "${ORG_PYTHON}" -I "$(dirname "${BASH_SOURCE[0]}")/../belt" shard-runner -- "$@" > "${shard_argv}" || {
     rm -f -- "${shard_argv}"
     exit 1
   }
@@ -120,45 +120,55 @@ belt=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 [[ -d ${run} ]] || org_coverage_sweep "${run}"
 mkdir -p "${run}"
 
-# python: a start-up hook and an rc file, written into the run's
-# directory by the first call in the run and read by every later one.
+# python: a pytest run, measured where it runs (#2177). The belt keeps
+# no start-up hook: no belt Python runs in a test's child, so the run
+# that holds the suite is the measurement. The command's first word is
+# read: `pytest`, or a Python (`python`, `python3`, `python3.N`, or a
+# path to one) followed by `-m pytest`, is rewritten to the pytest tool
+# venv's interpreter running
 #
-# The hook is written by the belt's one hook writer (startup_hook.py,
-# #1542), which appends the chain to the next sitecustomize on the path,
-# so a repository's own hook and the mutation leg's still run. Its work
-# is coverage's own start-up, from the directory the coverage package is
-# imported from, appended to sys.path so the suite's imports resolve as
-# they do unmeasured. The rc file names this run's data file and the
-# repository's root; coverage-measure.sh reads the run with it.
+#   -m coverage run --rcfile=<the run's rc file> -m pytest <the rest>
 #
-# The tool venv's interpreter must be the one the suite runs on: the
-# tracer is a compiled extension, and a venv built on another Python
-# would load in no child, silently. Asked once per run, of the belt's
-# one check (tool_python.py, #1788), which also names the directory the
-# coverage package is imported from.
+# so every argument after pytest is the command's own. Any other
+# command, Python or not, runs as it is and measures no Python:
+# coverage:check then names the leg that measured nothing, and its
+# remedy names this script.
 #
-# Each file is written whole and renamed into place, the rc file last,
-# so a call running beside the first reads complete files or writes
-# its own identical ones.
-if command -v coverage > /dev/null; then
+# The venv's interpreter must be the one the suite runs on: the tracer
+# is a compiled extension, and a venv built on another Python would be
+# testing another interpreter, silently. Asked once per call, of the
+# belt's one check (tool_python.py, #1788).
+#
+# The rc file is written once per run, whole and renamed into place, so
+# a call beside the first reads a complete file or writes its own
+# identical one. Branches from the start (#1336 property 2). Test files
+# are omitted: a suite executes itself completely by construction, and
+# counting it would raise the number without one more line of the code
+# under test being run. relative_files, so the report's paths are the
+# repository's own and Codecov maps them without a fix-up. `patch =
+# subprocess` measures the suite's own Python workers (pytest-xdist's),
+# which run the venv's interpreter; coverage-measure.sh reads the run
+# with the same file.
+py_skip=0
+case "${1:-}" in
+  pytest | */pytest) py_skip=1 ;;
+  python | python3 | python3.* | */python | */python3 | */python3.*)
+    if [[ ${2:-} == -m && ${3:-} == pytest ]]; then
+      py_skip=3
+    fi
+    ;;
+  *) ;;
+esac
+if ((py_skip > 0)); then
+  : "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
+  py_venv=$("${ORG_PYTHON}" -I "${belt%/*}/belt" tool-python measured pytest) || exit 1
   if [[ ! -f ${run}/coverage.rc ]]; then
-    : "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
-    cov_site=$("${ORG_PYTHON}" "${belt}/tool_python.py" measured coverage --site coverage) || exit 1
-    site=$("${ORG_PYTHON}" -c 'import sys; print(repr(sys.argv[1]))' "${cov_site}")
-    mkdir -p "${run}/hook" "${run}/python"
-    printf 'import sys\nsys.path.append(%s)\nimport coverage\ncoverage.process_startup()\n' \
-      "${site}" | "${ORG_PYTHON}" "${belt}/startup_hook.py" "${run}/hook.$$"
-    mv -f "${run}/hook.$$/sitecustomize.py" "${run}/hook/sitecustomize.py"
-    rmdir "${run}/hook.$$"
-    # Branches from the start (#1336 property 2). Test files are omitted:
-    # a suite executes itself completely by construction, and counting it
-    # would raise the number without one more line of the code under
-    # test being run. relative_files, so the report's paths are the
-    # repository's own and Codecov maps them without a fix-up.
+    mkdir -p "${run}/python"
     cat > "${run}/coverage.rc.$$" << RC
 [run]
 branch = true
 parallel = true
+patch = subprocess
 source = ${root}
 data_file = ${run}/python/.coverage
 relative_files = true
@@ -170,11 +180,8 @@ precision = 2
 RC
     mv -f "${run}/coverage.rc.$$" "${run}/coverage.rc"
   fi
-  export COVERAGE_PROCESS_START="${run}/coverage.rc"
-  case ":${PYTHONPATH:-}:" in
-    *":${run}/hook:"*) ;;
-    *) export PYTHONPATH="${run}/hook${PYTHONPATH:+:${PYTHONPATH}}" ;;
-  esac
+  shift "${py_skip}"
+  set -- "${py_venv}" -m coverage run --rcfile="${run}/coverage.rc" -m pytest "$@"
 fi
 
 # go: the measurement, merged into the command's own environment (#1651).
@@ -295,7 +302,7 @@ if org_tracked_has "${root}/Cargo.toml"; then
   # runs measuring at once in one checkout would clean and read each
   # other's directory (#2062). Every call claims it before anything is
   # cleaned or built, and a live other run's claim ends this one, by name.
-  "${ORG_PYTHON}" "${belt}/coverage_owner.py" claim "${CARGO_TARGET_DIR}" "${run}" || exit 1
+  "${ORG_PYTHON}" -I "${belt%/*}/belt" coverage-owner claim "${CARGO_TARGET_DIR}" "${run}" || exit 1
   # The workspace's own artifacts and old profiles go once per run, by its
   # first call (#2061): `report` reads every workspace executable in the
   # directory, so one an earlier build left and this run did not overwrite
@@ -306,8 +313,8 @@ if org_tracked_has "${root}/Cargo.toml"; then
   # starting beside the first waits for its clean to finish rather than
   # building into a directory the clean is emptying. A clean cargo refused
   # is red by name: cargo-llvm-cov reports it as a warning (#2070).
-  "${ORG_PYTHON}" "${belt}/once.py" "${run}/rust" -- \
-    "${ORG_PYTHON}" "${belt}/coverage_owner.py" clean >&2 || exit 1
+  "${ORG_PYTHON}" -I "${belt%/*}/belt" once "${run}/rust" -- \
+    "${ORG_PYTHON}" -I "${belt%/*}/belt" coverage-owner clean >&2 || exit 1
 fi
 
 # plpgsql: one directory per run, one report in it per database the
@@ -333,7 +340,7 @@ if [[ ${js[0]:-} == package.json && -n ${js[1]+set} ]]; then
   : "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
   ts_dir="${run}/typescript"
   ts_argv="${run}/vitest-argv.$$"
-  (cd "${root}" && "${ORG_PYTHON}" "${belt}/coverage_js_runner.py" \
+  (cd "${root}" && "${ORG_PYTHON}" -I "${belt%/*}/belt" coverage-js-runner \
     --measured-run "${ts_dir}" "${js[@]}" -- "$@") > "${ts_argv}" || {
     rm -f -- "${ts_argv}"
     exit 1

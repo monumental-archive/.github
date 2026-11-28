@@ -266,7 +266,7 @@ while read -r repo; do
           failed="${failed} ${repo}(bestpractices: issuer returned nothing for project ${id})"
         elif [[ ${heard} != 200 ]]; then
           unanswered bestpractices "bestpractices.dev, about project ${id},"
-        elif ! bp_owner=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/bestpractices_owner.py" \
+        elif ! bp_owner=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" bestpractices-owner \
           "${wearer}" <<< "${bp}"); then
           failed="${failed} ${repo}(bestpractices: ${bp_owner})"
         elif ! jq -e '(.badge_percentage_0 // 0) >= 100' <<< "${bp}" > /dev/null; then
@@ -292,7 +292,7 @@ while read -r repo; do
           failed="${failed} ${repo}(baseline: issuer returned nothing for project ${id})"
         elif [[ ${heard} != 200 ]]; then
           unanswered baseline "bestpractices.dev, about project ${id},"
-        elif ! bp_owner=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/bestpractices_owner.py" \
+        elif ! bp_owner=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" bestpractices-owner \
           "${wearer}" <<< "${bp}"); then
           failed="${failed} ${repo}(baseline: ${bp_owner})"
         elif ! jq -e '[.achieved_baseline_1_at, .achieved_baseline_2_at, .achieved_baseline_3_at] | any(. != null)' \

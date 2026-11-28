@@ -74,7 +74,7 @@ command -v cargo > /dev/null || {
 # derivation would skip this suite silently, which is the exact failure
 # #813 exists to end.
 metadata=$(cargo metadata --no-deps --format-version 1 --locked)
-surface=$("${ORG_PYTHON}" "${belt}/gate_surface.py" --exclude "${CLIPPY_EXCLUDE:-}" <<< "${metadata}")
+surface=$("${ORG_PYTHON}" -I "${ORG_BELT_ROOT}/belt" gate-surface --exclude "${CLIPPY_EXCLUDE:-}" <<< "${metadata}")
 crates=""
 declared=""
 while IFS=$'\t' read -r record spec kind crate_majors dir; do
@@ -132,7 +132,7 @@ fi
 # coverage:check.
 floor=""
 if [[ ${mode} == test ]]; then
-  floor=$("${ORG_PYTHON}" "${belt}/coverage_floor.py" read) || exit 1
+  floor=$("${ORG_PYTHON}" -I "${ORG_BELT_ROOT}/belt" coverage-floor read) || exit 1
 fi
 measured=""
 [[ ${mode} == test && -z ${floor} ]] || measured=1
@@ -167,7 +167,7 @@ org_pgrx_darwin_prepare "${only:-${declared}}"
 # takes its own major's Postgres, a clone of that pin for its target
 # directory, through org_pgrx_major (#1940).
 installed=$(mise ls "aqua:theseus-rs/postgresql-binaries" --json)
-"${ORG_PYTHON}" "${belt}/pgrx_postgres.py" --majors "${only:-${declared}}" <<< "${installed}" > /dev/null
+"${ORG_PYTHON}" -I "${ORG_BELT_ROOT}/belt" pgrx-postgres --majors "${only:-${declared}}" <<< "${installed}" > /dev/null
 
 # The runs this invocation owes, as `dir:major`.
 runs=""
@@ -215,7 +215,7 @@ measure_one() { # usage: measure_one <dir> <crate> <major>
     # directory a plain build used it reuses uninstrumented binaries and
     # writes no profile at all.
     # And of its own compiler (#1877, rust-coverage-env.sh says why).
-    compiler=$("${ORG_PYTHON}" "${belt}/gate_cache_key.py" digest) || exit 1
+    compiler=$("${ORG_PYTHON}" -I "${ORG_BELT_ROOT}/belt" gate-cache-key digest) || exit 1
     export CARGO_TARGET_DIR="${root}/llvm-cov-${leg}-${compiler}"
     # Its clang driver (#2022), its major's ICU headers and Postgres,
     # after the target directory the Postgres clone is chosen by (#1940).
@@ -232,7 +232,7 @@ measure_one() { # usage: measure_one <dir> <crate> <major>
     fi
     # Claimed for this run before it is cleaned (#2062): a second run
     # measuring in this checkout is refused by name, never mixed in.
-    "${ORG_PYTHON}" "${belt}/coverage_owner.py" claim "${CARGO_TARGET_DIR}" \
+    "${ORG_PYTHON}" -I "${ORG_BELT_ROOT}/belt" coverage-owner claim "${CARGO_TARGET_DIR}" \
       "${ORG_COVERAGE_RUN}" || exit 1
     # The workspace's own artifacts and old profiles go (#2061): `report`
     # reads every workspace executable in the directory, and one an earlier
@@ -240,7 +240,7 @@ measure_one() { # usage: measure_one <dir> <crate> <major>
     # zero hits. Dependencies stay built. One caller per directory per run,
     # so no lock: the majors never share one. A clean cargo refused is red
     # by name: cargo-llvm-cov reports it as a warning (#2070).
-    "${ORG_PYTHON}" "${belt}/coverage_owner.py" clean >&2 || exit 1
+    "${ORG_PYTHON}" -I "${ORG_BELT_ROOT}/belt" coverage-owner clean >&2 || exit 1
     if ! (cd "${dir}" && cargo pgrx test "pg${one}") >&2; then
       org_finding "" "${dir} at pg${one} failed — a suite that does not pass measures nothing"
       exit 1
@@ -276,7 +276,7 @@ hold() { # usage: hold <leg lines> <major>...
   printf '%s\n' "${lines}"
   [[ -n ${floor} ]] || return 0
   for one in "$@"; do jobs+=(--job "pgrx:${one}"); done
-  "${ORG_PYTHON}" "${belt}/coverage_floor.py" hold --label "${label}" ${jobs[@]+"${jobs[@]}"} \
+  "${ORG_PYTHON}" -I "${ORG_BELT_ROOT}/belt" coverage-floor hold --label "${label}" ${jobs[@]+"${jobs[@]}"} \
     <<< "${lines}" >&2
 }
 

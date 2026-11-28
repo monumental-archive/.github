@@ -13,10 +13,10 @@
 # tool's output instead of a capture of it, which is the whole reason
 # they are here — see [[fixture-is-not-evidence]] and #772.
 #
-# NOT ignored, deliberately: `release/testdata/lab_pg--0.27.0--0.28.1.sql`,
+# NOT ignored, deliberately: `tests/release/testdata/lab_pg--0.27.0--0.28.1.sql`,
 # the DERIVED upgrade script from the same tarball. It is our own emission
 # rather than pgrx's, it passes the org's rules unmodified, and #792 ruled
 # exactly that — the org's derived files meet the org's own rules by
 # construction. It stays in the lint so that stops being a claim.
-release/testdata/lab_pg--0.27.0.sql
-release/testdata/lab_pg--0.28.1.sql
+tests/release/testdata/lab_pg--0.27.0.sql
+tests/release/testdata/lab_pg--0.28.1.sql

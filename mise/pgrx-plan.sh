@@ -39,7 +39,7 @@ for tool in cargo jq; do
 done
 
 metadata=$(cargo metadata --no-deps --format-version 1 --locked)
-surface=$("${ORG_PYTHON}" "${canon}/mise/gate_surface.py" <<< "${metadata}")
+surface=$("${ORG_PYTHON}" -I "${canon}/belt" gate-surface <<< "${metadata}")
 majors=""
 while IFS=$'\t' read -r record _spec kind crate_majors _dir; do
   [[ ${record} == crate && ${kind} == pgrx ]] || continue

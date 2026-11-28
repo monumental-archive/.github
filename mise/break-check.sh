@@ -72,7 +72,7 @@ manifests=() && org_tracked_read manifests ':!vendor/**' "Cargo.toml" "*/Cargo.t
   exit 0
 }
 
-declaration=$("${ORG_PYTHON}" "${belt}/declared_break.py")
+declaration=$("${ORG_PYTHON}" -I "${ORG_BELT_ROOT}/belt" declared-break)
 if [[ ${declaration} == declared ]]; then
   echo "${label}: declared breaking, nothing to hold"
   exit 0

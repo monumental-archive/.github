@@ -206,7 +206,7 @@ jobs:
           REF: ${{ github.ref }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
-          "${ORG_PYTHON}" .org-canon/mise/standing_issue.py --workflow "${WORKFLOW}" \
+          "${ORG_PYTHON}" -I .org-canon/belt standing-issue --workflow "${WORKFLOW}" \
             --run-id "${RUN_ID}" --ref "${REF}" \
             --default-branch "${DEFAULT_BRANCH}" \
             --findings "${RUNNER_TEMP}/findings"

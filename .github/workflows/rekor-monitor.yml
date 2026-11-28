@@ -248,7 +248,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          "${ORG_PYTHON}" .github/rekor-monitor/certificate_issues.py \
+          "${ORG_PYTHON}" -I belt certificate-issues \
             --report "${RUNNER_TEMP}/report.json" --run-url "${RUN_URL}"
 
       # unattested-path: the save half of the checkpoint restore
@@ -292,7 +292,7 @@ jobs:
           CODE: ${{ steps.stele.outputs.code }}
           SAVED: ${{ steps.save.outcome == 'success' }}
         run: |
-          "${ORG_PYTHON}" .github/rekor-monitor/verdict.py --exit-code "${CODE}" \
+          "${ORG_PYTHON}" -I belt verdict --exit-code "${CODE}" \
             --report "${RUNNER_TEMP}/report.json" --saved "${SAVED}"
 
       # This job's findings records, for the report job (#1933).
@@ -362,7 +362,7 @@ jobs:
         env:
           KEPT: ${{ needs.start.outputs.kept }}
         run: |
-          "${ORG_PYTHON}" .github/rekor-monitor/gain.py --start run-start.json \
+          "${ORG_PYTHON}" -I belt gain --start run-start.json \
             --start-kept "${KEPT}" --checkpoint checkpoint.json \
             --reports "${RUNNER_TEMP}/reports" --legs 14
 
@@ -427,7 +427,7 @@ jobs:
           REF: ${{ github.ref }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
-          "${ORG_PYTHON}" .org-canon/mise/standing_issue.py --workflow "${WORKFLOW}" \
+          "${ORG_PYTHON}" -I .org-canon/belt standing-issue --workflow "${WORKFLOW}" \
             --run-id "${RUN_ID}" --ref "${REF}" \
             --default-branch "${DEFAULT_BRANCH}" \
             --findings "${RUNNER_TEMP}/findings"

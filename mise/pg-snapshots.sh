@@ -41,7 +41,7 @@ command -v cargo > /dev/null || {
 # workspace with no extension — an empty answer nobody could tell from
 # the real one.
 metadata=$(cargo metadata --no-deps --format-version 1 --locked)
-surface=$("${ORG_PYTHON}" "${belt}/gate_surface.py" <<< "${metadata}")
+surface=$("${ORG_PYTHON}" -I "${ORG_BELT_ROOT}/belt" gate-surface <<< "${metadata}")
 while IFS=$'\t' read -r record spec kind majors dir; do
   [[ ${record} == crate && ${kind} == pgrx ]] || continue
   [[ ${dir} != "-" ]] || {

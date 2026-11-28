@@ -52,7 +52,7 @@ org_rust_coverage_env() {
     MISE_TASK_NAME="${label}" org_finding "" "cargo metadata named no target_directory — nowhere to measure Rust into"
     return 1
   fi
-  compiler=$("${ORG_PYTHON}" "$(dirname "${BASH_SOURCE[0]}")/gate_cache_key.py" digest) || return 1
+  compiler=$("${ORG_PYTHON}" -I "$(dirname "${BASH_SOURCE[0]}")/../belt" gate-cache-key digest) || return 1
   export CARGO_TARGET_DIR="${target}/llvm-cov-target-${compiler}"
   envs=$(cargo llvm-cov show-env --sh) || return 1
   eval "${envs}"

@@ -59,7 +59,7 @@ for cfg in ${cfgs[@]+"${cfgs[@]}"}; do
   projects+=(--tsconfig "${cfg}" "${resolved}/${n}.json")
 done
 org_tracked ':!vendor/**' "package.json" "*/package.json" \
-  | "${ORG_PYTHON}" "${ORG_BELT_DIR}/biome_config.py" \
+  | "${ORG_PYTHON}" -I "${ORG_BELT_ROOT}/belt" biome-config \
     --org "${ORG_BELT_DIR}/biome-org.json" \
     --domains "${ORG_BELT_DIR}/biome-domains.tsv" \
     --nursery "${ORG_BELT_DIR}/biome-nursery-domains.tsv" \

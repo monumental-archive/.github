@@ -77,7 +77,7 @@ jobs:
         # than half the tracked files. release/source_archive.py.
         env:
           VERSION: ${{ inputs.version }}
-        run: '"${ORG_PYTHON}" .org-canon/release/source_archive.py'
+        run: '"${ORG_PYTHON}" -I .org-canon/belt source-archive'
       - name: Compute the subject manifest
         id: manifest
         run: |

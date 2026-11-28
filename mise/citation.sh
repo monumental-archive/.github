@@ -55,7 +55,7 @@ org_tracked_has REUSE.toml || {
 # The licence is the one the badge shield states, decided by ONE reader
 # both derivations call (#1589): REUSE.toml's single expression, or,
 # where it names several, the `licence` line of .badge-states.
-lic=$("${ORG_PYTHON}" "$(dirname "${BASH_SOURCE[0]}")/project_licence.py" fix:citation)
+lic=$("${ORG_PYTHON}" -I "$(dirname "${BASH_SOURCE[0]}")/../belt" project-licence fix:citation)
 if [[ -z ${lic} || ${lic} == "<SPDX expression>" ]]; then
   org_finding "" "REUSE.toml declares no licence expression — fill it first (lint:licence)"
   exit 1

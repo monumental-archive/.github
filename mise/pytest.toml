@@ -1,0 +1,41 @@
+# pytest at maximum enforcement (#2177): the belt's one pytest
+# configuration, DELIVERED and never copied, like ruff.toml. Every pytest
+# run the belt makes passes it with `-c` (the canon's own suite, and a
+# repository's through `measured`, the properties through
+# python_properties.py), so pytest reads no other config file and a
+# repository's own one weakens nothing. A repository's paths are
+# arguments in its `test` command, never keys here.
+#
+# Every strictness option pytest 9.2.0 has is on, each measured red on
+# a fixture tree (#2177's thread; tests/test_pytest_config.py holds
+# one row per option):
+#
+#   strict                     strict_config (an unknown key, exit 4),
+#                              strict_markers (an unregistered marker,
+#                              exit 2), strict_xfail (an xpass fails),
+#                              strict_parametrization_ids (a duplicate
+#                              id, exit 2), and any mode a later pytest
+#                              adds to it
+#   filterwarnings = error     every warning fails its test
+#   max_warnings = 0           a warning that reaches the summary is red
+#   empty_parameter_set_mark   an empty parameter set fails at
+#                              collection rather than skipping
+#   minversion, required_plugins
+#                              pytest 9.2.0 at least and both plugins
+#                              present, or exit 4; their versions are
+#                              pinned once, in the tool venv's uvx_args,
+#                              which Renovate moves
+#   collect_imported_tests     a test imported into another module is
+#                              not collected a second time
+#
+# No tests collected is pytest's own exit 5, red with no option. The
+# cache is off: it would be written into the working tree.
+[pytest]
+minversion = "9.2.0"
+strict = true
+filterwarnings = ["error"]
+max_warnings = 0
+empty_parameter_set_mark = "fail_at_collect"
+collect_imported_tests = false
+required_plugins = ["pytest-xdist", "hypothesis"]
+addopts = ["-p", "no:cacheprovider", "-ra"]

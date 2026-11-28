@@ -102,8 +102,8 @@ fi
 # about 1.3.0 alone, found nothing, and called an extension with eleven
 # published versions a first publish. Installability is a fact about
 # release assets, so it is settled per extension, in the loop below.
-predecessor_helper="${canon}/release/pgrx/previous_release.py"
-graph_targets=$("${ORG_PYTHON}" "${predecessor_helper}" graph "${controls[@]}")
+predecessor_helper=(-I "${canon}/belt" previous-release)
+graph_targets=$("${ORG_PYTHON}" "${predecessor_helper[@]}" graph "${controls[@]}")
 graph_head=$(head -n 1 <<< "${graph_targets}")
 if [[ -z ${graph_head} ]]; then
   echo "no upgrade graph; first publish of this extension needs no upgrade path"
@@ -128,7 +128,7 @@ fi
 # only maps, never aggregates: `--paginate` applies a filter per page,
 # and an aggregating one answered once PER MATCHING PAGE (#825).
 record=".pgrx-installable"
-predecessors=$("${ORG_PYTHON}" "${predecessor_helper}" record --repo "${GITHUB_REPOSITORY}" \
+predecessors=$("${ORG_PYTHON}" "${predecessor_helper[@]}" record --repo "${GITHUB_REPOSITORY}" \
   --version "${VERSION}" --out "${record}" "${controls[@]}")
 org_say "installable set recorded in ${record}:"
 sed 's/^/  /' "${record}"
@@ -143,7 +143,7 @@ fi
 # one (#1592): on an older line, a newer published version is not where
 # an installation upgrades to this release from. On a single line they
 # are the whole graph, and `below_head` is the graph's head.
-graph_below=$("${ORG_PYTHON}" "${predecessor_helper}" graph --below "${VERSION}" "${controls[@]}")
+graph_below=$("${ORG_PYTHON}" "${predecessor_helper[@]}" graph --below "${VERSION}" "${controls[@]}")
 below_head=$(head -n 1 <<< "${graph_below}")
 if [[ -n ${PREV_MANIFEST} && ${PREV_MANIFEST} != "${below_head}" ]]; then
   org_say "NOTE: manifest carried ${PREV_MANIFEST} but the upgrade graph reaches ${below_head}"
@@ -154,7 +154,7 @@ fi
 # under whichever backend key pins them, and for a LIST of rust versions
 # (a repo that fuzzes declares a nightly beside the stable one, .github#445)
 # the first entry, the one mise puts on PATH and this build must use.
-pins=$("${ORG_PYTHON}" "${canon}/release/caller_pins.py" env --input-of "the pgrx-extension class" \
+pins=$("${ORG_PYTHON}" -I "${canon}/belt" caller-pins env --input-of "the pgrx-extension class" \
   RUST_VERSION=rust PGRX_VERSION=cargo-pgrx) || {
   org_finding "" "rust and cargo:cargo-pgrx must be pinned in this repository's mise config"
   exit 1

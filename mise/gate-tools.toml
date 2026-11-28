@@ -244,9 +244,8 @@ when = []
 [tools."aqua:astral-sh/uv"]
 # No gate task runs it; mise installs every pipx: tool through it.
 for = [
-  "pipx:coverage",
-  "pipx:hypothesis",
   "pipx:mypy",
+  "pipx:pytest",
   "pipx:reuse",
   "pipx:sqlfluff",
   "pipx:yamllint",
@@ -342,11 +341,6 @@ when = ["*.sql", "scaffold/"]
 tasks = ["break:check"]
 when = ["*/Cargo.toml", "Cargo.toml"]
 
-[tools."pipx:cosmic-ray"]
-# audit:mutants only, and pinned lazy: no bare install builds it (#1771).
-tasks = []
-when = []
-
 [tools."cargo:cargo-mutants"]
 # audit:mutants only, and pinned lazy: no bare install builds it (#1355).
 tasks = []
@@ -389,23 +383,29 @@ tasks = ["lint:editorconfig", "lint:scaffold-assembly"]
 tasks = ["lint:scaffold-assembly", "lint:yaml"]
 when = ["*.yaml", "*.yml", "scaffold/"]
 
-[tools."pipx:coverage"]
-# coverage:check's python leg (#1331): the same guard as
-# cargo-llvm-cov's row, so the same wider half.
-tasks = ["coverage:check"]
-when = ["*.py", "Cargo.toml", "go.mod", "package.json"]
-
-[tools."pipx:hypothesis"]
-# test:python-properties (#1332): its guard is a tracked prop_*.py, and
-# git's default pathspec lets `*` cross a slash. lint:python-types
-# (#1604) types a property file against Hypothesis's own venv, so its
-# guard, any tracked .py or .pyi, installs it too.
+[tools."pipx:pytest"]
+# The pytest venv (#2177): coverage:check's python leg reads coverage
+# from it (#1331), with the same guard as cargo-llvm-cov's row, so the
+# same wider half; test:python-properties runs its pytest and
+# Hypothesis (#1332), its guard a tracked prop_*.py, and git's default
+# pathspec lets `*` cross a slash; lint:python-types (#1604) types a
+# property file against this venv, so its guard, any tracked .py or
+# .pyi, installs it too.
 tasks = [
+  "coverage:check",
   "lint:python-types",
   "lint:scaffold-assembly",
   "test:python-properties",
 ]
-when = ["*.py", "*.pyi", "*prop_*.py", "scaffold/"]
+when = [
+  "*.py",
+  "*.pyi",
+  "*prop_*.py",
+  "Cargo.toml",
+  "go.mod",
+  "package.json",
+  "scaffold/",
+]
 
 [tools."pipx:mypy"]
 # lint:python-types (#1604): its guard is a tracked .py or .pyi.

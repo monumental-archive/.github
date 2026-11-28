@@ -32,15 +32,15 @@ canon="${4:?canon dir}"
 staged="${5:?staged extension dir}"
 docker_dir=$(cd "${canon}/docker" && pwd -P)
 digest=$(jq -r .digest "${record}")
-ext=$("${ORG_PYTHON}" "${canon}/release/pgrx_images.py" extension-name --tree "${staged}")
-base=$("${ORG_PYTHON}" "${canon}/release/pgrx_images.py" base-image --pg "${pg}" \
+ext=$("${ORG_PYTHON}" -I "${canon}/belt" pgrx-images extension-name --tree "${staged}")
+base=$("${ORG_PYTHON}" -I "${canon}/belt" pgrx-images base-image --pg "${pg}" \
   --table "${canon}/docker/pgrx-base-images.toml")
 context=$(mktemp -d)
 rc=0
 trap 'rc=$?; rm -rf "${context}"; [ -n "${org_done:-}" ] || [ "${rc}" -ne 0 ] || rc=1; exit "${rc}"' EXIT
 # Called directly, never in $(…), so a refused reference stops the proof.
 render() { # recipe -> <context>/<recipe>.Dockerfile
-  "${ORG_PYTHON}" "${canon}/release/pgrx_images.py" consumer-dockerfile --recipe "$1" \
+  "${ORG_PYTHON}" -I "${canon}/belt" pgrx-images consumer-dockerfile --recipe "$1" \
     --image "${image}@${digest}" --base "${base}" --pg "${pg}" > "${context}/$1.Dockerfile"
 }
 render copy

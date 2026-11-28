@@ -208,7 +208,7 @@ fi
 # as `licence <SPDX expression>`. project_licence.py decides, and
 # citation.sh asks it the same question, so the shield and the
 # citation cannot state two licences (#1589).
-lic=$("${ORG_PYTHON}" "$(dirname "${BASH_SOURCE[0]}")/project_licence.py" fix:badges)
+lic=$("${ORG_PYTHON}" -I "$(dirname "${BASH_SOURCE[0]}")/../belt" project-licence fix:badges)
 if [[ -z ${lic} ]]; then
   org_finding "" "REUSE.toml carries no SPDX-License-Identifier — the licence shield has nothing to state"
   exit 1

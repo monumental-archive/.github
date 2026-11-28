@@ -90,7 +90,7 @@ jobs:
 
       - name: Decide which jobs apply
         id: applies
-        run: '"${ORG_PYTHON}" .org-canon/mise/audit_legs.py repo-deep-tests >> "${GITHUB_OUTPUT}"'
+        run: '"${ORG_PYTHON}" -I .org-canon/belt audit-legs repo-deep-tests >> "${GITHUB_OUTPUT}"'
 
       # This job's findings records, for the report job (#1933).
       - name: Hand the findings to the report job
@@ -433,7 +433,7 @@ jobs:
 
       - name: Plan the properties' legs
         id: shards
-        run: '"${ORG_PYTHON}" .org-canon/mise/gate_shard.py plan deep-tests >> "${GITHUB_OUTPUT}"'
+        run: '"${ORG_PYTHON}" -I .org-canon/belt gate-shard plan deep-tests >> "${GITHUB_OUTPUT}"'
 
       - name: Draw the property seed
         id: seed
@@ -677,7 +677,7 @@ jobs:
           REF: ${{ github.ref }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
-          "${ORG_PYTHON}" .org-canon/mise/standing_issue.py --workflow "${WORKFLOW}" \
+          "${ORG_PYTHON}" -I .org-canon/belt standing-issue --workflow "${WORKFLOW}" \
             --run-id "${RUN_ID}" --ref "${REF}" \
             --default-branch "${DEFAULT_BRANCH}" \
             --findings "${RUNNER_TEMP}/findings"

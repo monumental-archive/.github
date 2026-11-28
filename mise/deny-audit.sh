@@ -87,7 +87,7 @@ audit_root() {
   # is no verdict; stele judges the scan, an unfinished one CANNOT_JUDGE.
   cargo deny --manifest-path "${manifest}" --config "${config}" \
     --format json check advisories 2> "${scan}" || true
-  "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${belt}/stele_findings.py" assert advisories \
+  "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" stele-findings assert advisories \
     --scanner cargo-deny --scan "${scan}" --vex "${vex}" --subject "${dir}Cargo.lock"
 }
 

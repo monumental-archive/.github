@@ -491,7 +491,7 @@ jobs:
         # which tools (#1333). One reader, release/caller_pins.py.
         id: pins
         run: |
-          "${ORG_PYTHON}" .org-canon/release/caller_pins.py install \
+          "${ORG_PYTHON}" -I .org-canon/belt caller-pins install \
             --input-of "the release's advisory triage" \
             --if-pinned rust --if-pinned go --if-pinned govulncheck >> "${GITHUB_OUTPUT}"
       - name: Install mise and the pinned toolchain

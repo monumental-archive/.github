@@ -98,7 +98,7 @@ jobs:
         # docstrings carry what this block's comments did. The pipeline
         # sentence is passed in, so the helper names no organisation.
         run: >-
-          "${ORG_PYTHON}" .org-canon/release/mint_doi.py --pipeline "Built, proven
+          "${ORG_PYTHON}" -I .org-canon/belt mint-doi --pipeline "Built, proven
           and signed by the monumental-archive release pipeline;
           verification instructions ship with the GitHub release."
 ...

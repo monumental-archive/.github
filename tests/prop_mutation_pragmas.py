@@ -1,0 +1,100 @@
+"""mutation_pragmas.py's pragma finder, on modules nobody wrote down.
+
+The properties of `test_mutation_pragmas.py`'s fixed rows (#1548), over
+generated modules:
+
+- Invariance (V): a pragma is reported exactly when it is a comment,
+  at the line it is written on; the same text inside a string, a
+  triple-quoted string across lines included, never is.
+- Refusal (R): `main` answers any file with 0 and its records, or 1
+  and the file named on stderr, and never raises, whatever bytes the
+  file holds.
+
+Run by `test:python-properties` under the belt's Hypothesis profile;
+the ordinary suite (`mise run test`) never imports this file.
+"""
+
+import contextlib
+import io
+import tempfile
+from pathlib import Path
+
+from hypothesis import example
+from hypothesis import strategies as st
+
+from belt import mutation_pragmas as mp
+from belt.typed_hypothesis import given
+
+PRAGMA = "# pragma: no mutate"
+# One logical statement each, as (source lines, the offsets of the lines
+# that carry a pragma COMMENT).
+PIECES = [
+    (["x = 1"], []),
+    ([f"x = 1  {PRAGMA}"], [0]),
+    ([f"x = 1  {PRAGMA} -- a reason"], [0]),
+    ([PRAGMA], [0]),
+    ([f"s = '{PRAGMA}'"], []),
+    ([f's = "{PRAGMA}"  {PRAGMA}'], [0]),
+    (['s = """', PRAGMA, '"""'], []),
+    (['s = """', PRAGMA, f'"""  {PRAGMA}'], [2]),
+    (["y = (", f"    1,  {PRAGMA}", ")"], [1]),
+    (["# pragma: mutate"], []),
+]
+
+
+def written(path: Path, data: bytes) -> Path:
+    """Write bytes to a file.
+
+    Returns:
+        The path.
+
+    """
+    path.write_bytes(data)
+    return path
+
+
+# Two picks the shrinker once found, kept as examples.
+PICK_SIX: list[int] = [6]
+PICK_SEVEN_ONE: list[int] = [7, 1]
+
+
+class TestInvariance:
+    """A comment is a pragma; a string never is."""
+
+    @given(st.lists(st.sampled_from(range(len(PIECES))), max_size=8))
+    @example(PICK_SIX)
+    @example(PICK_SEVEN_ONE)
+    def test_exactly_the_comment_lines(self, picks: list[int]) -> None:
+        """Every pragma comment, at its line, and nothing else."""
+        lines: list[str] = []
+        expected: list[int] = []
+        for pick in picks:
+            body, marks = PIECES[pick]
+            expected += [len(lines) + 1 + m for m in marks]
+            lines += body
+        with tempfile.TemporaryDirectory() as scratch:
+            path = written(Path(scratch) / "m.py", ("\n".join(lines) + "\n").encode())
+            found = mp.pragmas(path)
+        found_lines = [line for line, _ in found]
+        assert found_lines == expected, lines
+        for _, text in found:
+            assert text.startswith("#")
+
+
+class TestRefusal:
+    """Any file is answered by name, never a traceback."""
+
+    @given(st.binary(max_size=200))
+    @example(b"x = '\xff'\n")
+    @example(b"\xef\xbb\xbf# coding: latin-1\n")
+    @example(b"s = '''\n")
+    def test_main_answers_any_bytes(self, data: bytes) -> None:
+        """0 and records, or 1 and the file named on stderr."""
+        with tempfile.TemporaryDirectory() as scratch:
+            path = written(Path(scratch) / "m.py", data)
+            out, err = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                status = mp.main([str(path)])
+        assert status in (0, 1)
+        if status == 1:
+            assert str(path) in err.getvalue()

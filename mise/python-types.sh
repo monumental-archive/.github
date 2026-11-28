@@ -58,15 +58,16 @@ running=$(mypy --version | awk '{ print $2 }')
   exit 1
 }
 
-# mypy reads the Hypothesis venv, where a property's imports resolve;
-# the belt's one check asks that it sits on the belt's Python (#1788).
+# mypy reads the pytest venv, where a test's and a property's imports
+# (pytest, Hypothesis) resolve; the belt's one check asks that it sits
+# on the belt's Python (#1788).
 exe=$(command -v python3)
-if command -v hypothesis > /dev/null; then
-  exe=$("${ORG_PYTHON}" "${belt}/tool_python.py" "${label}" hypothesis) || exit 1
+if command -v pytest > /dev/null; then
+  exe=$("${ORG_PYTHON}" -I "${ORG_BELT_ROOT}/belt" tool-python "${label}" pytest) || exit 1
 fi
 
 red=0
-seams=$("${ORG_PYTHON}" "${belt}/python_types_seams.py" "${args[@]}") || red=1
+seams=$("${ORG_PYTHON}" -I "${ORG_BELT_ROOT}/belt" python-types-seams "${args[@]}") || red=1
 if [[ -n ${seams} ]]; then
   detail=()
   while IFS= read -r line; do detail+=("${line}"); done <<< "${seams}"
@@ -77,10 +78,11 @@ fi
 # The import roots, derived from the tracked files (python_roots.py,
 # #1634): mypy follows neither a script's own directory nor the sibling
 # root a file names from its `__file__`, so it is handed both, and the
-# belt's own directory, where a property file's `from typed_hypothesis
-# import given` resolves as the properties runner resolves it (#1604).
+# tree the belt package sits in, where a property file's `from
+# belt.typed_hypothesis import given` resolves as the properties runner
+# resolves it (#1604, #2177).
 # Two files that would be one module are red by name, before mypy stops.
-roots=$("${ORG_PYTHON}" "${belt}/python_roots.py" "${belt}" "${args[@]}") || {
+roots=$("${ORG_PYTHON}" -I "${ORG_BELT_ROOT}/belt" python-roots "${ORG_BELT_ROOT:?unset}" "${args[@]}") || {
   org_finding "" "rename one of each pair above so every module name is one file's"
   exit 1
 }
