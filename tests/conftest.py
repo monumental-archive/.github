@@ -40,20 +40,17 @@ from tests import hermetic
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator
 
+# The fixture tests run pytest on planted trees (tests/test_conftest.py,
+# tests/test_pytest_config.py).
+pytest_plugins = ("pytester",)
 
+
+# The directory guard is set up first, so it is torn down last: after
+# `monkeypatch`, which the environment fixture takes, has undone a
+# `monkeypatch.chdir`. pytest orders a plugin's autouse fixtures by
+# name, so the guard's name sorts before the environment's.
 @pytest.fixture(autouse=True)
-def _hermetic_environ(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Clear the process environment to the one a fixture is given."""
-    wanted = hermetic.env()
-    for name in list(os.environ):
-        if name not in wanted:
-            monkeypatch.delenv(name)
-    for name, value in wanted.items():
-        monkeypatch.setenv(name, value)
-
-
-@pytest.fixture(autouse=True)
-def _working_directory(request: pytest.FixtureRequest) -> Generator[None]:
+def _directory_held(request: pytest.FixtureRequest) -> Generator[None]:
     """Fail a test that leaves the working directory elsewhere.
 
     Raises:
@@ -73,6 +70,17 @@ def _working_directory(request: pytest.FixtureRequest) -> Generator[None]:
             f" (the suite runs from {start}); take monkeypatch.chdir",
             pytrace=False,
         )
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_environ(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Clear the process environment to the one a fixture is given."""
+    wanted = hermetic.env()
+    for name in list(os.environ):
+        if name not in wanted:
+            monkeypatch.delenv(name)
+    for name, value in wanted.items():
+        monkeypatch.setenv(name, value)
 
 
 @pytest.fixture

@@ -1,16 +1,20 @@
 """Each runner `measured` shards is handed its share in its own terms (#2160).
 
-mise/shard_runner.py turns ORG_SHARD=k/n into vitest's `--shard`,
-nextest's `--partition slice:` and a share of `go test`'s packages. The
-belt pins none of the three (the repository does), so these rows run
-the adapter against stand-ins that keep each runner's measured split
-contract (the owner's ruling on #2160, the measurements recorded there):
+belt/shard_runner.py turns ORG_SHARD=k/n into vitest's `--shard`,
+nextest's `--partition slice:`, a share of pytest's test files (#2177)
+and a share of `go test`'s packages. These rows call the adapter in
+process against stand-ins on PATH that keep each runner's measured
+split contract (the owner's ruling on #2160, the measurements recorded
+there):
 
     vitest   k from 1; files sorted by sha1 of "/<root-relative path>",
              cut in contiguous slices, the first N mod n one longer;
              k < 1, k > n and n above the file count exit 1.
     nextest  `slice:k/n`, k from 1: every matching test, by binary then
              name, dealt round-robin.
+    pytest   no shard of its own; `--collect-only -q` prints one
+             `file::test` line per test, and a run runs the files it
+             is given.
     go       no shard of its own; `go list` prints import paths sorted,
              and `go test` runs the packages it is given.
 
@@ -19,21 +23,26 @@ it, so a row holds the adapter's report to what the runner ran, and the
 shards' union to the whole suite with nothing twice. The real runners
 are proven in the first consumer's own gate (monumental-archive#523).
 
-stdlib `unittest`, run by `mise run test`.
+pytest, run by `mise run test`.
 """
+
+from __future__ import annotations
 
 import hashlib
 import subprocess
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
-from belt import decoded, shard
+from belt import decoded, shard, shard_runner
 from tests import hermetic
 
-HERE = hermetic.MISE
-ADAPTER = HERE / "shard_runner.py"
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from tests.conftest import Called
 
 # The stand-ins, one Python script per runner. Each reads its fixture
 # from the environment and writes what its `run` ran to STUB_RAN.
@@ -86,6 +95,29 @@ elif args[1] == "run":
         out.write("".join(f"{b} {t}\n" for b, t in order[k - 1 :: n]))
 """
 
+PYTEST = r"""
+import os, sys
+files = os.environ["STUB_FILES"].split()
+args = sys.argv[1:]
+given = [a for a in args if not a.startswith("-") and (a in files or a == "tests")]
+if "--collect-only" in args:
+    chosen = [f for f in files if any(f == g or f.startswith(g + "/") for g in given)]
+    print("".join(f"{f}::test_one\n{f}::test_two\n" for f in chosen), end="")
+    print(f"\n{2 * len(chosen)} tests collected in 0.01s")
+else:
+    with open(os.environ["STUB_RAN"], "a") as out:
+        out.write("".join(f"{f}\n" for f in given))
+        out.write("argv " + " ".join(args) + "\n")
+"""
+
+# `python3 -m pytest`, handed to the pytest stand-in beside it.
+PYTHON3 = r"""
+import os, sys
+assert sys.argv[1:3] == ["-m", "pytest"], sys.argv
+here = os.path.dirname(os.path.abspath(__file__))
+os.execv(os.path.join(here, "pytest"), ["pytest", *sys.argv[3:]])
+"""
+
 GO = r"""
 import os, sys
 packages = os.environ["STUB_PACKAGES"].split()
@@ -101,9 +133,10 @@ elif args[0] == "test":
 
 
 TRUE: list[str] = ["true"]
+USAGE = 2
 
 
-def words(done: subprocess.CompletedProcess[str]) -> list[str]:
+def words(done: Called) -> list[str]:
     """Read the adapter's command, NUL-separated on its stdout.
 
     Returns:
@@ -137,25 +170,36 @@ class TestRunner:
     """A stand-in on PATH, the adapter run against it shard by shard."""
 
     @pytest.fixture(autouse=True)
-    def _set_up_test_runner(self, tmp_path: Path) -> None:
+    def _set_up_test_runner(
+        self, tmp_path: Path, call_main: Callable[..., Called]
+    ) -> None:
         """Make the stand-ins' directory and the reports directory."""
-        self.base = Path(str(tmp_path))
+        self.call = call_main
+        self.base = tmp_path
         self.bin = self.base / "bin"
         self.bin.mkdir()
         self.reports = self.base / "reports"
         self.ran = self.base / "ran"
-        for name, body in (("vitest", VITEST), ("cargo", NEXTEST), ("go", GO)):
+        stubs = (
+            ("vitest", VITEST),
+            ("cargo", NEXTEST),
+            ("pytest", PYTEST),
+            ("python3", PYTHON3),
+            ("go", GO),
+        )
+        for name, body in stubs:
             stub = self.bin / name
             stub.write_text(f"#!{sys.executable}\n{body}", encoding="utf-8")
             stub.chmod(0o755)
 
     def adapt(
         self, spec: str, command: list[str], fixture: dict[str, str]
-    ) -> subprocess.CompletedProcess[str]:
-        """Run the adapter for one shard of a command.
+    ) -> Called:
+        """Call the adapter for one shard of a command.
 
         Returns:
-            The finished adapter: its stdout is the command, NUL-separated.
+            What it returned and wrote: its stdout is the command,
+            NUL-separated.
 
         """
         env = hermetic.env(
@@ -166,13 +210,8 @@ class TestRunner:
             STUB_RAN=str(self.ran),
             **fixture,
         )
-        return subprocess.run(
-            [sys.executable, str(ADAPTER), "--", *command],
-            cwd=self.base,
-            env=env,
-            capture_output=True,
-            text=True,
-            check=False,
+        return self.call(
+            lambda: shard_runner.main(["--", *command]), env=env, cwd=self.base
         )
 
     def shards(
@@ -330,6 +369,44 @@ PACKAGES = [
 ]
 
 
+TEST_FILES = ["tests/test_a.py", "tests/test_b.py", "tests/sub/test_c.py", "tests/test_d.py"]
+
+
+class TestPytest(TestRunner):
+    """pytest: every n-th of the sorted test files, from the k-th (#2177)."""
+
+    @pytest.mark.parametrize("n", [2, 3])
+    def test_the_share_is_this_shards_files_and_the_union_the_population(
+        self, n: int
+    ) -> None:
+        """Each shard runs its own files; together, every file once."""
+        fixture = {"STUB_FILES": " ".join(TEST_FILES)}
+        command = ["pytest", "-c", "mise/pytest.toml", "-n", "auto", "tests"]
+        shares = self.shards(n, command, fixture)
+        self.whole(n, shares, TEST_FILES)
+        assert shares[0] == sorted(TEST_FILES)[::n]
+
+    def test_options_stay_and_paths_become_files(self) -> None:
+        """A valued option's value is not a path; the paths become the share."""
+        done = self.adapt(
+            "1/2",
+            ["python3", "-m", "pytest", "-c", "cfg.toml", "--durations=10", "tests"],
+            {"STUB_FILES": " ".join(TEST_FILES)},
+        )
+        assert done.returncode == 0, done.stderr
+        want: list[str] = [
+            "python3", "-m", "pytest", "-c", "cfg.toml", "--durations=10",
+            "tests/sub/test_c.py", "tests/test_b.py",
+        ]  # fmt: skip
+        assert want == words(done)
+
+    def test_a_shard_dealt_nothing_runs_true(self) -> None:
+        """One file on two shards: the second runs `true`, not every test."""
+        done = self.adapt("2/2", ["pytest", "tests"], {"STUB_FILES": TEST_FILES[0]})
+        assert done.returncode == 0, done.stderr
+        assert words(done) == TRUE
+
+
 class TestGoTest(TestRunner):
     """`go test`: every n-th of the sorted packages, from the k-th."""
 
@@ -380,14 +457,11 @@ class TestUnchanged(TestRunner):
         done = self.adapt("", ["vitest", "run"], {"STUB_FILES": "a"})
         assert argv_of("vitest", "run") == words(done)
 
-    def test_usage(self) -> None:
+    def test_usage(self, as_task: Callable[[str], None]) -> None:
         """No `--`: the usage exit."""
-        done = subprocess.run(
-            [sys.executable, str(ADAPTER), "vitest"],
-            env=hermetic.env(),
-            capture_output=True,
-            text=True,
-            check=False,
+        as_task("test")
+        done = self.call(lambda: shard_runner.main(["vitest"]))
+        assert done.returncode == USAGE
+        assert done.stderr == (
+            "test: usage: belt shard-runner -- <command> [<argument>…]\n"
         )
-        assert done.returncode == 2
-        assert "usage: shard_runner.py -- <command>" in done.stderr

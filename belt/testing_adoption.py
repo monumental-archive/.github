@@ -2,8 +2,9 @@
 
 Mutation testing and the coverage floor are adopted by a tracked file,
 and a leg with no file skips clean, by name: `audit:mutants` reads
-`.cargo/mutants.toml`, `.gomuignore`, `cosmic-ray.toml` or
-`stryker.config.json`, and `coverage:check` reads `.coverage-floor`.
+`.cargo/mutants.toml`, `.gomuignore`, `setup.cfg` (its `[mutmut]`
+section, #2177) or `stryker.config.json`, and `coverage:check` reads
+`.coverage-floor`.
 Opt-in by file made absence green, so a repository could ship a
 language with no mutation run and no floor. This closes that door:
 for each language the belt measures, a repository that ships it must
@@ -137,7 +138,7 @@ class Language:
 LANGUAGES = (
     Language("Rust", _rust, ".cargo/mutants.toml", "mutants-rust.sh"),
     Language("Go", _go, ".gomuignore", "mutants-go.sh"),
-    Language("Python", _python, "cosmic-ray.toml", "mutants-python.sh"),
+    Language("Python", _python, "setup.cfg", "mutants_python.py"),
     Language("TypeScript", _typescript, "stryker.config.json", "mutants-typescript.sh"),
 )
 
@@ -191,7 +192,7 @@ def main(argv: list[str]) -> int:
 
     """
     if argv:
-        findings.finding("", f"takes no arguments, got {argv!r}")
+        writer.finding("", f"takes no arguments, got {argv!r}")
         return 2
     paths = stdin_paths()
     ships = shipped(paths)

@@ -1,19 +1,14 @@
-"""Tests for mutation_pragmas.py's refusal of a file it cannot read (#1555).
+"""Every mutation pragma is the reasoned line form (#1354, #1555, #2177).
 
-The regression row of the defect `prop_mutation_pragmas.py` found: a file
-whose bytes are not UTF-8 past its encoding line raised
-UnicodeDecodeError out of `main`, a traceback that also left every later
-file unread, where the contract is the file named on stderr and exit 1.
-
-stdlib `unittest`, matching the other mise/test_*.py; run through the
-gate as `mise run test`.
+`refusal` judges one comment; `main` judges every pragma comment in the
+files it is given, and names a file it cannot read (the regression row
+of the defect prop_mutation_pragmas.py found: a file whose bytes are not
+UTF-8 past its encoding line raised UnicodeDecodeError out of `main`,
+and left every later file unread).
 """
 
-from tests import hermetic
-import contextlib
-import io
-import tempfile
-from pathlib import Path
+from __future__ import annotations
+
 from typing import TYPE_CHECKING
 
 import pytest
@@ -22,33 +17,77 @@ from belt import mutation_pragmas as mp
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from pathlib import Path
+
+    from tests.conftest import Called
 
 # The task that runs the helper, whose name its findings carry (#1934).
 TASK = "audit:mutants"
+LINE_ONLY = "only the line form exists; mark each line, with its reason"
+NO_REASON = "# pragma: no mutate with no reason — write it after ' -- '"
+WHY = "  an exclusion records a mutant the suite cannot kill; say why at the site\n"
 
 
-@pytest.fixture(autouse=True)
-def _task(as_task: Callable[[str], None]) -> None:
-    """Run every row as the task does, recording no finding."""
+@pytest.mark.parametrize(
+    ("comment", "word"),
+    [
+        ("# pragma: no mutate -- the width", "--"),
+        ("# pragma: no mutate", ""),
+        ("# pragma: no mutate block", "block"),
+        ("# pragma: no mutate: start, why", "start"),
+        ("# pragma: no mutate end", "end"),
+    ],
+)
+def test_the_word_is_read_as_mutmut_reads_it(comment: str, word: str) -> None:
+    """The first word after `no mutate`, past a colon, before a comma."""
+    assert mp.word(comment) == word
+
+
+@pytest.mark.parametrize(
+    ("comment", "refused"),
+    [
+        pytest.param("# pragma: no mutate -- the fixture's width", None, id="reasoned"),
+        pytest.param("# pragma: no mutate", NO_REASON, id="no reason"),
+        pytest.param("# pragma: no mutate --   ", NO_REASON, id="an empty reason"),
+        pytest.param(
+            "# pragma: no mutate block -- why",
+            f"# pragma: no mutate block — {LINE_ONLY}",
+            id="block",
+        ),
+        pytest.param(
+            "# pragma: no mutate start", f"# pragma: no mutate start — {LINE_ONLY}", id="start"
+        ),
+        pytest.param(
+            "# pragma: no mutate end", f"# pragma: no mutate end — {LINE_ONLY}", id="end"
+        ),
+    ],
+)
+def test_each_pragma_is_judged(comment: str, refused: str | None) -> None:
+    """The line form with its reason passes; every other form is named."""
+    assert mp.refusal(comment) == refused
+
+
+def test_a_pragma_in_a_string_is_not_a_site(
+    tmp_path: Path, call_main: Callable[..., Called], as_task: Callable[[str], None]
+) -> None:
+    """A fixture's planted pragma text is string, not comment."""
     as_task(TASK)
+    path = tmp_path / "f.py"
+    path.write_text('X = "# pragma: no mutate block"\n', encoding="utf-8")
+    done = call_main(lambda: mp.main([str(path)]))
+    assert (done.returncode, done.stderr) == (0, "")
 
 
-HERE = hermetic.MISE
-
-
-class TestUnreadable:
-    """A file that is not UTF-8 is named, and the next file still read."""
-
-    def test_invalid_utf8_is_named_and_the_rest_read(self) -> None:
-        """The shrunk example: a CR, then a truncated UTF-8 sequence."""
-        with tempfile.TemporaryDirectory() as scratch:
-            bad = Path(scratch) / "bad.py"
-            bad.write_bytes(b"\r\xc2\x80")
-            good = Path(scratch) / "good.py"
-            good.write_text("x = 1  # pragma: no mutate\n", encoding="utf-8")
-            out, err = io.StringIO(), io.StringIO()
-            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-                status = mp.main([str(bad), str(good)])
-        assert status == 1
-        assert f"{TASK}: {bad}: could not tokenize:" in err.getvalue()
-        assert out.getvalue() == f"{good}\t1\t# pragma: no mutate\n"
+def test_invalid_utf8_is_named_and_the_rest_read(
+    tmp_path: Path, call_main: Callable[..., Called], as_task: Callable[[str], None]
+) -> None:
+    """The shrunk example: a CR, then a truncated UTF-8 sequence."""
+    as_task(TASK)
+    bad = tmp_path / "bad.py"
+    bad.write_bytes(b"\r\xc2\x80")
+    good = tmp_path / "good.py"
+    good.write_text("x = 1  # pragma: no mutate\n", encoding="utf-8")
+    done = call_main(lambda: mp.main([str(bad), str(good)]))
+    assert done.returncode == 1
+    assert done.stderr.startswith(f"{TASK}: {bad}: could not tokenize:")
+    assert done.stderr.endswith(f"{TASK}: {good}:1: {NO_REASON}\n{WHY}")

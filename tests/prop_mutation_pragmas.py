@@ -6,9 +6,8 @@ generated modules:
 - Invariance (V): a pragma is reported exactly when it is a comment,
   at the line it is written on; the same text inside a string, a
   triple-quoted string across lines included, never is.
-- Refusal (R): `main` answers any file with 0 and its records, or 1
-  and the file named on stderr, and never raises, whatever bytes the
-  file holds.
+- Refusal (R): `main` answers any file with 0, or 1 and the file
+  named on stderr, and never raises, whatever bytes the file holds.
 
 Run by `test:python-properties` under the belt's Hypothesis profile;
 the ordinary suite (`mise run test`) never imports this file.
@@ -89,7 +88,7 @@ class TestRefusal:
     @example(b"\xef\xbb\xbf# coding: latin-1\n")
     @example(b"s = '''\n")
     def test_main_answers_any_bytes(self, data: bytes) -> None:
-        """0 and records, or 1 and the file named on stderr."""
+        """0, or 1 and the file named on stderr."""
         with tempfile.TemporaryDirectory() as scratch:
             path = written(Path(scratch) / "m.py", data)
             out, err = io.StringIO(), io.StringIO()

@@ -29,12 +29,13 @@ lint = 4
 ceiling = 128
 
 # Rust and Go four, round-robin (edtf #107 set Rust's from its first
-# run); Python 48 (cosmic-ray judges a mutant per suite run);
+# run); Python four, a share of the modules each, mutmut's baseline
+# paid once per shard (#2177; set from its first run);
 # TypeScript eight, StrykerJS given a share of the files (#2153).
 [shards.mutants]
 rust = 4
 go = 4
-python = 48
+python = 4
 typescript = 8
 
 # The Monday properties at a random seed: Python by position, eight
