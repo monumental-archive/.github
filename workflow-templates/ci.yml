@@ -54,7 +54,7 @@ jobs:
       # measured on stele's standup, where this template's silence was
       # the one gate finding).
       contents: read # this repository's contents, read-only
-    uses: monumental-archive/.github/.github/workflows/ci.yml@38eb388e9fb67ee13216dff37a1d0757851f8f15 # v1.79.0
+    uses: monumental-archive/.github/.github/workflows/ci.yml@52e5777bf158c5a2668711719cab12dc2db81c7e # v1.79.1
     secrets:
       # The coverage badge feed: a repository that ships a measured
       # language tracks a .coverage-floor (lint:test-adoption, #1910),

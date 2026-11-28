@@ -229,7 +229,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@90f833d396d0cc3674b631d2d225e306476c303a # v5.2.10
         with:
-          version: 2026.11.11
+          version: 2026.11.12
           cache: false
           # Only what this job's steps call (#1333): the release path is
           # uncached, so every tool in scope is paid for on every run.
