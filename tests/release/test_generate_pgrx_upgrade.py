@@ -1,5 +1,5 @@
 """Table tests for the pgrx upgrade derivation's predecessor selection.
-                        # ruff: ignore[hardcoded-temp-file]
+
 #816: after edtf v1.3.0 was tagged and failed to publish, the next
 release asked only whether the graph HEAD (1.3.0) had published tarballs,
 found none, and announced "first publish of this extension" for an
@@ -49,9 +49,10 @@ import re
 import subprocess
 import sys
 import textwrap
+from collections.abc import Iterator
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import ClassVar, NamedTuple, override
+from typing import ClassVar, NamedTuple
 
 import pytest
 
@@ -441,7 +442,7 @@ class TestSelectsThePredecessor(TestNeedsJq):
 
 
 class TestReadsThePinsThroughTheOneReader:
-    """The pins come from release/caller_pins.py, as the build leg's do (#1333)."""
+    """The pins come from `belt caller-pins`, as the build leg's do (#1333)."""
 
     def test_an_unpinned_cargo_pgrx_is_refused_with_its_remedy(self) -> None:
         """The reader names the tool, the script keeps its own finding."""
@@ -451,7 +452,7 @@ class TestReadsThePinsThroughTheOneReader:
             result = repo.derive("1.3.1", "1.3.0", "edtf-releases.json")
         assert result.returncode == 1
         assert (
-            "::error::caller_pins.py: cargo-pgrx missing — pin cargo-pgrx in this"
+            "::error::caller-pins: cargo-pgrx missing — pin cargo-pgrx in this"
             " repository's mise config; it is a build input of the"
             " pgrx-extension class\n"
             "generate-pgrx-upgrade.sh: rust and cargo:cargo-pgrx must be pinned"
@@ -490,24 +491,12 @@ class TestAFailedControlListingIsNotAbsence:
         assert "not applicable" not in result.stdout + result.stderr
 
 
-# Set on the suite this row spawns, so the child declines to spawn one of
-# its own. A marker rather than running one class by name: the row is
-# about what a WHOLE suite run does to an index, and naming a class would
-# quietly stop covering rows added to any other one.
-INNER_RUN = "PGRX_HARNESS_INNER_RUN"
-
-
-@pytest.mark.usefixtures("_set_up_test_leaves_the_callers_git_alone")
 class TestLeavesTheCallersGitAlone(TestNeedsJq):
     """#857, planted: the hazard itself, run for real on every gate."""
 
-    @pytest.fixture
-    def _set_up_test_leaves_the_callers_git_alone(self) -> None:
-        """Skip the row in the inner run, which this row spawned."""
-        if os.environ.get(INNER_RUN):
-            pytest.skip("the inner run: this row spawned it")
-
-    def test_a_linked_worktrees_index_is_byte_identical_afterwards(self) -> None:
+    def test_a_linked_worktrees_index_is_byte_identical_afterwards(
+        self, request: pytest.FixtureRequest
+    ) -> None:
         """Run the whole suite the way a `pre-push` hook in a worktree does.
 
         A scratch repository, a linked worktree of it, and exactly the
@@ -522,9 +511,6 @@ class TestLeavesTheCallersGitAlone(TestNeedsJq):
         (#857): the index is untouched, and the suite that left it
         untouched actually ran.
         """
-        expected = unittest.defaultTestLoader.loadTestsFromModule(
-            sys.modules[__name__]
-        ).countTestCases()
         with TemporaryDirectory() as d:
             scratch = Path(d)
             home = scratch / "home"
@@ -547,12 +533,20 @@ class TestLeavesTheCallersGitAlone(TestNeedsJq):
 
             planted = support.env()
             planted.update({
-                INNER_RUN: "1",
                 "GIT_DIR": str(gitdir),
                 "GIT_INDEX_FILE": str(index),
             })
             run = subprocess.run(
-                [sys.executable, str(Path(__file__).resolve()), "-v"],
+                [
+                    *(sys.executable, "-m", "pytest", "-q"),
+                    *("-c", str(CANON / "mise" / "pytest.toml")),
+                    *("--rootdir", str(CANON), str(Path(__file__).resolve())),
+                    # The whole file but this row, which would spawn
+                    # another: deselected, by its own id. Naming a class
+                    # to run would quietly stop covering rows added to
+                    # any other one.
+                    *("--deselect", request.node.nodeid),
+                ],
                 cwd=linked,
                 env=planted,
                 capture_output=True,
@@ -564,14 +558,15 @@ class TestLeavesTheCallersGitAlone(TestNeedsJq):
             after_files = support.tracked(linked)
             status = git(["status", "--porcelain"], linked, home)
 
-        assert run.returncode == 0, run.stderr
-        assert f"Ran {expected} tests" in run.stderr
-        # Exactly one skip, this row declining to recurse, plus the floor
-        # rows where this machine has no Postgres: they start a server
-        # and never touch git. Any other skip means the rows that shell
-        # out to git did not run, and an index nothing touched would then
-        # prove nothing at all.
-        assert f"OK (skipped={expected_inner_skips()})" in run.stderr
+        assert run.returncode == 0, run.stdout + run.stderr
+        # The only skips are the floor rows where this machine has no
+        # Postgres: they start a server and never touch git. Any other
+        # skip means the rows that shell out to git did not run, and an
+        # index nothing touched would then prove nothing at all.
+        skips = expected_inner_skips()
+        counted = f", {skips} skipped" if skips else ""
+        summary = run.stdout.rstrip().splitlines()[-1]
+        assert re.match(rf"^\d+ passed{counted}, 1 deselected in ", summary), run.stdout
         assert before_files == after_files, "the shared index lost files"
         assert status == "", f"the linked worktree is dirty:\n{status}"
         assert before_digest == after_digest, "the shared index was rewritten"
@@ -1241,7 +1236,7 @@ class TestFloorTemplateShape:
         assert "@" not in fill(template, 180007, "18.7")
 
 
-@pytest.mark.usefixtures("_set_up_test_live_server")
+@pytest.mark.usefixtures("_live_server", "_set_up_test_live_server")
 class TestLiveServer:
     """A throwaway server from the gate's own Postgres, shared by the rows.
 
@@ -1251,16 +1246,17 @@ class TestLiveServer:
     # False where this machine has no Postgres: every row skips by name.
     running: ClassVar[bool] = False
     bindir: ClassVar[Path]
-    tmp: ClassVar[TemporaryDirectory[str]]
     data: ClassVar[Path]
     sock: ClassVar[Path]
     num: ClassVar[int]
     version: ClassVar[str]
 
-    @override
+    @pytest.fixture(scope="class")
     @classmethod
-    def setUpClass(cls) -> None:
-        """Start a throwaway server on a private socket, no TCP.
+    def _live_server(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
+        """Start a throwaway server on a private socket, no TCP; stop it after.
+
+        One per class that takes it, as each class's rows share it.
 
         Raises:
             AssertionError: on the gate's runner with no Postgres found,
@@ -1268,13 +1264,13 @@ class TestLiveServer:
 
         """
         if not (PG_BIN or ON_RUNNER):
+            yield
             return
         if PG_BIN is None:
             msg = "the gate's runner carries no /usr/lib/postgresql/*/bin"
             raise AssertionError(msg)
         cls.bindir = PG_BIN
-        cls.tmp = TemporaryDirectory()
-        tmp = Path(cls.tmp.name)
+        tmp = tmp_path_factory.mktemp("pg")
         cls.data = tmp / "data"
         cls.sock = tmp
         run = [str(cls.bindir / "initdb"), "-D", str(cls.data), "-A", "trust"]
@@ -1282,15 +1278,8 @@ class TestLiveServer:
         opts = f"-c listen_addresses= -k {cls.sock}"
         subprocess.run(
             [
-                str(cls.bindir / "pg_ctl"),
-                "-D",
-                str(cls.data),
-                "-o",
-                opts,
-                "-w",
-                "-l",
-                str(tmp / "log"),
-                "start",
+                *(str(cls.bindir / "pg_ctl"), "-D", str(cls.data), "-o", opts),
+                *("-w", "-l", str(tmp / "log"), "start"),
             ],
             check=True,
             capture_output=True,
@@ -1298,19 +1287,7 @@ class TestLiveServer:
         cls.num = int(cls.psql("SHOW server_version_num").stdout.strip())
         cls.version = cls.psql("SHOW server_version").stdout.strip()
         cls.running = True
-
-    @pytest.fixture
-    def _set_up_test_live_server(self) -> None:
-        """Skip the row where this machine has no Postgres to start."""
-        if not self.running:
-            pytest.skip("no Postgres on this machine")
-
-    @override
-    @classmethod
-    def tearDownClass(cls) -> None:
-        """Stop the server and drop its directory."""
-        if not cls.running:
-            return
+        yield
         subprocess.run(
             [
                 str(cls.bindir / "pg_ctl"),
@@ -1323,7 +1300,13 @@ class TestLiveServer:
             check=False,
             capture_output=True,
         )
-        cls.tmp.cleanup()
+        cls.running = False
+
+    @pytest.fixture
+    def _set_up_test_live_server(self) -> None:
+        """Skip the row where this machine has no Postgres to start."""
+        if not self.running:
+            pytest.skip("no Postgres on this machine")
 
     @classmethod
     def psql(cls, sql: str, *args: str) -> subprocess.CompletedProcess[str]:
@@ -1667,12 +1650,11 @@ def expected_inner_skips() -> int:
     """Count the skips a whole-suite run of this file owes (#857 row).
 
     Returns:
-        One for the row declining to recurse, plus every floor row
-        where this machine has no Postgres to start.
+        Every floor row where this machine has no Postgres to start.
 
     """
-    skips = 1
+    skips = 0
     if not (PG_BIN or ON_RUNNER):
         for live in (TestWarnsBelowTheFloor, TestSnapshotReadsTheCatalog):
-            skips += len(unittest.TestLoader().getTestCaseNames(live))
+            skips += sum(name.startswith("test_") for name in dir(live))
     return skips

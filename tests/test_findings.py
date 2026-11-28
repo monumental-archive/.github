@@ -23,15 +23,17 @@ message or the subject, is printed and recorded as its backslash
 escape, and the status is 0 (#1984).
 """
 
+import os
 import re
 import subprocess
 import sys
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 
-from belt import decoded
+from belt import decoded, findings
 from tests import support
 
 MISE = support.MISE
@@ -52,26 +54,30 @@ if [[ $entry == twice ]]; then
 fi
 """
 
-PYTHON_REPORTER = f"""import sys
-sys.path.insert(0, {str(MISE)!r})
-from belt import findings
-findings.finding(
-    sys.argv[2], sys.argv[3], sys.argv[4:], annotate=sys.argv[1] == "annotated"
-)
-if sys.argv[1] == "twice":
-    findings.finding(sys.argv[2], sys.argv[3], sys.argv[4:])
-"""
-
 JOB_FILE = re.compile(r"^mutants-rust-[0-9a-f]{16}\.jsonl$")
 
 AWKWARD = 'say "hi" \\ there\tnaïve ✓'
 
 
+@dataclass(frozen=True)
+class Ran:
+    """What one writer's run answered."""
+
+    returncode: int
+    stdout: str
+    stderr: str
+
+
 class Writer:
-    """One writer, run the way a task runs it."""
+    """One writer, run the way a task runs it.
+
+    The Python writer is belt Python, so it is called in this process
+    with the environment a task would give it; the shell writers are
+    started as the task starts them.
+    """
 
     def __init__(
-        self, name: str, interpreter: list[str], script: str, suffix: str
+        self, name: str, interpreter: list[str] | None, script: str, suffix: str
     ) -> None:
         """Hold the writer's interpreter and its reporter script."""
         self.name = name
@@ -84,22 +90,25 @@ class Writer:
         root: Path,
         entry: str,
         *args: str,
+        capfd: pytest.CaptureFixture[str],
         **env: str,
-    ) -> subprocess.CompletedProcess[str]:
+    ) -> Ran:
         """Run the reporter once.
 
         Returns:
-            The finished process.
+            Its status and both streams.
 
         """
         reporter = root / f"reporter{self.suffix}"
+        if self.interpreter is None:
+            return self.called(reporter, entry, args, env, capfd)
         reporter.write_text(self.script, encoding="utf-8")
         overrides = {"PYTHONUTF8": "1", **env}
         child = support.env(**overrides)
         for name in ("MISE_TASK_NAME", "ORG_FINDINGS"):
             if name not in env:
                 child.pop(name, None)
-        return subprocess.run(
+        done = subprocess.run(
             [*self.interpreter, str(reporter), entry, *args],
             capture_output=True,
             text=True,
@@ -108,6 +117,39 @@ class Writer:
             check=False,
             cwd=root,
         )
+        return Ran(done.returncode, done.stdout, done.stderr)
+
+    @staticmethod
+    def called(
+        reporter: Path,
+        entry: str,
+        args: tuple[str, ...],
+        env: dict[str, str],
+        capfd: pytest.CaptureFixture[str],
+    ) -> Ran:
+        """Call the Python writer as the shell reporter calls its own.
+
+        Returns:
+            Its status and both streams.
+
+        """
+        subject, message, *detail = args
+        with pytest.MonkeyPatch.context() as patched:
+            for name in ("MISE_TASK_NAME", "ORG_FINDINGS"):
+                if name not in env:
+                    patched.delenv(name, raising=False)
+            for name, value in env.items():
+                patched.setenv(name, value)
+            patched.chdir(reporter.parent)
+            # The running program's name, which a finding falls back to.
+            patched.setattr(sys, "argv", [str(reporter)])
+            # Each call is one process: its records file is drawn afresh.
+            patched.setattr(findings, "_drawn", [])
+            findings.finding(subject, message, detail, annotate=entry == "annotated")
+            if entry == "twice":
+                findings.finding(subject, message, detail)
+        out, err = capfd.readouterr()
+        return Ran(0, out, err)
 
 
 def writers() -> list[Writer]:
@@ -118,7 +160,7 @@ def writers() -> list[Writer]:
 
     """
     out = [
-        Writer("python", [sys.executable], PYTHON_REPORTER, ".py"),
+        Writer("python", None, "", ".py"),
         Writer("belt bash", [support.tool("bash")], SHELL_REPORTER, ".sh"),
     ]
     if SYSTEM_BASH.exists():
@@ -156,6 +198,8 @@ class TestFindingRows:
         message: str,
         detail: list[str],
         printed: str,
+        *,
+        capfd: pytest.CaptureFixture[str],
     ) -> None:
         """Run one finding and hold its printed form and its record."""
         done = writer.run(
@@ -166,6 +210,7 @@ class TestFindingRows:
             *detail,
             MISE_TASK_NAME="lint:demo",
             ORG_FINDINGS=str(self.file),
+            capfd=capfd,
         )
         assert done.returncode == 0, done.stderr
         assert done.stdout == ""
@@ -183,7 +228,9 @@ class TestFindingRows:
         assert self.file.read_text(encoding="utf-8").count("\n") == 1
 
     @pytest.mark.parametrize("writer", writers())
-    def test_a_finding_with_a_subject(self, writer: object) -> None:
+    def test_a_finding_with_a_subject(
+        self, writer: object, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """The form is `<task>: <subject>: <message>`."""
         self.file.unlink(missing_ok=True)
         self.found(
@@ -192,10 +239,13 @@ class TestFindingRows:
             "a pin is loose",
             [],
             "lint:demo: Cargo.toml: a pin is loose\n",
+            capfd=capfd,
         )
 
     @pytest.mark.parametrize("writer", writers())
-    def test_a_finding_without_a_subject(self, writer: object) -> None:
+    def test_a_finding_without_a_subject(
+        self, writer: object, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """An empty subject leaves `<task>: <message>`, and is recorded empty."""
         self.file.unlink(missing_ok=True)
         self.found(
@@ -204,10 +254,13 @@ class TestFindingRows:
             "nothing is tracked",
             [],
             "lint:demo: nothing is tracked\n",
+            capfd=capfd,
         )
 
     @pytest.mark.parametrize("writer", writers())
-    def test_two_detail_lines_are_indented_two_spaces(self, writer: object) -> None:
+    def test_two_detail_lines_are_indented_two_spaces(
+        self, writer: object, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Each detail line follows the first, indented two spaces."""
         self.file.unlink(missing_ok=True)
         self.found(
@@ -218,11 +271,12 @@ class TestFindingRows:
             "lint:demo: chrono@0.4.45: RUSTSEC-2026-0543 is undecided\n"
             "  reached through object_store 0.14.2\n"
             "  and through arrow 57.0.0\n",
+            capfd=capfd,
         )
 
     @pytest.mark.parametrize("writer", writers())
     def test_a_quote_a_backslash_a_tab_and_non_ascii_survive(
-        self, writer: object
+        self, writer: object, capfd: pytest.CaptureFixture[str]
     ) -> None:
         """The record reads back to the same characters the call was given."""
         self.file.unlink(missing_ok=True)
@@ -232,18 +286,25 @@ class TestFindingRows:
             AWKWARD,
             [AWKWARD],
             f"lint:demo: a\tb: {AWKWARD}\n  {AWKWARD}\n",
+            capfd=capfd,
         )
 
     @pytest.mark.parametrize("writer", writers())
-    def test_unset_records_nothing(self, writer: object) -> None:
+    def test_unset_records_nothing(
+        self, writer: object, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Without ORG_FINDINGS the finding is printed and nothing is written."""
-        done = writer.run(self.root, "plain", "x", "y", MISE_TASK_NAME="lint:demo")
+        done = writer.run(
+            self.root, "plain", "x", "y", MISE_TASK_NAME="lint:demo", capfd=capfd
+        )
         assert done.returncode == 0, done.stderr
         assert done.stderr == "lint:demo: x: y\n"
         assert not any(self.root.rglob("*.jsonl"))
 
     @pytest.mark.parametrize("writer", writers())
-    def test_empty_records_nothing(self, writer: object) -> None:
+    def test_empty_records_nothing(
+        self, writer: object, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """An empty ORG_FINDINGS records nothing, on a runner too."""
         done = writer.run(
             self.root,
@@ -254,13 +315,16 @@ class TestFindingRows:
             ORG_FINDINGS="",
             RUNNER_TEMP=str(self.root / "runner"),
             GITHUB_JOB="mutants-rust",
+            capfd=capfd,
         )
         assert done.returncode == 0, done.stderr
         assert done.stderr == "lint:demo: x: y\n"
         assert not any(self.root.rglob("*.jsonl"))
 
     @pytest.mark.parametrize("writer", writers())
-    def test_a_failed_append_is_said_and_is_not_fatal(self, writer: object) -> None:
+    def test_a_failed_append_is_said_and_is_not_fatal(
+        self, writer: object, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A path under a file: printed, one more line names it, status 0."""
         blocker = self.root / "a-file"
         blocker.write_text("", encoding="utf-8")
@@ -273,6 +337,7 @@ class TestFindingRows:
             "z",
             MISE_TASK_NAME="lint:demo",
             ORG_FINDINGS=str(target),
+            capfd=capfd,
         )
         assert done.returncode == 0, done.stderr
         lines = done.stderr.splitlines()
@@ -286,7 +351,7 @@ class TestFindingRows:
 
     @pytest.mark.parametrize("writer", writers())
     def test_the_annotated_entry_escapes_as_the_runner_reads(
-        self, writer: object
+        self, writer: object, capfd: pytest.CaptureFixture[str]
     ) -> None:
         """`::error::`, with `%`, CR and LF escaped; the record is the same."""
         message = "50% done\nnext"
@@ -299,15 +364,20 @@ class TestFindingRows:
             "one detail",
             MISE_TASK_NAME="lint:demo",
             ORG_FINDINGS=str(self.file),
+            capfd=capfd,
         )
         assert done.returncode == 0, done.stderr
         assert done.stderr == "::error::lint:demo: s: 50%25 done%0Anext\n  one detail\n"
         assert self.records()[0]["message"] == message
 
     @pytest.mark.parametrize("writer", writers())
-    def test_a_plain_line_cannot_open_a_command(self, writer: object) -> None:
+    def test_a_plain_line_cannot_open_a_command(
+        self, writer: object, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A message of a newline and a command prints one line, the command escaped."""
-        done = writer.run(self.root, "plain", "", "x\n::error::forged", "::warning::w")
+        done = writer.run(
+            self.root, "plain", "", "x\n::error::forged", "::warning::w", capfd=capfd
+        )
         assert done.returncode == 0, done.stderr
         lines = done.stderr.splitlines()
         assert len(lines) == 2, done.stderr
@@ -315,7 +385,9 @@ class TestFindingRows:
         assert lines[1] == "  \\::warning::w"
 
     @pytest.mark.parametrize("writer", writers())
-    def test_the_task_is_mise_s_name_when_set(self, writer: object) -> None:
+    def test_the_task_is_mise_s_name_when_set(
+        self, writer: object, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """MISE_TASK_NAME names the task in the line and the record."""
         self.file.unlink(missing_ok=True)
         done = writer.run(
@@ -325,21 +397,28 @@ class TestFindingRows:
             "m",
             MISE_TASK_NAME="audit:deny",
             ORG_FINDINGS=str(self.file),
+            capfd=capfd,
         )
         assert done.stderr == "audit:deny: s: m\n"
         assert self.records()[0]["task"] == "audit:deny"
 
     @pytest.mark.parametrize("writer", writers())
-    def test_the_task_is_the_script_s_name_when_unset(self, writer: object) -> None:
+    def test_the_task_is_the_script_s_name_when_unset(
+        self, writer: object, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Where mise named no task, the running script's file name does."""
         self.file.unlink(missing_ok=True)
         name = f"reporter{writer.suffix}"
-        done = writer.run(self.root, "plain", "s", "m", ORG_FINDINGS=str(self.file))
+        done = writer.run(
+            self.root, "plain", "s", "m", ORG_FINDINGS=str(self.file), capfd=capfd
+        )
         assert done.stderr == f"{name}: s: m\n"
         assert self.records()[0]["task"] == name
 
     @pytest.mark.parametrize("writer", writers())
-    def test_a_step_script_s_finding_names_the_job(self, writer: object) -> None:
+    def test_a_step_script_s_finding_names_the_job(
+        self, writer: object, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """The runner's step script, directly under RUNNER_TEMP: GITHUB_JOB."""
         self.file.unlink(missing_ok=True)
         done = writer.run(
@@ -350,11 +429,14 @@ class TestFindingRows:
             ORG_FINDINGS=str(self.file),
             RUNNER_TEMP=str(self.root),
             GITHUB_JOB="attach",
+            capfd=capfd,
         )
         assert done.stderr == "attach: s: m\n"
         assert self.records()[0]["task"] == "attach"
 
-    def test_a_script_elsewhere_keeps_its_name_in_a_job(self) -> None:
+    def test_a_script_elsewhere_keeps_its_name_in_a_job(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Not directly under RUNNER_TEMP, or no job: the script's name."""
         cases = {
             "elsewhere": {"RUNNER_TEMP": "/elsewhere", "GITHUB_JOB": "attach"},
@@ -375,12 +457,15 @@ class TestFindingRows:
                     "m",
                     ORG_FINDINGS=str(self.file),
                     **planted,
+                    capfd=capfd,
                 )
                 assert done.stderr == f"{name}: s: m\n"
                 assert self.records()[0]["task"] == name
 
     @pytest.mark.parametrize("writer", writers())
-    def test_findings_append(self, writer: object) -> None:
+    def test_findings_append(
+        self, writer: object, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A second finding is a second line of the same file."""
         self.file.unlink(missing_ok=True)
         for message in ("one", "two"):
@@ -391,6 +476,7 @@ class TestFindingRows:
                 message,
                 MISE_TASK_NAME="t",
                 ORG_FINDINGS=str(self.file),
+                capfd=capfd,
             )
         messages: list[object] = [r["message"] for r in self.records()]
         expected: list[object] = ["one", "two"]
@@ -432,7 +518,9 @@ class TestRunnerRows:
         """Give each row a directory of its own."""
         self.root = Path(str(tmp_path))
 
-    def on_a_runner(self, writer: Writer, entry: str) -> list[Path]:
+    def on_a_runner(
+        self, writer: Writer, entry: str, *, capfd: pytest.CaptureFixture[str]
+    ) -> list[Path]:
         """Run one call as a job's step does, ORG_FINDINGS unset (#1976).
 
         Returns:
@@ -452,6 +540,7 @@ class TestRunnerRows:
             MISE_TASK_NAME="lint:demo",
             RUNNER_TEMP=str(temp),
             GITHUB_JOB="mutants-rust",
+            capfd=capfd,
         )
         assert done.returncode == 0, done.stderr
         files = sorted(p for p in temp.rglob("*") if p.is_file())
@@ -461,9 +550,11 @@ class TestRunnerRows:
         return files
 
     @pytest.mark.parametrize("writer", writers())
-    def test_on_a_runner_the_writer_names_the_file(self, writer: object) -> None:
+    def test_on_a_runner_the_writer_names_the_file(
+        self, writer: object, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Unset on a runner: one record in findings/<job>-<16 hex>.jsonl."""
-        files = self.on_a_runner(writer, "plain")
+        files = self.on_a_runner(writer, "plain", capfd=capfd)
         assert len(files) == 1, files
         expected: list[dict[str, object]] = [
             {
@@ -477,16 +568,20 @@ class TestRunnerRows:
         assert records(files[0]) == expected
 
     @pytest.mark.parametrize("writer", writers())
-    def test_one_process_writes_one_file(self, writer: object) -> None:
+    def test_one_process_writes_one_file(
+        self, writer: object, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Two findings of one process land in one file, in order."""
-        files = self.on_a_runner(writer, "twice")
+        files = self.on_a_runner(writer, "twice", capfd=capfd)
         assert len(files) == 1, files
         assert len(records(files[0])) == 2
 
     @pytest.mark.parametrize("writer", writers())
-    def test_two_processes_write_two_files(self, writer: object) -> None:
+    def test_two_processes_write_two_files(
+        self, writer: object, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Two legs of one matrix share GITHUB_JOB and never a file."""
-        first = self.on_a_runner(writer, "plain")
+        first = self.on_a_runner(writer, "plain", capfd=capfd)
         temp = self.root / "runner"
         done = writer.run(
             self.root,
@@ -496,6 +591,7 @@ class TestRunnerRows:
             MISE_TASK_NAME="lint:demo",
             RUNNER_TEMP=str(temp),
             GITHUB_JOB="mutants-rust",
+            capfd=capfd,
         )
         assert done.returncode == 0, done.stderr
         both = sorted(temp.rglob("*.jsonl"))
@@ -637,35 +733,21 @@ class TestLinesRows:
         assert done.stderr == "lint:demo: last\n"
 
 
-UNENCODABLE = f"""import os
-import sys
-sys.path.insert(0, {str(MISE)!r})
-from belt import findings
-findings.finding(os.fsdecode(b"bad\\xffname"), "x\\ud800y")
-"""
-
-
 class TestUnencodableRows:
     """A lone surrogate is recorded as its backslash escape (#1984)."""
 
-    def test_a_lone_surrogate_is_recorded_as_printed(self) -> None:
+    def test_a_lone_surrogate_is_recorded_as_printed(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Exit 0, one record json.loads reads, the stderr line the same text."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             file = root / "out" / "job.jsonl"
-            reporter = root / "reporter.py"
-            reporter.write_text(UNENCODABLE, encoding="utf-8")
-            done = subprocess.run(
-                [sys.executable, str(reporter)],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                env=support.env(
-                    MISE_TASK_NAME="t", ORG_FINDINGS=str(file), PYTHONUTF8="1"
-                ),
-                check=False,
-                cwd=root,
-            )
+            with pytest.MonkeyPatch.context() as patched:
+                patched.setenv("MISE_TASK_NAME", "t")
+                patched.setenv("ORG_FINDINGS", str(file))
+                findings.finding(os.fsdecode(b"bad\xffname"), "x\ud800y")
+            done = Ran(0, *capfd.readouterr())
             assert done.returncode == 0, done.stderr
             lines = file.read_text(encoding="utf-8").splitlines()
             assert len(lines) == 1

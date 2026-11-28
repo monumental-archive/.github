@@ -420,7 +420,10 @@ class Zenodo:
         except typed_std.NotAResponseError as e:
             raise RefusedError(str(e)) from None
         except urllib.error.HTTPError as e:
-            return e.code, e.read()
+            # The error is the response: read it, then close it, or its
+            # socket is left for the collector.
+            with e:
+                return e.code, e.read()
         except (urllib.error.URLError, OSError) as e:
             reason = e.reason if isinstance(e, urllib.error.URLError) else e
             raise HttpError(method, url, str(reason)) from e

@@ -92,14 +92,12 @@ PUT, so its `rights` holds one id - the state the helper must repair.
 from __future__ import annotations
 
 import base64
-import contextlib
 import copy
 import functools
 import http.client
 import io
 import json
 import os
-import subprocess
 import sys
 import threading
 import urllib.request
@@ -123,7 +121,7 @@ CANON = support.CANON
 Doc = dict[str, object]
 # An empty list, whatever it would hold: requests, writes, entries.
 NOTHING: list[object] = []
-HELPER = CANON / "release" / "mint_doi.py"
+COMMAND = "mint-doi"
 TESTDATA = Path(__file__).resolve().parent / "testdata"
 DRAFT = TESTDATA / "zenodo-rdm-draft.json"
 CANON_LATEST = TESTDATA / "zenodo-canon-latest.json"
@@ -617,9 +615,9 @@ def run_helper(  # ruff: ignore[too-many-arguments] - one knob per row family
     repo: str = "monumental-archive/edtf",
     cff: str | None = None,
     cff_status: int = 0,
-    script: bool = False,
+    capfd: pytest.CaptureFixture[str],
 ) -> Run:
-    """Run the helper with CITATION.cff stating `licence`.
+    """Call the helper with CITATION.cff stating `licence`, both streams read as one.
 
     Args:
         licence: the `license:` line's value.
@@ -633,8 +631,6 @@ def run_helper(  # ruff: ignore[too-many-arguments] - one knob per row family
         repo: the repository releasing.
         cff: the whole CITATION.cff, overriding `licence` and `concept`.
         cff_status: gh's exit status on the CITATION.cff read.
-        script: start the helper as the step does, rather than call its
-            `main` in this process; its two streams are read as one.
 
     Returns:
         The run's status, output and the fake's request log.
@@ -666,31 +662,15 @@ def run_helper(  # ruff: ignore[too-many-arguments] - one knob per row family
             STUB_CFF_B64=str(b64),
             STUB_CFF_STATUS=str(cff_status),
         )
-        out = io.StringIO()
-        if script:
-            done = subprocess.run(
-                [sys.executable, str(HELPER), "--pipeline", PIPELINE],
-                env=env,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                check=False,
-                timeout=60,
-            )
-            code = done.returncode
-            out.write(done.stdout)
-        else:
-            with (
-                pytest.MonkeyPatch.context() as patched,
-                contextlib.redirect_stdout(out),
-                contextlib.redirect_stderr(out),
-            ):
-                patched.setattr(mint_doi, "pause", pauses.append)
-                code = mint_doi.main(["--pipeline", PIPELINE], env)
+        with pytest.MonkeyPatch.context() as patched:
+            patched.setattr(sys, "argv", [COMMAND])
+            patched.setattr(mint_doi, "pause", pauses.append)
+            code = mint_doi.main(["--pipeline", PIPELINE], env)
+        out, err = capfd.readouterr()
         text = summary.read_text() if summary.exists() else ""
     return Run(
         code,
-        out.getvalue(),
+        out + err,
         list(z.log),
         [b.decode(errors="replace") for b in z.bodies],
         pauses,
@@ -721,28 +701,21 @@ class TestTheFixturesAreTheRealShapes:
         assert "family-names:" in text
 
 
+@pytest.mark.usefixtures("_run")
 class TestOneId:
     """`0BSD` -> one id, through the legacy deposit alone, as before."""
 
     run_: Run
 
-    @override
-    @classmethod
-    def setUpClass(cls) -> None:
-        """Run the helper once for every row of the class."""
-        cls.run_ = run_helper("0BSD")
+    @pytest.fixture
+    def _run(self, capfd: pytest.CaptureFixture[str]) -> None:
+        """Run the helper for the row."""
+        self.run_ = run_helper("0BSD", capfd=capfd)
 
     def test_it_publishes(self) -> None:
         """The helper exits green with the stub's DOI."""
         assert self.run_.returncode == 0, self.run_.stdout
         assert "DOI 10.5281/zenodo.101" in self.run_.stdout
-
-    def test_the_script_mints_as_the_step_runs_it(self) -> None:
-        """The script row (#1698): started as the step starts it, same answer."""
-        run = run_helper("0BSD", script=True)
-        assert run.returncode == 0, run.stdout
-        assert "DOI 10.5281/zenodo.101" in run.stdout
-        assert run.requests == self.run_.requests
 
     def test_the_vocabulary_is_asked_for_the_one_id(self) -> None:
         """The vocabulary is asked for exactly the one id."""
@@ -763,16 +736,16 @@ class TestOneId:
         assert "Licensed under" not in description
 
 
+@pytest.mark.usefixtures("_run")
 class TestTwoIds:
     """`MIT OR Apache-2.0` -> both ids on the record, the sentence quoted."""
 
     run_: Run
 
-    @override
-    @classmethod
-    def setUpClass(cls) -> None:
-        """Run the helper once for every row of the class."""
-        cls.run_ = run_helper("MIT OR Apache-2.0")
+    @pytest.fixture
+    def _run(self, capfd: pytest.CaptureFixture[str]) -> None:
+        """Run the helper for the row."""
+        self.run_ = run_helper("MIT OR Apache-2.0", capfd=capfd)
 
     def test_it_publishes(self) -> None:
         """The helper exits green with the stub's DOI."""
@@ -832,9 +805,9 @@ class TestTwoIds:
         assert reads[0][2] == RDM
         assert self.run_.requests.index(reads[0]) > publish
 
-    def test_and_takes_the_same_path(self) -> None:
+    def test_and_takes_the_same_path(self, capfd: pytest.CaptureFixture[str]) -> None:
         """AND is accepted and quoted the same way as OR."""
-        run = run_helper("MIT AND Apache-2.0")
+        run = run_helper("MIT AND Apache-2.0", capfd=capfd)
         assert run.returncode == 0, run.stdout
         assert (
             "Licensed under the SPDX expression MIT AND Apache-2.0,"
@@ -853,18 +826,22 @@ SHORT = (
 class TestThePublishedRecord:
     """The published record is verified; it cannot be unpublished."""
 
-    def test_a_published_record_with_one_id_is_red_by_name(self) -> None:
+    def test_a_published_record_with_one_id_is_red_by_name(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Publish kept one of two ids: red, naming the DOI."""
-        run = run_helper("MIT OR Apache-2.0", published="one")
+        run = run_helper("MIT OR Apache-2.0", published="one", capfd=capfd)
         assert run.returncode == 1, run.stdout
         assert SHORT in run.stdout
         assert (
             len(run.made("POST", "/api/deposit/depositions/101/actions/publish")) == 1
         )
 
-    def test_a_read_that_fails_is_unverified_never_a_pass(self) -> None:
+    def test_a_read_that_fails_is_unverified_never_a_pass(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A published record that cannot be read is red as unverified."""
-        run = run_helper("MIT OR Apache-2.0", published="fail")
+        run = run_helper("MIT OR Apache-2.0", published="fail", capfd=capfd)
         assert run.returncode == 1, run.stdout
         assert (
             "::error::mint-doi: the published record 101 could not be read back —"
@@ -873,28 +850,37 @@ class TestThePublishedRecord:
         ) in run.stdout
         assert "::notice::DOI" not in run.stdout
 
-    def test_a_rerun_over_a_published_record_with_one_id_is_red(self) -> None:
+    def test_a_rerun_over_a_published_record_with_one_id_is_red(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """The #484 convergence path reaches the same check."""
         run = run_helper(
-            "MIT OR Apache-2.0", published="one", concept="10.5281/zenodo.100"
+            "MIT OR Apache-2.0",
+            published="one",
+            concept="10.5281/zenodo.100",
+            capfd=capfd,
         )
         assert run.returncode == 1, run.stdout
         assert SHORT in run.stdout
         assert run.made("POST", "/api/deposit/depositions") == NOTHING
         assert len(run.published_reads()) == 1
 
-    def test_a_rerun_over_a_published_record_with_both_is_green(self) -> None:
+    def test_a_rerun_over_a_published_record_with_both_is_green(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A rerun over a complete record converges green."""
-        run = run_helper("MIT OR Apache-2.0", concept="10.5281/zenodo.100")
+        run = run_helper("MIT OR Apache-2.0", concept="10.5281/zenodo.100", capfd=capfd)
         assert run.returncode == 0, run.stdout
         assert "::notice::DOI 10.5281/zenodo.101" in run.stdout
         assert run.made("POST", "/api/deposit/depositions") == NOTHING
         assert len(run.published_reads()) == 1
 
-    def test_one_id_never_reads_the_published_record(self) -> None:
+    def test_one_id_never_reads_the_published_record(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """0BSD, fresh or rerun: no published read, whatever it would say."""
         for concept in (None, "10.5281/zenodo.100"):
-            run = run_helper("0BSD", published="fail", concept=concept)
+            run = run_helper("0BSD", published="fail", concept=concept, capfd=capfd)
             assert run.returncode == 0, run.stdout
             assert run.published_reads() == NOTHING
 
@@ -908,31 +894,38 @@ class TestRefusals:
         assert message in run.stdout
         assert run.made("POST", "/api/deposit/depositions") == NOTHING
 
-    def test_with_is_refused_by_name(self) -> None:
+    def test_with_is_refused_by_name(self, capfd: pytest.CaptureFixture[str]) -> None:
         """WITH refuses, naming the operator."""
         self.assert_refused(
-            run_helper("GPL-2.0-only WITH Classpath-exception-2.0"),
+            run_helper("GPL-2.0-only WITH Classpath-exception-2.0", capfd=capfd),
             "::error::mint-doi: CITATION.cff license 'GPL-2.0-only WITH"
             " Classpath-exception-2.0'"
             " joins ids with 'WITH'",
         )
 
-    def test_parentheses_are_refused_by_name(self) -> None:
+    def test_parentheses_are_refused_by_name(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Parentheses refuse by name."""
         self.assert_refused(
-            run_helper("(MIT OR Apache-2.0)"),
+            run_helper("(MIT OR Apache-2.0)", capfd=capfd),
             "license '(MIT OR Apache-2.0)' uses parentheses",
         )
 
-    def test_a_dangling_operator_is_refused(self) -> None:
+    def test_a_dangling_operator_is_refused(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """An expression ending in an operator refuses."""
         self.assert_refused(
-            run_helper("MIT OR"), "license 'MIT OR' is not a complete expression"
+            run_helper("MIT OR", capfd=capfd),
+            "license 'MIT OR' is not a complete expression",
         )
 
-    def test_an_id_absent_from_the_vocabulary_is_refused_naming_it(self) -> None:
+    def test_an_id_absent_from_the_vocabulary_is_refused_naming_it(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """An id the vocabulary 404s refuses, naming it."""
-        run = run_helper("MIT OR Not-A-Licence")
+        run = run_helper("MIT OR Not-A-Licence", capfd=capfd)
         self.assert_refused(
             run,
             "::error::mint-doi: licence id 'not-a-licence' (from CITATION.cff"
@@ -940,9 +933,11 @@ class TestRefusals:
         )
         assert len(run.made("GET", "/api/vocabularies/licenses/")) == 2
 
-    def test_a_read_back_missing_an_id_never_publishes(self) -> None:
+    def test_a_read_back_missing_an_id_never_publishes(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A read-back short of an id refuses before the publish."""
-        run = run_helper("MIT OR Apache-2.0", collapse=True)
+        run = run_helper("MIT OR Apache-2.0", collapse=True, capfd=capfd)
         assert run.returncode == 1, run.stdout
         assert 'the draft\'s licences read back as ["mit"]' in run.stdout
         assert (
@@ -1033,7 +1028,13 @@ def canon_zenodo(**kw: object) -> Zenodo:
     return z
 
 
-def canon_run(z: Zenodo, licence: str = "0BSD", version: str = "1.68.5") -> Run:
+def canon_run(
+    z: Zenodo,
+    licence: str = "0BSD",
+    version: str = "1.68.5",
+    *,
+    capfd: pytest.CaptureFixture[str],
+) -> Run:
     """Run the canon's release of `version` against `z`.
 
     Returns:
@@ -1046,6 +1047,7 @@ def canon_run(z: Zenodo, licence: str = "0BSD", version: str = "1.68.5") -> Run:
         zenodo=z,
         version=version,
         repo=CANON_REPO,
+        capfd=capfd,
     )
 
 
@@ -1198,9 +1200,11 @@ class TestTheRecordedResponses:
 class TestAlreadyPublished:
     """#484: a rerun over a published version converges, writing nothing."""
 
-    def test_the_canon_converges_on_its_recorded_record(self) -> None:
+    def test_the_canon_converges_on_its_recorded_record(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """The canon's own concept at v1.68.4: green, no write, no read-back."""
-        run = canon_run(canon_zenodo(), version="1.68.4")
+        run = canon_run(canon_zenodo(), version="1.68.4", capfd=capfd)
         assert run.returncode == 0, run.stdout
         assert (
             f"::notice::DOI 10.5281/zenodo.{CANON_PREV} (concept"
@@ -1212,13 +1216,16 @@ class TestAlreadyPublished:
         assert run.published_reads(CANON_PREV) == last
         assert run.requests[-1][2] == ""
 
-    def test_edtf_converges_after_verifying_both_licences(self) -> None:
+    def test_edtf_converges_after_verifying_both_licences(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Edtf at v1.3.5: green, its record's licences read, no write."""
         run = run_helper(
             "MIT OR Apache-2.0",
             concept=f"10.5281/zenodo.{EDTF_CONCEPT}",
             zenodo=edtf_zenodo(),
             version="1.3.5",
+            capfd=capfd,
         )
         assert run.returncode == 0, run.stdout
         assert f"::notice::DOI 10.5281/zenodo.{EDTF_PREV}" in run.stdout
@@ -1227,16 +1234,16 @@ class TestAlreadyPublished:
         assert ("GET", f"{ORIGIN}/api/records/{EDTF_PREV}", RDM) in run.requests
 
 
+@pytest.mark.usefixtures("_run")
 class TestALaterMint:
     """The canon's v1.68.5 grows from v1.68.4 on the captured answers."""
 
     run_: Run
 
-    @override
-    @classmethod
-    def setUpClass(cls) -> None:
-        """Run the helper once for every row of the class."""
-        cls.run_ = canon_run(canon_zenodo())
+    @pytest.fixture
+    def _run(self, capfd: pytest.CaptureFixture[str]) -> None:
+        """Run the helper for the row."""
+        self.run_ = canon_run(canon_zenodo(), capfd=capfd)
 
     def test_it_publishes_the_new_version(self) -> None:
         """Green through the concept's redirect, with the new DOI (#337)."""
@@ -1305,7 +1312,9 @@ class TestALaterMint:
         creators: list[object] = [{"name": "Allen, Carl"}]
         assert meta["creators"] == creators
 
-    def test_two_licences_go_on_the_new_draft(self) -> None:
+    def test_two_licences_go_on_the_new_draft(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A later mint with two ids sets the rights on the captured draft."""
         z = canon_zenodo(
             records={
@@ -1314,7 +1323,7 @@ class TestALaterMint:
             }
         )
         z.records[f"plain/{CANON_DRAFT}"] = z.published_record
-        run = canon_run(z, licence="MIT OR Apache-2.0")
+        run = canon_run(z, licence="MIT OR Apache-2.0", capfd=capfd)
         assert run.returncode == 0, run.stdout
         (put,) = run.made("PUT", f"/api/records/{CANON_DRAFT}/draft")
         (publish,) = run.made("POST", f"{DEP}/{CANON_DRAFT}/actions/publish")
@@ -1327,22 +1336,26 @@ class TestALaterMint:
 class TestStaleDrafts:
     """Only an unsubmitted draft under the concept is deleted (C2, C5)."""
 
-    def test_the_published_record_in_the_draft_listing_is_kept(self) -> None:
+    def test_the_published_record_in_the_draft_listing_is_kept(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """C2 as captured lists v1.68.4 itself: nothing but the old file goes."""
-        run = canon_run(canon_zenodo())
+        run = canon_run(canon_zenodo(), capfd=capfd)
         assert run.returncode == 0, run.stdout
         assert "deleting stale" not in run.stdout
         deleted = [r[1] for r in run.requests if r[0] == "DELETE"]
         assert deleted == strings(f"{ORIGIN}{DEP}/{CANON_DRAFT}/files/{INHERITED}")
 
-    def test_a_stale_draft_is_deleted_before_newversion(self) -> None:
+    def test_a_stale_draft_is_deleted_before_newversion(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """C5 as captured holds an interrupted run's draft: it goes first.
 
         The captured newversion then answers the same id again; the fake
         does not model Zenodo minting a fresh one.
         """
         z = canon_zenodo(drafts=captured("drafts-during"))
-        run = canon_run(z)
+        run = canon_run(z, capfd=capfd)
         assert run.returncode == 0, run.stdout
         assert (
             f"::notice::deleting stale unpublished draft {z.base}{DEP}/{CANON_DRAFT}"
@@ -1356,12 +1369,14 @@ class TestStaleDrafts:
         (newv,) = run.made("POST", f"{DEP}/{CANON_PREV}/actions/newversion")
         assert stale < newv
 
-    def test_both_together_delete_only_the_draft(self) -> None:
+    def test_both_together_delete_only_the_draft(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """C2 and C5 in one listing: the published record is never touched."""
         z = canon_zenodo(
             drafts=[*captured_list("drafts-before"), *captured_list("drafts-during")]
         )
-        run = canon_run(z)
+        run = canon_run(z, capfd=capfd)
         assert run.returncode == 0, run.stdout
         deleted = [r[1] for r in run.requests if r[0] == "DELETE"]
         assert deleted == strings(
@@ -1375,9 +1390,11 @@ class TestStaleDrafts:
 class TestLostPublishResponse:
     """#484: the truth after a failed publish is the archive's state."""
 
-    def test_a_lost_response_over_a_landed_publish_is_recovered(self) -> None:
+    def test_a_lost_response_over_a_landed_publish_is_recovered(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """The connection drops, the record landed: green, 20 s spacing."""
-        run = canon_run(canon_zenodo(publish="drop", appear_after=1))
+        run = canon_run(canon_zenodo(publish="drop", appear_after=1), capfd=capfd)
         assert run.returncode == 0, run.stdout
         assert f"::notice::DOI 10.5281/zenodo.{CANON_DRAFT}" in run.stdout
         assert "**Published despite a lost response**" in run.summary
@@ -1387,9 +1404,11 @@ class TestLostPublishResponse:
         latest = run.made("GET", f"/api/records/{CANON_CONCEPT}/versions/latest")
         assert len([i for i in latest if i > publish]) == 2
 
-    def test_a_failed_publish_that_never_lands_is_red(self) -> None:
+    def test_a_failed_publish_that_never_lands_is_red(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Nothing published: three reads, 20 s apart, then red by name."""
-        run = canon_run(canon_zenodo(publish="fail"))
+        run = canon_run(canon_zenodo(publish="fail"), capfd=capfd)
         assert run.returncode == 1, run.stdout
         assert (
             "::error::mint-doi: publish failed and the concept's latest published"
@@ -1456,7 +1475,7 @@ class TestFirstMintGuards:
     """The refusals before any deposit exists."""
 
     def test_the_canons_first_mint_is_refused_on_the_measured_answers(
-        self,
+        self, capfd: pytest.CaptureFixture[str]
     ) -> None:
         """#1389's fail-before test: the canon's title, as production answers.
 
@@ -1467,7 +1486,9 @@ class TestFirstMintGuards:
         """
         z = first_mint_zenodo([])
         z.titles_by_query = measured_titles()
-        run = run_helper("0BSD", zenodo=z, version="1.68.5", repo=CANON_REPO)
+        run = run_helper(
+            "0BSD", zenodo=z, version="1.68.5", repo=CANON_REPO, capfd=capfd
+        )
         assert run.returncode == 1, run.stdout
         assert (
             "::error::mint-doi: a submitted deposition already bears this title but"
@@ -1481,12 +1502,18 @@ class TestFirstMintGuards:
             == f"{ORIGIN}{DEP}?q=title:%22monumental-archive%2F.github%22&size=100&page=1"
         )
 
-    def test_a_title_with_no_dot_is_refused_on_the_measured_answers(self) -> None:
+    def test_a_title_with_no_dot_is_refused_on_the_measured_answers(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Edtf's title: M4 holds its submitted record, so a first mint refuses."""
         z = first_mint_zenodo([])
         z.titles_by_query = measured_titles()
         run = run_helper(
-            "0BSD", zenodo=z, version="1.3.6", repo="monumental-archive/edtf"
+            "0BSD",
+            zenodo=z,
+            version="1.3.6",
+            repo="monumental-archive/edtf",
+            capfd=capfd,
         )
         assert run.returncode == 1, run.stdout
         assert (
@@ -1495,27 +1522,35 @@ class TestFirstMintGuards:
         )
         assert run.writes() == NOTHING
 
-    def test_the_old_query_answer_could_never_refuse(self) -> None:
+    def test_the_old_query_answer_could_never_refuse(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """M1, what `title:".github"` answered: nothing, so a mint went on."""
         run = run_helper("0BSD", zenodo=first_mint_zenodo(measured("present-github")),
-                         version="1.68.5", repo=CANON_REPO)  # fmt: skip
+                         version="1.68.5", repo=CANON_REPO, capfd=capfd)  # fmt: skip
         assert run.returncode == 0, run.stdout
         assert "**First mint**" in run.summary
         assert len(run.made("POST", DEP)) == 2
 
-    def test_an_unsubmitted_title_alone_does_not_refuse(self) -> None:
+    def test_an_unsubmitted_title_alone_does_not_refuse(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """C5, the captured unsubmitted draft of the title: the mint goes on."""
         run = run_helper("0BSD", zenodo=first_mint_zenodo(captured("drafts-during")),
-                         version="1.68.5", repo=CANON_REPO)  # fmt: skip
+                         version="1.68.5", repo=CANON_REPO, capfd=capfd)  # fmt: skip
         assert run.returncode == 0, run.stdout
         assert "**First mint**" in run.summary
 
-    def test_a_title_on_a_later_page_refuses(self) -> None:
+    def test_a_title_on_a_later_page_refuses(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Page 1 full of unsubmitted drafts, the minted title on page 2."""
         (draft,) = captured_list("drafts-during")
         z = first_mint_zenodo([])
         z.title_pages = [[draft] * mint_doi.LISTING_PAGE, captured("drafts-before")]
-        run = run_helper("0BSD", zenodo=z, version="1.68.5", repo=CANON_REPO)
+        run = run_helper(
+            "0BSD", zenodo=z, version="1.68.5", repo=CANON_REPO, capfd=capfd
+        )
         assert run.returncode == 1, run.stdout
         assert (
             "::error::mint-doi: a submitted deposition already bears this title"
@@ -1524,12 +1559,16 @@ class TestFirstMintGuards:
         assert len(run.made("GET", f"{DEP}?q=title")) == 2
         assert run.writes() == NOTHING
 
-    def test_a_listing_page_that_cannot_be_read_refuses(self) -> None:
+    def test_a_listing_page_that_cannot_be_read_refuses(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Page 2 answers 503 on every try: refused, nothing created."""
         (draft,) = captured_list("drafts-during")
         z = first_mint_zenodo([])
         z.title_pages = [[draft] * mint_doi.LISTING_PAGE, 503]
-        run = run_helper("0BSD", zenodo=z, version="1.68.5", repo=CANON_REPO)
+        run = run_helper(
+            "0BSD", zenodo=z, version="1.68.5", repo=CANON_REPO, capfd=capfd
+        )
         assert run.returncode == 1, run.stdout
         assert (
             "::error::mint-doi: the deposition listing"
@@ -1539,14 +1578,18 @@ class TestFirstMintGuards:
         ) in run.stdout
         assert run.writes() == NOTHING
 
-    def test_a_listing_still_full_at_the_page_bound_refuses(self) -> None:
+    def test_a_listing_still_full_at_the_page_bound_refuses(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Full pages to the bound: the bound refuses, never passes."""
         (draft,) = captured_list("drafts-during")
         z = first_mint_zenodo([])
         z.title_pages = [[draft] * mint_doi.LISTING_PAGE] * 3
         with pytest.MonkeyPatch.context() as patched:
             patched.setattr(mint_doi, "LISTING_MAX_PAGES", 3)
-            run = run_helper("0BSD", zenodo=z, version="1.68.5", repo=CANON_REPO)
+            run = run_helper(
+                "0BSD", zenodo=z, version="1.68.5", repo=CANON_REPO, capfd=capfd
+            )
         assert run.returncode == 1, run.stdout
         assert (
             f"could not be read to its end ({3 * mint_doi.LISTING_PAGE} entries read)"
@@ -1555,11 +1598,13 @@ class TestFirstMintGuards:
         assert len(run.made("GET", f"{DEP}?q=title")) == 3
         assert run.writes() == NOTHING
 
-    def test_a_vocabulary_answering_500_refuses_as_unchecked(self) -> None:
+    def test_a_vocabulary_answering_500_refuses_as_unchecked(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A 500 is retried as transient, then refused; no deposit."""
         z = stub_zenodo("both", None)
         z.vocab_status = 500
-        run = run_helper("0BSD", zenodo=z)
+        run = run_helper("0BSD", zenodo=z, capfd=capfd)
         assert run.returncode == 1, run.stdout
         assert (
             "::error::mint-doi: Zenodo's licence vocabulary answered HTTP 500 for"
@@ -1569,14 +1614,16 @@ class TestFirstMintGuards:
         assert len(run.made("GET", "/api/vocabularies/licenses/0bsd")) == 6
         assert run.writes() == NOTHING
 
-    def test_no_authors_refuses_before_any_request(self) -> None:
+    def test_no_authors_refuses_before_any_request(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A citation with no authors is red by name; Zenodo is never asked."""
         cff = "\n".join(
             line
             for line in citation("0BSD").splitlines()
             if "family-names" not in line and "given-names" not in line
         )
-        run = run_helper("0BSD", cff=cff)
+        run = run_helper("0BSD", cff=cff, capfd=capfd)
         assert run.returncode == 1, run.stdout
         assert (
             "::error::mint-doi: CITATION.cff carries no authors — the record"
@@ -1585,9 +1632,11 @@ class TestFirstMintGuards:
         ) in run.stdout
         assert run.requests == NOTHING
 
-    def test_no_citation_refuses_by_name(self) -> None:
+    def test_no_citation_refuses_by_name(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Gh failing to fetch CITATION.cff is red, naming the tag."""
-        run = run_helper("0BSD", cff="")
+        run = run_helper("0BSD", cff="", capfd=capfd)
         assert run.returncode == 1, run.stdout
         assert (
             "::error::mint-doi: no CITATION.cff at v1.3.5 — a DOI-minting repo"
@@ -1596,14 +1645,16 @@ class TestFirstMintGuards:
         ) in run.stdout
         assert run.requests == NOTHING
 
-    def test_a_failed_read_refuses_though_its_body_decodes(self) -> None:
+    def test_a_failed_read_refuses_though_its_body_decodes(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Gh's exit status decides, never the decoder (#103).
 
         A 404 reached the fallback only because its error body happened
         not to be valid base64. Here gh fails after printing a body that
         decodes to a whole CITATION.cff: the read failed, so it refuses.
         """
-        run = run_helper("0BSD", cff_status=1)
+        run = run_helper("0BSD", cff_status=1, capfd=capfd)
         assert run.returncode == 1, run.stdout
         assert (
             "::error::mint-doi: no CITATION.cff at v1.3.5 — a DOI-minting repo"
@@ -1612,9 +1663,11 @@ class TestFirstMintGuards:
         ) in run.stdout
         assert run.requests == NOTHING
 
-    def test_a_concept_doi_without_a_record_id_refuses(self) -> None:
+    def test_a_concept_doi_without_a_record_id_refuses(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A recorded concept DOI must end in a Zenodo record id."""
-        run = run_helper("0BSD", concept="10.5281/zenodo.abc")
+        run = run_helper("0BSD", concept="10.5281/zenodo.abc", capfd=capfd)
         assert run.returncode == 1, run.stdout
         assert (
             "::error::mint-doi: CITATION.cff concept DOI '10.5281/zenodo.abc' does"
@@ -1623,9 +1676,11 @@ class TestFirstMintGuards:
         ) in run.stdout
         assert run.requests[-1][1].rsplit("/", 1)[1] == "0bsd"
 
-    def test_an_unresolvable_concept_refuses(self) -> None:
+    def test_an_unresolvable_concept_refuses(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A concept with no published version is red by name, nothing created."""
-        run = run_helper("0BSD", concept="10.5281/zenodo.555")
+        run = run_helper("0BSD", concept="10.5281/zenodo.555", capfd=capfd)
         assert run.returncode == 1, run.stdout
         assert (
             "::error::mint-doi: the concept record 555 did not resolve to a latest"
@@ -1802,28 +1857,38 @@ class TestAnswerShapes:
                 mint_doi.rights_ids(value, where)
             assert message == str(caught.value)
 
-    def test_a_newversion_answer_with_no_draft_link_is_refused(self) -> None:
+    def test_a_newversion_answer_with_no_draft_link_is_refused(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """No deposit is grown from an answer that names no draft."""
-        run = canon_run(canon_zenodo(newversion_body={"links": {}}))
+        run = canon_run(canon_zenodo(newversion_body={"links": {}}), capfd=capfd)
         assert run.returncode == 1, run.stdout
         assert (
             "::error::mint-doi: the newversion answer's links.latest_draft is not"
             " a string"
         ) in run.stdout
 
-    def test_a_draft_listing_entry_that_is_not_an_object_is_refused(self) -> None:
+    def test_a_draft_listing_entry_that_is_not_an_object_is_refused(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """The stale-draft sweep reads depositions, nothing else."""
-        run = canon_run(canon_zenodo(drafts=[1]))
+        run = canon_run(canon_zenodo(drafts=[1]), capfd=capfd)
         assert run.returncode == 1, run.stdout
         assert (
             "::error::mint-doi: an entry of the draft listing is not an object"
             in run.stdout
         )
 
-    def test_a_title_listing_entry_that_is_not_an_object_is_refused(self) -> None:
+    def test_a_title_listing_entry_that_is_not_an_object_is_refused(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """The first-mint guard reads depositions, nothing else."""
         run = run_helper(
-            "0BSD", zenodo=first_mint_zenodo([1]), version="1.68.5", repo=CANON_REPO
+            "0BSD",
+            zenodo=first_mint_zenodo([1]),
+            version="1.68.5",
+            repo=CANON_REPO,
+            capfd=capfd,
         )
         assert run.returncode == 1, run.stdout
         assert (

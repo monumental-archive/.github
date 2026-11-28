@@ -1164,7 +1164,7 @@ class TestFindingsReport(TestStubbed):
     def test_each_record_reaches_the_job_whose_step_ran_it(
         self, capfd: pytest.CaptureFixture[str]
     ) -> None:
-        """A's record in A's issue only; verdict.py by its script; the rest in all."""
+        """A's record in A's issue only; verdict by its command; the rest in all."""
         verdict = '"${ORG_PYTHON}" -I belt verdict --report r.json'
         self.jobs([
             job(1, "a", "failure"),
@@ -1180,7 +1180,7 @@ class TestFindingsReport(TestStubbed):
             "run.jsonl",
             standing.Finding("lint:a", "a.py", "finding of a"),
             standing.Finding("lint:b", "b.py", "finding of b"),
-            standing.Finding("verdict.py", "leg 1", "finding of the watch"),
+            standing.Finding("verdict", "leg 1", "finding of the watch"),
             standing.Finding("audit:loose", "", "finding of no failing step"),
         )
         status, _out, err = self.run_report(findings=found, capfd=capfd)
@@ -1196,8 +1196,8 @@ class TestFindingsReport(TestStubbed):
         assert "finding of b" not in a
         assert "- b.py: finding of b\n" in b
         assert "finding of a" not in b
-        assert "### belt verdict (1)\n" in watch
-        assert "Its findings are above, under <code>verdict.py</code>." in watch
+        assert "### verdict (1)\n" in watch
+        assert "Its findings are above, under <code>verdict</code>." in watch
         assert "finding of the watch" not in a + b
         for text in (a, b, watch):
             outside = text[text.index(standing.OUTSIDE) : text.index("## Red legs")]

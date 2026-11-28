@@ -70,9 +70,10 @@ With `--findings DIR` the body is also written from the run's findings
 as mise/findings.sh and mise/findings.py append them. A line that is
 not a record is counted, and the body says how many. A failing step
 ran a task when the task is named after `mise run ` in the step's name,
-in a `[<task>] ` prefix of its output, or is the file name of a `.py`
-or `.sh` script the step's name runs (a record written outside mise
-carries its script's file name). `## Findings` lists the findings
+in a `[<task>] ` prefix of its output, is the command a `belt
+<command>` in the step's name runs, or is the file name of a `.sh`
+script it runs (a record written outside mise carries the command's
+name, or the script's file name). `## Findings` lists the findings
 whose task one of this job's failing steps ran; a finding whose task
 no red job's failing step ran is listed in every red job's issue,
 under `## Recorded outside this job's failing step`. Each section
@@ -154,6 +155,11 @@ TASK_PREFIX = re.compile(r"^\[([^\]\s]+)\] ")
 # A script a failing step's name runs: a record written outside mise
 # carries its file name as its task (#1890 item 1).
 SCRIPT = re.compile(r"([^\s/\"';&|()]+\.(?:py|sh))(?=$|[\s\"';&|)])")
+# A belt command a failing step's name runs (#2177): the launcher names
+# the finding writer's task after the command.
+LAUNCHED = re.compile(
+    r"(?:^|[\s/\"'])belt[\"']?\s+([a-z][a-z0-9]*(?:-[a-z0-9]+)*)(?=$|[\s\"';&|)])"
+)
 # One final ` (…)` of a listed job name: a matrix leg's values (#1966).
 LEG = re.compile(r" \([^()]*\)$")
 OLD_TITLE = "{workflow} is red"
@@ -622,9 +628,9 @@ def step_tasks(step: str, output: list[str]) -> frozenset[str]:
     """Name the tasks a failing step ran.
 
     Returns:
-        Each task named after `mise run ` in the step's name, the file
-        name of each `.py` or `.sh` script its name runs, and each task
-        named in a `[<task>] ` prefix of its output.
+        Each task named after `mise run ` in the step's name, each belt
+        command and the file name of each `.py` or `.sh` script its name
+        runs, and each task named in a `[<task>] ` prefix of its output.
 
     """
     named: set[str] = set()
@@ -632,10 +638,11 @@ def step_tasks(step: str, output: list[str]) -> frozenset[str]:
         task = typed_std.group(match, 1)
         if task:
             named.add(task)
-    for match in SCRIPT.finditer(step):
-        script = typed_std.group(match, 1)
-        if script:
-            named.add(script)
+    for pattern in (SCRIPT, LAUNCHED):
+        for match in pattern.finditer(step):
+            script = typed_std.group(match, 1)
+            if script:
+                named.add(script)
     for line in output:
         prefixed = TASK_PREFIX.match(line)
         task = typed_std.group(prefixed, 1) if prefixed else None
@@ -682,6 +689,7 @@ def job_log(repo: str, job_id: int) -> str:
         with typed_std.urlopen(request, timeout=LOG_TIMEOUT) as answer:
             return answer.read().decode("utf-8", errors="replace")
     except urllib.error.HTTPError as err:
+        err.close()
         msg = f"GET {path} answered HTTP {err.code}"
         raise StandingIssueError(msg) from err
     except (OSError, typed_std.NotAResponseError) as err:

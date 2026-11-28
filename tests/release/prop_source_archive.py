@@ -1,5 +1,5 @@
 """source_archive.py, the source-archive build, on any repository name.
-        # ruff: ignore[slice-to-remove-prefix-or-suffix] - the model, written apart from the helper's removeprefix
+
 The property of `test_source_archive.py`'s fixed rows (#1556), over
 generated owners, repository names and versions. `git` is replaced
 in-process: `archive` writes one fixed tarball, `ls-files` lists as

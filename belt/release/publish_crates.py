@@ -116,7 +116,9 @@ def http(
     except typed_std.NotAResponseError as e:
         raise RefusalError(str(e)) from None
     except urllib.error.HTTPError as e:
-        return Response(e.code, e.read())
+        # The error is the response: read it, then close it.
+        with e:
+            return Response(e.code, e.read())
     except urllib.error.URLError, TimeoutError:
         return Response(None, b"")
 

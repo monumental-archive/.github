@@ -25,7 +25,6 @@ its own file's: the export is the function's, so no site can forget it.
 
 import socket
 import subprocess
-import sys
 import tempfile
 from pathlib import Path
 
@@ -71,11 +70,9 @@ org_task test:planted
 "$2" "$3"
 """
 
-CHILD = f"""import sys
-sys.path.insert(0, {str(MISE)!r})
-from belt import findings
-findings.finding("", "m")
-"""
+# The child prints the task it was handed, as the finding writer reads
+# it (tests/test_findings.py holds the writer to MISE_TASK_NAME).
+CHILD = 'printf "%s: m\\n" "${MISE_TASK_NAME-unset}" >&2\n'
 
 
 def config() -> dict[str, object]:
@@ -216,7 +213,7 @@ class TestOrgTaskRows:
     """`org_task` names a bare script's task for every child (#1979)."""
 
     def run_planted(self, **env: str) -> subprocess.CompletedProcess[str]:
-        """Run a script that sources the writer, then starts a Python child.
+        """Run a script that sources the writer, then starts a child.
 
         Returns:
             The finished process.
@@ -225,7 +222,7 @@ class TestOrgTaskRows:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "planted.sh").write_text(PLANTED, encoding="utf-8")
-            (root / "child.py").write_text(CHILD, encoding="utf-8")
+            (root / "child.sh").write_text(CHILD, encoding="utf-8")
             given = support.env(PYTHONUTF8="1", ORG_FINDINGS="", **env)
             if "MISE_TASK_NAME" not in env:
                 assert "MISE_TASK_NAME" not in given
@@ -234,8 +231,8 @@ class TestOrgTaskRows:
                     str(support.tool("bash")),
                     str(root / "planted.sh"),
                     str(WRITER),
-                    sys.executable,
-                    str(root / "child.py"),
+                    str(support.tool("bash")),
+                    str(root / "child.sh"),
                 ],
                 capture_output=True,
                 text=True,
@@ -245,8 +242,8 @@ class TestOrgTaskRows:
                 cwd=root,
             )
 
-    def test_a_bare_script_names_its_task_to_a_python_child(self) -> None:
-        """With no MISE_TASK_NAME, the child prints the task, not child.py."""
+    def test_a_bare_script_names_its_task_to_a_child(self) -> None:
+        """With no MISE_TASK_NAME, the child is handed the script's task."""
         done = self.run_planted()
         assert done.returncode == 0, done.stderr
         assert done.stderr == "test:planted: m\n"

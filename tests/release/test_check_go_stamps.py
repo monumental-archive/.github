@@ -1,5 +1,5 @@
 """Run release/check_go_stamps.py, the go-binary stamp check, on a stub go.
-        # ruff: ignore[start-process-with-partial-path] - the runner's git
+
 #1371 moved the step "Refuse a binary whose stamp is not the released
 commit" out of build-go-binary.yml into the helper, refusals unchanged.
 A build leg carries no belt, so the step runs the helper from the canon

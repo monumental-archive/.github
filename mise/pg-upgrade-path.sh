@@ -59,6 +59,8 @@
 # is no published predecessor to strand. Only once a graph exists is
 # reachability enforced. A linter that cannot skip cannot be universal.
 set -euo pipefail
+: "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
+: "${ORG_CANON_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: lefthook run post-checkout)}"
 # The canon's one writer of workflow commands (#1660), beside this file.
 # shellcheck source=mise/workflow-command.sh
 . "$(dirname "${BASH_SOURCE[0]}")/workflow-command.sh"
@@ -100,167 +102,8 @@ for control in "${controls[@]}"; do
     exit 1
   fi
 
-  RECORD="${record}" ORG_MISE_DIR="$(dirname "${BASH_SOURCE[0]}")" \
-    python3 - "${name}" "${version}" "${sql_dir}" "${scripts[@]}" << 'PY'
-import collections
-import os
-import re
-import sys
-
-# The canon's one writer of workflow commands (#1660).
-sys.path.insert(0, os.environ["ORG_MISE_DIR"])
-import workflow_command
-
-name, version, sql_dir, *paths = sys.argv[1:]
-record_path = os.environ["RECORD"]
-
-pattern = re.compile(r"^" + re.escape(name) + r"--(.+?)--(.+)\.sql$")
-edges = collections.defaultdict(list)
-released = set()
-targets = set()
-
-for path in paths:
-    match = pattern.match(os.path.basename(path))
-    if not match:
-        workflow_command.error(f"cannot parse upgrade script name: {os.path.basename(path)}")
-        workflow_command.error(f"expected {name}--<from>--<to>.sql")
-        sys.exit(1)
-    edges[match.group(1)].append(match.group(2))
-    released.add(match.group(1))
-    targets.add(match.group(2))
-
-
-def reaches(start):
-    """Can `start` get to `version` by any chain of upgrade scripts?"""
-    seen, queue = set(), collections.deque([start])
-    while queue:
-        node = queue.popleft()
-        if node == version:
-            return True
-        if node in seen:
-            continue
-        seen.add(node)
-        queue.extend(edges.get(node, ()))
-    return False
-
-
-def read_record(path):
-    """What the release path last observed at the forge.
-
-    Returns (by_extension, provenance). `by_extension` is None when there
-    is no record at all — a tree that has not been through a Release PR
-    since #825, where the honest answer is that publication is unknown.
-    A record that IS present is held to the derived-state law the way
-    `.coverage-floor` is: it must carry the derivation that produced it,
-    and anything else is drift, which reds rather than being repaired.
-    """
-    try:
-        with open(path, encoding="utf-8") as handle:
-            text = handle.read()
-    except FileNotFoundError:
-        return None, ""
-
-    observed = derived = ""
-    by_extension = {}
-    problems = []
-    for lineno, line in enumerate(text.splitlines(), 1):
-        stripped = line.strip()
-        if stripped.startswith("#"):
-            key, sep, value = stripped.lstrip("#").strip().partition(":")
-            if sep and key.strip() == "observed":
-                observed = value.strip()
-            elif sep and key.strip() == "derived":
-                derived = value.strip()
-            continue
-        if not stripped:
-            continue
-        extension, *carried = stripped.split()
-        if extension in by_extension:
-            problems.append(f"line {lineno}: {extension} is named twice")
-            continue
-        by_extension[extension] = set(carried)
-    if not observed or not derived:
-        problems.append("carries no `# observed:` and `# derived:` derivation")
-
-    if problems:
-        for problem in problems:
-            workflow_command.error(f"{path} {problem}")
-        workflow_command.error(f"{path} is derived state written by the release path;")
-        workflow_command.error("regenerate it by re-running the Release PR, never by hand")
-        sys.exit(1)
-    return by_extension, f"{derived}, observed {observed}"
-
-
-record, provenance = read_record(record_path)
-# None when the record does not exist, and also when it exists but does
-# not name THIS extension — a crate added since the last release. Both
-# mean the same thing to every judgment below: nobody has asked the forge
-# about these versions, so nothing here may claim they did.
-installable = None if record is None else record.get(name)
-
-# A `to`-only version is the open question this check used to close by
-# guessing (#825). Answer it from the record, or say plainly that it is
-# open — never call it burned on the strength of a filename.
-for dead in sorted(v for v in targets - released if v != version):
-    if installable is None:
-        print(f"NOTE: {name} {dead} is a target nothing was derived from; no")
-        print(f"      {record_path} in this tree says whether it published, and")
-        print("      if it did, installations on it are stranded")
-    elif dead not in installable:
-        print(f"NOTE: {name} {dead} is a target nothing was derived from, and no")
-        print(f"      non-draft release carried its tarballs ({provenance}) —")
-        print(f"      nothing can be installed on it; need not reach {version}")
-
-# The record may ACCUSE, never excuse. A `from` owes a path whatever the
-# record says about it: it is a `from` because a later release was
-# derived from it, which is the forge's own answer at that time, and
-# dropping that requirement on the strength of a later observation would
-# let a deleted asset retire a real obligation.
-owes_a_path = set(released)
-if installable is not None:
-    owes_a_path |= installable & targets
-
-stranded = sorted(v for v in owes_a_path if v != version and not reaches(v))
-
-# Explain only the versions the RECORD put on the hook. A `from` is
-# already on it for a reason the reader can see in the graph, and saying
-# "it is not a dead end" about a version nobody called a dead end is
-# noise that buries the one line that carries new information.
-for accused in stranded:
-    if installable is not None and accused in installable and accused not in released:
-        workflow_command.error(f"{name} {accused} is a target nothing was derived from,")
-        workflow_command.error(f"but a non-draft release carries its tarballs ({provenance})")
-        workflow_command.error("— it published, so installations on it are stranded")
-
-if stranded:
-    workflow_command.error(f"no ALTER EXTENSION UPDATE path to {version} from: {' '.join(stranded)}")
-    workflow_command.error(f"add {sql_dir}/{name}--<from>--<to>.sql to connect them")
-    workflow_command.error("an empty file is correct when the SQL surface did not change")
-    sys.exit(1)
-
-# The current version must itself be an endpoint of the graph. If it is
-# not, this release added no upgrade script — which is exactly what a
-# burned predecessor produced in #816: a Release PR that derived nothing
-# and would have stranded every installation.
-if version not in released | targets:
-    workflow_command.error(f"{name} {version} is not an endpoint of the upgrade graph")
-    workflow_command.error(f"this release derived no upgrade script, so nothing can reach {version}")
-    workflow_command.error(f"expected {sql_dir}/{name}--<previous>--{version}.sql")
-    sys.exit(1)
-
-# Claim exactly what was checked. Without the record the check has seen
-# no evidence about publication at all, and saying "every published
-# version" would be the same sentence #825 was filed about.
-if installable is None:
-    workflow_command.notice(f"every {name} version a later release was derived from")
-    workflow_command.notice(f"reaches {version}; no {record_path} here, so whether a")
-    workflow_command.notice("target-only version published was not checked")
-else:
-    workflow_command.notice(f"every installable {name} version reaches {version}")
-    workflow_command.notice(f"installable set recorded {provenance}")
-for path in sorted(paths):
-    print(f"ok  {os.path.basename(path)}")
-PY
+  RECORD="${record}" "${ORG_PYTHON}" -I "${ORG_CANON_DIR}/belt" pg-upgrade-path \
+    "${name}" "${version}" "${sql_dir}" "${scripts[@]}"
   checked=$((checked + 1))
 done
 

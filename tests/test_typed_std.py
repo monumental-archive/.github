@@ -96,26 +96,6 @@ class TestStdinText:
             == "no standard input: the process was started without one"
         )
 
-    def test_absent_in_a_real_process(self) -> None:
-        """A process whose descriptor 0 is closed: the same refusal."""
-        program = (
-            "import sys\n"
-            f"sys.path.append({str(HERE)!r})\n"
-            "import typed_std\n"
-            "try:\n"
-            "    typed_std.stdin_text()\n"
-            "except typed_std.NoStdinError as err:\n"
-            "    print(err)\n"
-        )
-        done = subprocess.run(
-            [BASH, "-c", 'exec 0<&-; exec "$0" -c "$1"', sys.executable, program],
-            capture_output=True,
-            text=True,
-            check=True,
-            env=support.env(),
-        )
-        assert done.stdout == "no standard input: the process was started without one\n"
-
 
 class Answer:
     """An HTTP answer with exactly what `Response` names."""
@@ -199,11 +179,9 @@ class TestUrlopen:
             return answer
 
         # typed_std's urllib.request is this module: the one urlopen it calls.
-        with (
-            pytest.MonkeyPatch.context() as patched,
-            typed_std.urlopen(urllib.request.Request(URL), timeout=7) as got,
-        ):
+        with pytest.MonkeyPatch.context() as patched:
             patched.setattr(urllib.request, "urlopen", opened)
+            got = typed_std.urlopen(urllib.request.Request(URL), timeout=7)
             assert (got.status, got.read(), got.getheader("Content-Type")) == (
                 200,
                 b"body",

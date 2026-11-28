@@ -558,31 +558,39 @@ class TestMain:
     """The command: refusals and failed commands as job-log lines."""
 
     @staticmethod
-    def main(failure: BaseException) -> tuple[int, str]:
+    def main(
+        failure: BaseException, capfd: pytest.CaptureFixture[str]
+    ) -> tuple[int, str]:
         """Run main with `run` raising failure.
 
         Returns:
             The exit code and stderr, where the finding writer prints.
 
         """
-        out = io.StringIO()
-        with pytest.MonkeyPatch.context() as patched:
-            patched.setattr(publish_crates, "run", failure)
-            patched.setattr(sys, "stderr", out)
-            code = publish_crates.main([])
-        return code, out.getvalue()
 
-    def test_a_refusal_is_printed_and_exits_1(self) -> None:
+        def refuse(*_args: object, **_kwargs: object) -> int:
+            raise failure
+
+        with pytest.MonkeyPatch.context() as patched:
+            patched.setattr(publish_crates, "run", refuse)
+            code = publish_crates.main([])
+        return code, capfd.readouterr().err
+
+    def test_a_refusal_is_printed_and_exits_1(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """The refusal's own line, exit 1."""
-        assert self.main(publish_crates.RefusalError("stop")) == (
+        assert self.main(publish_crates.RefusalError("stop"), capfd) == (
             1,
             "::error::publish-crates: stop\n",
         )
 
-    def test_a_failed_command_names_itself_and_its_status(self) -> None:
+    def test_a_failed_command_names_itself_and_its_status(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A failed cargo or member helper is named, with its exit."""
         failed = publish_crates.CommandError(["cargo", "package", "-p", "x"], 101)
-        assert self.main(failed) == (
+        assert self.main(failed, capfd) == (
             101,
             "::error::publish-crates: cargo package -p x exited 101\n",
         )
@@ -591,5 +599,4 @@ class TestMain:
         """Without a failure, main returns what run returned."""
         with pytest.MonkeyPatch.context() as patched:
             patched.setattr(publish_crates, "run", lambda *_args, **_kwargs: 0)
-            patched.setattr(sys, "stdout", io.StringIO())
             assert publish_crates.main([]) == 0
