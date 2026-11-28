@@ -244,6 +244,7 @@ class Packaging:
     work: Path
     cargo_log: Path
     outputs: Path
+    bodies: list[str]
 
     def ran(self, status: int, said: tuple[str, str]) -> Run:
         """Run the shipped step bodies after the helper, as the job does.
@@ -254,11 +255,11 @@ class Packaging:
         """
         out, err = said
         work = self.work
-        for name in STEPS:
+        for body in self.bodies:
             if status != 0:
                 break
             result = subprocess.run(
-                [BASH, "-c", step_body(name)],
+                [BASH, "-c", body],
                 env=self.environ,
                 capture_output=True,
                 text=True,
@@ -334,11 +335,13 @@ def package(
             STUB_METADATA=str(tmp / "metadata.json"),
             STUB_UNWRITTEN=" ".join(job.unwritten),
         )
+        # Read before the step's world is set: yq answers from the canon.
+        bodies = [step_body(name) for name in STEPS]
         for name, value in environ.items():
             monkeypatch.setenv(name, value)
         monkeypatch.chdir(work)
         monkeypatch.setattr(sys, "argv", [COMMAND])
-        return Packaging(environ, work, log, outputs)
+        return Packaging(environ, work, log, outputs, bodies)
 
     return lay_out
 
@@ -493,7 +496,7 @@ def test_a_blank_exclusion_is_no_exclusion(
     capfd: pytest.CaptureFixture[str], package: Callable[..., Packaging]
 ) -> None:
     """Whitespace-only flags take the one-run branch too."""
-    packaging = package("  ", members=("edtf-core"))
+    packaging = package("  ", members=("edtf-core",))
     status = package_crates.main([])
     run = packaging.ran(status, capfd.readouterr())
     assert run.returncode == 0, run.stdout + run.stderr
@@ -575,7 +578,7 @@ def test_a_named_crate_cargo_did_not_write_fails_by_name(
     capfd: pytest.CaptureFixture[str], package: Callable[..., Packaging]
 ) -> None:
     """Nothing the publisher will upload goes unhashed."""
-    packaging = package("", members=("edtf-core", "edtf-cli"), unwritten=("edtf-cli"))
+    packaging = package("", members=("edtf-core", "edtf-cli"), unwritten=("edtf-cli",))
     status = package_crates.main([])
     run = packaging.ran(status, capfd.readouterr())
     assert run.returncode != 0
