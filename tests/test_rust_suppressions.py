@@ -19,7 +19,6 @@ import pytest
 
 from belt import decoded
 from belt import rust_suppressions as rsup
-from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -35,9 +34,6 @@ def _task(as_task: Callable[[str], None]) -> None:
 
 
 pytestmark = pytest.mark.usefixtures("_task")
-
-
-HELPER = support.MISE / "rust_suppressions.py"
 
 
 Found = list[tuple[int, str]]
@@ -185,30 +181,32 @@ class TestMain:
     """The command: paths on stdin, findings and remedy on stderr."""
 
     @staticmethod
-    def run_helper(root: Path, names: str) -> subprocess.CompletedProcess[str]:
-        """Run the helper in `root` with `names` on stdin.
+    def run_helper(
+        root: Path, names: str, capfd: pytest.CaptureFixture[str]
+    ) -> subprocess.CompletedProcess[str]:
+        """Run the helper in `root` with `names` on stdin, in process.
 
         Returns:
-            The finished process.
+            Its status and what it wrote, as a finished process's.
 
         """
-        return subprocess.run(
-            [sys.executable, str(HELPER)],
-            cwd=root,
-            input=names,
-            env=support.env(MISE_TASK_NAME=TASK),
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        with pytest.MonkeyPatch.context() as patched:
+            patched.setenv("MISE_TASK_NAME", TASK)
+            patched.chdir(root)
+            patched.setattr(sys, "stdin", io.StringIO(names))
+            status = rsup.main([])
+        out, err = capfd.readouterr()
+        return subprocess.CompletedProcess([], status, out, err)
 
-    def test_findings_name_each_file_and_the_remedy(self) -> None:
+    def test_findings_name_each_file_and_the_remedy(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Both kinds reported together; exit 1."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "Cargo.toml").write_text('[lints.rust]\nx = "allow"\n')
             (root / "lib.rs").write_text("\n#![allow(y)]\n")
-            done = self.run_helper(root, "Cargo.toml\0\0lib.rs\0gone.rs\0")
+            done = self.run_helper(root, "Cargo.toml\0\0lib.rs\0gone.rs\0", capfd)
         assert done.returncode == 1
         assert done.stdout == ""
         assert (
@@ -217,24 +215,26 @@ class TestMain:
             "  lib.rs:2: #![allow(y)]\n" + "".join(f"{line}\n" for line in rsup.REMEDY)
         ) == done.stderr
 
-    def test_clean_input_prints_nothing(self) -> None:
+    def test_clean_input_prints_nothing(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """No finding: exit 0, silent."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "lib.rs").write_text('#![expect(y, reason = "z")]\n')
-            done = self.run_helper(root, "lib.rs\0")
+            done = self.run_helper(root, "lib.rs\0", capfd)
         assert (done.returncode, done.stdout, done.stderr) == (0, "", "")
 
     @pytest.mark.parametrize(
         ("name", "raw"), [("Cargo.toml", b"[lints\n"), ("lib.rs", b"\xff\n")]
     )
     def test_undecodable_files_are_refused_by_name(
-        self, name: object, raw: object
+        self, name: str, raw: bytes, capfd: pytest.CaptureFixture[str]
     ) -> None:
         """A manifest that is not TOML, a source that is not UTF-8."""
         with tempfile.TemporaryDirectory() as tmp:
             (Path(tmp) / name).write_bytes(raw)
-            done = self.run_helper(Path(tmp), f"{name}\0")
+            done = self.run_helper(Path(tmp), f"{name}\0", capfd)
             assert done.returncode == 1
             assert done.stderr.startswith(f"lint:rust: {name}: ")
 

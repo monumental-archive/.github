@@ -474,3 +474,18 @@ class TestUnchanged(TestRunner):
         assert self.capfd.readouterr().err == (
             "test: usage: belt shard-runner -- <command> [<argument>…]\n"
         )
+
+
+@pytest.mark.parametrize(
+    ("line", "file"),
+    [
+        pytest.param("suite/test_a.py::test_it", "suite/test_a.py", id="per-test"),
+        pytest.param("suite/test_b.py: 2", "suite/test_b.py", id="per-file"),
+        pytest.param("  <Function test_it>", "", id="indented"),
+        pytest.param("3 tests collected in 0.12s", "", id="summary"),
+        pytest.param("", "", id="blank"),
+    ],
+)
+def test_each_listing_line_names_its_file(line: str, file: str) -> None:
+    """pytest's listing names a file per test, or per file under `-qq`."""
+    assert shard_runner.listed(line) == file

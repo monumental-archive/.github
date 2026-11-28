@@ -4,22 +4,19 @@ mise/shard.py names a shard (ORG_SHARD=k/n), writes what each shard
 ran, and holds the union of every shard's report to the population it
 chose from. These rows plant the union's two failures (a shard that
 drops an item, one that repeats one) and each of its other refusals, by
-message, then run the belt's test runner for real on a fixture tree at
-1/2 and 2/2 and hold what the two shards reported to the whole suite.
+message, then hand a pytest run over a fixture tree its share at 1/2 and 2/2
+(shard_runner.py, in process), run each share for real, and hold what
+the two shards reported to the whole suite.
 """
 
 import subprocess
-import sys
 import tempfile
 from pathlib import Path
 
 import pytest
 
-from belt import decoded, shard
+from belt import decoded, shard, shard_runner
 from tests import support
-
-HERE = support.MISE
-RUNNER = HERE / "unittest_guarded.py"
 
 
 def doc(
@@ -134,60 +131,69 @@ class TestUnion:
             assert shard.main(["union"]) == 2
 
 
-SUITE = {
-    f"test_{name}.py": (
-        "import unittest\n\n\nclass T(unittest.TestCase):\n"
-        "    def test_it(self):\n        self.assertTrue(True)\n"
-    )
-    for name in ("a", "b", "c", "d", "e")
-}
+SUITE = {f"test_{name}.py": "def test_it():\n    pass\n" for name in "abcde"}
+PYTEST = support.tool("pytest")
 
 
 @pytest.mark.usefixtures("_set_up_test_guarded")
 class TestGuarded:
-    """The belt's test runner takes a share, run for real at 1/2 and 2/2."""
+    """A pytest run takes a share, run for real at 1/2 and 2/2."""
 
     @pytest.fixture
-    def _set_up_test_guarded(self, tmp_path: Path) -> None:
+    def _set_up_test_guarded(
+        self, tmp_path: Path, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Plant five test files and a reports directory."""
         self.root = Path(str(tmp_path))
         (self.root / "suite").mkdir()
         for name, body in SUITE.items():
             (self.root / "suite" / name).write_text(body, encoding="utf-8")
         self.reports = self.root / "reports"
+        self.capfd = capfd
 
     def shard_run(self, spec: str) -> subprocess.CompletedProcess[str]:
-        """Run the runner over the suite as one shard.
+        """Hand the suite's pytest run one shard, then run that share.
 
         Returns:
-            The finished run.
+            The share's run; for a share that could not be named, the
+            runner's status and what it wrote.
 
         """
-        env = support.env(
-            ORG_SHARD=spec,
-            ORG_SHARD_TASK="test:py",
-            ORG_SHARD_REPORTS=str(self.reports),
-            ORG_TEST_WORKERS="1",
-        )
-        return subprocess.run(
-            [
-                sys.executable,
-                str(RUNNER),
-                "discover",
-                "--start-directory",
+        with pytest.MonkeyPatch.context() as patched:
+            for name, value in {
+                "ORG_SHARD": spec,
+                "ORG_SHARD_TASK": "test:py",
+                "ORG_SHARD_REPORTS": str(self.reports),
+            }.items():
+                patched.setenv(name, value)
+            patched.chdir(self.root)
+            status = shard_runner.main([
+                "--",
+                PYTEST,
+                "-q",
+                "-p",
+                "no:cacheprovider",
                 "suite",
-                "--pattern",
-                "test_*.py",
-            ],
+            ])
+        out, err = self.capfd.readouterr()
+        if status != 0:
+            return subprocess.CompletedProcess([], status, out, err)
+        return subprocess.run(
+            [word for word in out.split("\0") if word],
             cwd=self.root,
-            env=env,
+            env=support.env(),
             capture_output=True,
             text=True,
             check=False,
         )
 
     def test_two_shards_run_the_whole_suite_once(self) -> None:
-        """1/2 and 2/2 between them run every file, none twice."""
+        """1/2 and 2/2 between them run every file, none twice.
+
+        The run's own `-q` makes pytest's listing `-qq`, a count per
+        file: before the share read that form, every shard held nothing
+        and ran `true`.
+        """
         for spec in ("1/2", "2/2"):
             done = self.shard_run(spec)
             assert done.returncode == 0, done.stderr
@@ -198,7 +204,7 @@ class TestGuarded:
             for d in reports
             for r in decoded.as_array(d["ran"], "ran")
         )
-        want = [f"test_{n}" for n in "abcde"]
+        want = [f"suite/test_{n}.py" for n in "abcde"]
         assert want == ran
         none: list[str] = []
         assert none == shard.union(reports, {"test:py": 2})
@@ -213,6 +219,8 @@ class TestGuarded:
 
     def test_a_malformed_shard_is_refused(self) -> None:
         """ORG_SHARD=0/2: exit 1, the value named, nothing run."""
-        done = self.shard_run("0/2")
-        assert done.returncode == 1
-        assert "ORG_SHARD='0/2' is not a shard (k/n, 1 <= k <= n)" in done.stderr
+        with pytest.raises(SystemExit) as ended:
+            self.shard_run("0/2")
+        _out, err = self.capfd.readouterr()
+        assert ended.value.code == 1
+        assert "ORG_SHARD='0/2' is not a shard (k/n, 1 <= k <= n)" in err

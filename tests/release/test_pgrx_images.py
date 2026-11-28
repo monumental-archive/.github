@@ -20,11 +20,13 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
 from belt import decoded
+from belt.release import pgrx_images
 from tests import support
 
 RELEASE = support.RELEASE
@@ -36,7 +38,6 @@ WRITER_MOUNT = (
     f" -v {CANON}/mise/tracked.sh:/opt/org/tracked.sh:ro"
     " -e ORG_FINDINGS_WRITER=/opt/org/findings.sh"
 )
-STAGE = RELEASE / "pgrx_images.py"
 PROOF = RELEASE / "pgrx-image-proof.sh"
 TABLE = CANON / "docker" / "pgrx-base-images.toml"
 BASH = support.tool("bash")
@@ -112,14 +113,38 @@ def run(
     )
 
 
+type Images = Callable[..., subprocess.CompletedProcess[str]]
+
+
+@pytest.fixture
+def images(capfd: pytest.CaptureFixture[str]) -> Images:
+    """Call pgrx_images.py's `main` in process, as the workflow step runs it.
+
+    Returns:
+        The caller: `images(*argv, cwd=...)`, giving the status and what
+        it wrote as a finished process's.
+
+    """
+
+    def call(*argv: str, cwd: Path = CANON) -> subprocess.CompletedProcess[str]:
+        with pytest.MonkeyPatch.context() as patched:
+            patched.chdir(cwd)
+            status = pgrx_images.main(list(argv))
+        out, err = capfd.readouterr()
+        return subprocess.CompletedProcess(list(argv), status, out, err)
+
+    return call
+
+
 @pytest.mark.usefixtures("_set_up_test_stage")
 class TestStage:
     """`pgrx_images.py stage`: every branch, messages asserted."""
 
     @pytest.fixture
-    def _set_up_test_stage(self, tmp_path: Path) -> None:
+    def _set_up_test_stage(self, tmp_path: Path, images: Images) -> None:
         """Make a workspace with a tarballs/ directory, removed after."""
         self.root = tmp_path
+        self.images = images
         (self.root / "tarballs").mkdir()
 
     def plant(self, pg: str, arch: str, **kw: bool) -> str:
@@ -143,19 +168,9 @@ class TestStage:
             The finished process.
 
         """
-        return run(
-            [
-                sys.executable,
-                str(STAGE),
-                "stage",
-                "--pg",
-                pg,
-                "--version",
-                VERSION,
-                "--crate-dir",
-                CRATE,
-            ],
-            self.root,
+        return self.images(
+            *("stage", "--pg", pg, "--version", VERSION, "--crate-dir", CRATE),
+            cwd=self.root,
         )
 
     def test_both_architectures_staged(self) -> None:
@@ -247,38 +262,28 @@ A_TABLE_THAT_IS_NOT_MAJORS_TO_REFERENCES_ROWS = [
 class TestBaseImage:
     """`pgrx_images.py base-image`: the [build] row, or a refusal."""
 
-    def test_every_major_names_its_build_image(self) -> None:
+    def test_every_major_names_its_build_image(self, images: Images) -> None:
         """Each [build] row is what the verb prints."""
         rows = build_rows()
         for pg, ref in rows.items():
-            result = run(
-                [
-                    sys.executable,
-                    str(STAGE),
-                    "base-image",
-                    "--pg",
-                    pg,
-                    "--table",
-                    str(TABLE),
-                ],
-                CANON,
+            result = images(
+                "base-image",
+                "--pg",
+                pg,
+                "--table",
+                str(TABLE),
             )
             assert (0, f"{ref}\n") == (result.returncode, result.stdout)
             assert "@sha256:" in ref
 
-    def test_a_major_with_no_row(self) -> None:
+    def test_a_major_with_no_row(self, images: Images) -> None:
         """A major the table does not pin is refused by name."""
-        result = run(
-            [
-                sys.executable,
-                str(STAGE),
-                "base-image",
-                "--pg",
-                "13",
-                "--table",
-                str(TABLE),
-            ],
-            CANON,
+        result = images(
+            "base-image",
+            "--pg",
+            "13",
+            "--table",
+            str(TABLE),
         )
         assert result.returncode == 1
         assert (
@@ -290,7 +295,7 @@ class TestBaseImage:
         ("text", "want"), A_TABLE_THAT_IS_NOT_MAJORS_TO_REFERENCES_ROWS
     )
     def test_a_table_that_is_not_majors_to_references(
-        self, text: str, want: str
+        self, text: str, want: str, images: Images
     ) -> None:
         """#1556's shrunk examples are refused by name.
 
@@ -300,17 +305,12 @@ class TestBaseImage:
         with tempfile.TemporaryDirectory() as tmp:
             table = Path(tmp) / "pgrx-base-images.toml"
             table.write_text(text, "utf-8")
-            result = run(
-                [
-                    sys.executable,
-                    str(STAGE),
-                    "base-image",
-                    "--pg",
-                    "16",
-                    "--table",
-                    str(table),
-                ],
-                CANON,
+            result = images(
+                "base-image",
+                "--pg",
+                "16",
+                "--table",
+                str(table),
             )
             assert (1, f"::error::pgrx-images: {want.format(t=table)}\n") == (
                 result.returncode,
@@ -332,37 +332,33 @@ IMAGE = "ghcr.io/example/edtf-postgres"
 PINNED = IMAGE + "@sha256:" + "a" * 64
 
 
-def render(
-    recipe: str, image: str, base: str, pg: str
-) -> subprocess.CompletedProcess[str]:
+type Render = Callable[[str, str, str, str], subprocess.CompletedProcess[str]]
+
+
+@pytest.fixture
+def render(images: Images) -> Render:
     """Run the consumer-dockerfile verb.
 
     Returns:
-        The finished process.
+        The renderer: `render(recipe, image, base, pg)`.
 
     """
-    return run(
-        [
-            sys.executable,
-            str(STAGE),
-            "consumer-dockerfile",
-            "--recipe",
-            recipe,
-            "--image",
-            image,
-            "--base",
-            base,
-            "--pg",
-            pg,
-        ],
-        CANON,
-    )
+
+    def call(
+        recipe: str, image: str, base: str, pg: str
+    ) -> subprocess.CompletedProcess[str]:
+        return images(
+            *("consumer-dockerfile", "--recipe", recipe, "--image", image),
+            *("--base", base, "--pg", pg),
+        )
+
+    return call
 
 
 class TestConsumerDockerfile:
     """`pgrx_images.py consumer-dockerfile`: the recipes, pinned or refused."""
 
-    def test_the_copy_recipe(self) -> None:
+    def test_the_copy_recipe(self, render: Render) -> None:
         """The text the workflow's first heredoc wrote, byte for byte."""
         result = render("copy", PINNED, build_image("17"), "17")
         assert result.returncode == 0, result.stderr
@@ -373,7 +369,7 @@ class TestConsumerDockerfile:
             "COPY --from=ext /share/extension/ /usr/share/postgresql/17/extension/\n"
         ) == result.stdout
 
-    def test_the_path_recipe(self) -> None:
+    def test_the_path_recipe(self, render: Render) -> None:
         """The text the workflow's second heredoc wrote, byte for byte."""
         result = render("path", PINNED, build_image("18"), "18")
         assert result.returncode == 0, result.stderr
@@ -383,7 +379,7 @@ class TestConsumerDockerfile:
             "COPY --from=ext / /extensions/ext/\n"
         ) == result.stdout
 
-    def test_every_rendered_from_is_pinned(self) -> None:
+    def test_every_rendered_from_is_pinned(self, render: Render) -> None:
         """Every recipe on every [build] row: each FROM carries a digest."""
         rows = build_rows()
         for pg, base in rows.items():
@@ -397,7 +393,7 @@ class TestConsumerDockerfile:
                 for line in from_lines:
                     assert "@sha256:" in line.split()[1]
 
-    def test_an_unpinned_extension_image(self) -> None:
+    def test_an_unpinned_extension_image(self, render: Render) -> None:
         """A tag, not a digest: refused, nothing rendered."""
         result = render("copy", IMAGE + ":1.2.3-pg17-artifact", build_image("17"), "17")
         assert (result.returncode, result.stdout) == (1, "")
@@ -408,7 +404,7 @@ class TestConsumerDockerfile:
             " pinned references\n"
         ) == result.stderr
 
-    def test_an_unpinned_base_image(self) -> None:
+    def test_an_unpinned_base_image(self, render: Render) -> None:
         """A stock postgres by tag: refused, nothing rendered."""
         result = render("path", PINNED, "postgres:18-bookworm", "18")
         assert (result.returncode, result.stdout) == (1, "")
@@ -574,38 +570,36 @@ class TestProof:
         assert list[str]() == lines
 
 
-def extension_name(tree: Path) -> subprocess.CompletedProcess[str]:
-    """Run the extension-name verb on a tree.
-
-    Returns:
-        The finished process.
-
-    """
-    return run(
-        [sys.executable, str(STAGE), "extension-name", "--tree", str(tree)], CANON
-    )
-
-
 @pytest.mark.usefixtures("_set_up_test_extension_name")
 class TestExtensionName:
     """`pgrx_images.py extension-name`: the one shipped extension (#1439)."""
 
     @pytest.fixture
-    def _set_up_test_extension_name(self, tmp_path: Path) -> None:
+    def _set_up_test_extension_name(self, tmp_path: Path, images: Images) -> None:
         """Make an empty staged share/extension tree, removed after."""
         self.tree = tmp_path
+        self.images = images
+
+    def extension_name(self) -> subprocess.CompletedProcess[str]:
+        """Run the extension-name verb on the tree.
+
+        Returns:
+            Its status and what it wrote, as a finished process's.
+
+        """
+        return self.images("extension-name", "--tree", str(self.tree))
 
     def test_one_control_file_names_the_extension(self) -> None:
         """The stem of the one control file, SQL scripts beside it ignored."""
         (self.tree / "edtf_postgres.control").write_text("")
         (self.tree / "edtf_postgres--1.2.3.sql").write_text("")
-        result = extension_name(self.tree)
+        result = self.extension_name()
         assert (result.returncode, result.stdout) == (0, "edtf_postgres\n")
 
     def test_no_control_file(self) -> None:
         """An artifact that ships no extension is refused by name."""
         (self.tree / "edtf_postgres--1.2.3.sql").write_text("")
-        result = extension_name(self.tree)
+        result = self.extension_name()
         assert (result.returncode, result.stdout) == (1, "")
         assert (
             f"::error::pgrx-images: {self.tree} holds no extension control file;"
@@ -617,7 +611,7 @@ class TestExtensionName:
         """Two control files: the proof cannot tell which it is proving."""
         (self.tree / "edtf_postgres.control").write_text("")
         (self.tree / "amcheck.control").write_text("")
-        result = extension_name(self.tree)
+        result = self.extension_name()
         assert (result.returncode, result.stdout) == (1, "")
         assert (
             f"::error::pgrx-images: {self.tree} holds 2 extension control files"

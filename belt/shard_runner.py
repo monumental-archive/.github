@@ -133,6 +133,8 @@ PYTEST_VALUED = frozenset({
     "--rootdir",
     "--tb",
 })
+# A file's line in pytest's `-qq` collection listing: `<file>: <count>`.
+COUNTED = re.compile(r"(.+\.py): [0-9]+")
 # `<python> -m pytest`: the interpreter, the flag and the module.
 PYTHON_M_PYTEST = 3
 # The interpreters a `<python> -m pytest` run may start with.
@@ -291,6 +293,24 @@ def go_test(command: Sequence[str], k: int, n: int) -> list[str] | None:
     return [*words[: at + 2], *flags, *mine, *rest[end:]]
 
 
+def listed(line: str) -> str:
+    """Read the test file one line of pytest's `--collect-only` listing names.
+
+    The listing is `<file>::<test>` per test, or `<file>: <count>` per
+    file once the run's own `-q` makes it `-qq` (pytest 9.2.0).
+
+    Returns:
+        The file, or "" for a line that names none.
+
+    """
+    if line.startswith(" "):
+        return ""
+    if "::" in line:
+        return line.split("::", 1)[0]
+    counted = COUNTED.fullmatch(line)
+    return counted.group(1) if counted else ""
+
+
 def pytest(command: Sequence[str], k: int, n: int) -> list[str] | None:
     """Give a pytest run every n-th of its test files, from the k-th.
 
@@ -324,11 +344,7 @@ def pytest(command: Sequence[str], k: int, n: int) -> list[str] | None:
             paths.append(word)
     root = ["--rootdir", str(Path.cwd())]
     listing = [*head, *options, *paths, "--collect-only", "-q", *root]
-    files = {
-        line.split("::", 1)[0]
-        for line in run_out(listing).splitlines()
-        if "::" in line and not line.startswith(" ")
-    }
+    files = {listed(line) for line in run_out(listing).splitlines()} - {""}
     every = sorted(files)
     mine = every[k - 1 :: n]
     shard.report("pytest", " ".join(paths), every, mine)
