@@ -10,6 +10,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.79.2](https://github.com/monumental-archive/.github/compare/v1.79.1...v1.79.2) - 2026-11-28
+
+### Fixed
+
+- update monumental-archive/signer to 2d429c2 ([#2194](https://github.com/monumental-archive/.github/pull/2194))
+- update jdx/mise to 2026.11.12 ([#2196](https://github.com/monumental-archive/.github/pull/2196))
+
+### Documentation
+
+- list the hypofuzz watch with the others ([#2184](https://github.com/monumental-archive/.github/pull/2184))
+- make idiomatic code the written default ([#2188](https://github.com/monumental-archive/.github/pull/2188))
+
+### Dependencies
+
+- update monumental-archive-db to fb14ff4 ([#2183](https://github.com/monumental-archive/.github/pull/2183))
+- update monumental-archive-db to 37257a5 ([#2193](https://github.com/monumental-archive/.github/pull/2193))
+
 ## [1.79.1](https://github.com/monumental-archive/.github/compare/v1.79.0...v1.79.1) - 2026-11-28
 
 ### Fixed
