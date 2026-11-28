@@ -35,9 +35,7 @@ inherits them is staged into the caller's real index when the suite runs
 from pre-push. Every git here runs without any `GIT_*` variable.
 """
 
-import contextlib
 import dataclasses
-import io
 import re
 import shlex
 import subprocess
@@ -1127,28 +1125,23 @@ class Refusals:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path
 
-    def run_main(self, table_text: str, config_text: str) -> tuple[int, str, Path]:
-        """Run the helper in-process over a table and config written here.
+    def enter(
+        self, monkeypatch: pytest.MonkeyPatch, table_text: str, config_text: str
+    ) -> Path:
+        """Write a table and config here, and run as the gate's step does.
 
         Returns:
-            Exit status, stderr and the table's path.
+            The table's path.
 
         """
         tmp = tempfile.mkdtemp(dir=self.tmp)
         table = Path(tmp) / "gate-tools.toml"
         table.write_text(table_text, encoding="utf-8")
         (Path(tmp) / "config.toml").write_text(config_text, encoding="utf-8")
-        err = io.StringIO()
-        with (
-            pytest.MonkeyPatch.context() as patched,
-            contextlib.redirect_stderr(err),
-            contextlib.redirect_stdout(io.StringIO()),
-        ):
-            patched.setenv("MISE_TASK_NAME", "")
-            patched.setenv("ORG_FINDINGS", "")
-            patched.setattr(sys, "argv", [STEP])
-            status = gate_tools.main(["--table", str(table), "list"])
-        return status, err.getvalue(), table
+        monkeypatch.setenv("MISE_TASK_NAME", "")
+        monkeypatch.setenv("ORG_FINDINGS", "")
+        monkeypatch.setattr(sys, "argv", [STEP])
+        return table
 
 
 @fixture
@@ -1157,7 +1150,11 @@ def refusals(tmp_path: Path) -> Refusals:
     return Refusals(tmp_path)
 
 
-def test_wrong_shapes_in_the_table(refusals: Refusals) -> None:
+def test_wrong_shapes_in_the_table(
+    refusals: Refusals,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """Each shape the decoder refuses, with the field it names."""
     rows = [
         ("[tools\n", "Expected ']'"),
@@ -1169,15 +1166,23 @@ def test_wrong_shapes_in_the_table(refusals: Refusals) -> None:
         ('[tools.x]\nrun = [""," ", 2]\n', "tools.x.run is not a list of strings"),
     ]
     for text, message in rows:
-        status, err, table = refusals.run_main(text, "[tools]\n")
+        table = refusals.enter(monkeypatch, text, "[tools]\n")
+        status = gate_tools.main(["--table", str(table), "list"])
+        err = capfd.readouterr().err
         assert status == 1
         assert err.startswith(f"::error::{STEP}: {table}: "), err
         assert message in err
 
 
-def test_belt_tools_not_a_table(refusals: Refusals) -> None:
+def test_belt_tools_not_a_table(
+    refusals: Refusals,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """The belt config's [tools] is read through the same decoder."""
-    status, err, table = refusals.run_main("[tools]\n", "tools = []\n")
+    table = refusals.enter(monkeypatch, "[tools]\n", "tools = []\n")
+    status = gate_tools.main(["--table", str(table), "list"])
+    err = capfd.readouterr().err
     assert status == 1
     assert (
         f"::error::{STEP}: {table.parent / 'config.toml'}: [tools] is not an object\n"
