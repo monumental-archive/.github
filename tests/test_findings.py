@@ -99,6 +99,7 @@ class Writer:
         entry: str,
         *args: str,
         capfd: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
         **env: str,
     ) -> Ran:
         """Run the reporter once.
@@ -109,7 +110,7 @@ class Writer:
         """
         reporter = root / f"reporter{self.suffix}"
         if self.interpreter is None:
-            return self.called(reporter, entry, args, env, capfd)
+            return self.called(reporter, entry, args, env, capfd, monkeypatch)
         reporter.write_text(self.script, encoding="utf-8")
         overrides = {"PYTHONUTF8": "1", **env}
         child = self.make_env(**overrides)
@@ -134,6 +135,7 @@ class Writer:
         args: tuple[str, ...],
         env: dict[str, str],
         capfd: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
     ) -> Ran:
         """Call the Python writer as the shell reporter calls its own.
 
@@ -142,20 +144,19 @@ class Writer:
 
         """
         subject, message, *detail = args
-        with pytest.MonkeyPatch.context() as patched:
-            for name in ("MISE_TASK_NAME", "ORG_FINDINGS"):
-                if name not in env:
-                    patched.delenv(name, raising=False)
-            for name, value in env.items():
-                patched.setenv(name, value)
-            patched.chdir(reporter.parent)
-            # The running program's name, which a finding falls back to.
-            patched.setattr(sys, "argv", [str(reporter)])
-            # Each call is one process: its records file is drawn afresh.
-            patched.setattr(findings, "_drawn", [])
-            findings.finding(subject, message, detail, annotate=entry == "annotated")
-            if entry == "twice":
-                findings.finding(subject, message, detail)
+        for name in ("MISE_TASK_NAME", "ORG_FINDINGS"):
+            if name not in env:
+                monkeypatch.delenv(name, raising=False)
+        for name, value in env.items():
+            monkeypatch.setenv(name, value)
+        monkeypatch.chdir(reporter.parent)
+        # The running program's name, which a finding falls back to.
+        monkeypatch.setattr(sys, "argv", [str(reporter)])
+        # Each call is one process: its records file is drawn afresh.
+        monkeypatch.setattr(findings, "_drawn", [])
+        findings.finding(subject, message, detail, annotate=entry == "annotated")
+        if entry == "twice":
+            findings.finding(subject, message, detail)
         out, err = capfd.readouterr()
         return Ran(0, out, err)
 
@@ -220,6 +221,7 @@ class FindingRows:
         printed: str,
         *,
         capfd: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Run one finding and hold its printed form and its record."""
         done = writer.run(
@@ -231,6 +233,7 @@ class FindingRows:
             MISE_TASK_NAME="lint:demo",
             ORG_FINDINGS=str(self.file),
             capfd=capfd,
+            monkeypatch=monkeypatch,
         )
         assert done.returncode == 0, done.stderr
         assert done.stdout == ""
@@ -256,7 +259,10 @@ def finding_rows(tmp_path: Path) -> FindingRows:
 
 @pytest.mark.parametrize("writer", writers())
 def test_a_finding_with_a_subject(
-    finding_rows: FindingRows, writer: object, capfd: pytest.CaptureFixture[str]
+    finding_rows: FindingRows,
+    writer: object,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The form is `<task>: <subject>: <message>`."""
     finding_rows.file.unlink(missing_ok=True)
@@ -267,12 +273,16 @@ def test_a_finding_with_a_subject(
         [],
         "lint:demo: Cargo.toml: a pin is loose\n",
         capfd=capfd,
+        monkeypatch=monkeypatch,
     )
 
 
 @pytest.mark.parametrize("writer", writers())
 def test_a_finding_without_a_subject(
-    finding_rows: FindingRows, writer: object, capfd: pytest.CaptureFixture[str]
+    finding_rows: FindingRows,
+    writer: object,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """An empty subject leaves `<task>: <message>`, and is recorded empty."""
     finding_rows.file.unlink(missing_ok=True)
@@ -283,12 +293,16 @@ def test_a_finding_without_a_subject(
         [],
         "lint:demo: nothing is tracked\n",
         capfd=capfd,
+        monkeypatch=monkeypatch,
     )
 
 
 @pytest.mark.parametrize("writer", writers())
 def test_two_detail_lines_are_indented_two_spaces(
-    finding_rows: FindingRows, writer: object, capfd: pytest.CaptureFixture[str]
+    finding_rows: FindingRows,
+    writer: object,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Each detail line follows the first, indented two spaces."""
     finding_rows.file.unlink(missing_ok=True)
@@ -301,12 +315,16 @@ def test_two_detail_lines_are_indented_two_spaces(
         "  reached through object_store 0.14.2\n"
         "  and through arrow 57.0.0\n",
         capfd=capfd,
+        monkeypatch=monkeypatch,
     )
 
 
 @pytest.mark.parametrize("writer", writers())
 def test_a_quote_a_backslash_a_tab_and_non_ascii_survive(
-    finding_rows: FindingRows, writer: object, capfd: pytest.CaptureFixture[str]
+    finding_rows: FindingRows,
+    writer: object,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The record reads back to the same characters the call was given."""
     finding_rows.file.unlink(missing_ok=True)
@@ -317,16 +335,26 @@ def test_a_quote_a_backslash_a_tab_and_non_ascii_survive(
         [AWKWARD],
         f"lint:demo: a\tb: {AWKWARD}\n  {AWKWARD}\n",
         capfd=capfd,
+        monkeypatch=monkeypatch,
     )
 
 
 @pytest.mark.parametrize("writer", writers())
 def test_unset_records_nothing(
-    finding_rows: FindingRows, writer: object, capfd: pytest.CaptureFixture[str]
+    finding_rows: FindingRows,
+    writer: object,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Without ORG_FINDINGS the finding is printed and nothing is written."""
     done = writer.run(
-        finding_rows.root, "plain", "x", "y", MISE_TASK_NAME="lint:demo", capfd=capfd
+        finding_rows.root,
+        "plain",
+        "x",
+        "y",
+        MISE_TASK_NAME="lint:demo",
+        capfd=capfd,
+        monkeypatch=monkeypatch,
     )
     assert done.returncode == 0, done.stderr
     assert done.stderr == "lint:demo: x: y\n"
@@ -335,7 +363,10 @@ def test_unset_records_nothing(
 
 @pytest.mark.parametrize("writer", writers())
 def test_empty_records_nothing(
-    finding_rows: FindingRows, writer: object, capfd: pytest.CaptureFixture[str]
+    finding_rows: FindingRows,
+    writer: object,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """An empty ORG_FINDINGS records nothing, on a runner too."""
     done = writer.run(
@@ -348,6 +379,7 @@ def test_empty_records_nothing(
         RUNNER_TEMP=str(finding_rows.root / "runner"),
         GITHUB_JOB="mutants-rust",
         capfd=capfd,
+        monkeypatch=monkeypatch,
     )
     assert done.returncode == 0, done.stderr
     assert done.stderr == "lint:demo: x: y\n"
@@ -356,7 +388,10 @@ def test_empty_records_nothing(
 
 @pytest.mark.parametrize("writer", writers())
 def test_a_failed_append_is_said_and_is_not_fatal(
-    finding_rows: FindingRows, writer: object, capfd: pytest.CaptureFixture[str]
+    finding_rows: FindingRows,
+    writer: object,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A path under a file: printed, one more line names it, status 0."""
     blocker = finding_rows.root / "a-file"
@@ -371,6 +406,7 @@ def test_a_failed_append_is_said_and_is_not_fatal(
         MISE_TASK_NAME="lint:demo",
         ORG_FINDINGS=str(target),
         capfd=capfd,
+        monkeypatch=monkeypatch,
     )
     assert done.returncode == 0, done.stderr
     lines = done.stderr.splitlines()
@@ -385,7 +421,10 @@ def test_a_failed_append_is_said_and_is_not_fatal(
 
 @pytest.mark.parametrize("writer", writers())
 def test_the_annotated_entry_escapes_as_the_runner_reads(
-    finding_rows: FindingRows, writer: object, capfd: pytest.CaptureFixture[str]
+    finding_rows: FindingRows,
+    writer: object,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """`::error::`, with `%`, CR and LF escaped; the record is the same."""
     message = "50% done\nnext"
@@ -399,6 +438,7 @@ def test_the_annotated_entry_escapes_as_the_runner_reads(
         MISE_TASK_NAME="lint:demo",
         ORG_FINDINGS=str(finding_rows.file),
         capfd=capfd,
+        monkeypatch=monkeypatch,
     )
     assert done.returncode == 0, done.stderr
     assert done.stderr == "::error::lint:demo: s: 50%25 done%0Anext\n  one detail\n"
@@ -407,7 +447,10 @@ def test_the_annotated_entry_escapes_as_the_runner_reads(
 
 @pytest.mark.parametrize("writer", writers())
 def test_a_plain_line_cannot_open_a_command(
-    finding_rows: FindingRows, writer: object, capfd: pytest.CaptureFixture[str]
+    finding_rows: FindingRows,
+    writer: object,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A message of a newline and a command prints one line, the command escaped."""
     done = writer.run(
@@ -417,6 +460,7 @@ def test_a_plain_line_cannot_open_a_command(
         "x\n::error::forged",
         "::warning::w",
         capfd=capfd,
+        monkeypatch=monkeypatch,
     )
     assert done.returncode == 0, done.stderr
     lines = done.stderr.splitlines()
@@ -427,7 +471,10 @@ def test_a_plain_line_cannot_open_a_command(
 
 @pytest.mark.parametrize("writer", writers())
 def test_the_task_is_mise_s_name_when_set(
-    finding_rows: FindingRows, writer: object, capfd: pytest.CaptureFixture[str]
+    finding_rows: FindingRows,
+    writer: object,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """MISE_TASK_NAME names the task in the line and the record."""
     finding_rows.file.unlink(missing_ok=True)
@@ -439,6 +486,7 @@ def test_the_task_is_mise_s_name_when_set(
         MISE_TASK_NAME="audit:deny",
         ORG_FINDINGS=str(finding_rows.file),
         capfd=capfd,
+        monkeypatch=monkeypatch,
     )
     assert done.stderr == "audit:deny: s: m\n"
     assert finding_rows.records()[0]["task"] == "audit:deny"
@@ -446,7 +494,10 @@ def test_the_task_is_mise_s_name_when_set(
 
 @pytest.mark.parametrize("writer", writers())
 def test_the_task_is_the_script_s_name_when_unset(
-    finding_rows: FindingRows, writer: object, capfd: pytest.CaptureFixture[str]
+    finding_rows: FindingRows,
+    writer: object,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Where mise named no task, the running script's file name does."""
     finding_rows.file.unlink(missing_ok=True)
@@ -458,6 +509,7 @@ def test_the_task_is_the_script_s_name_when_unset(
         "m",
         ORG_FINDINGS=str(finding_rows.file),
         capfd=capfd,
+        monkeypatch=monkeypatch,
     )
     assert done.stderr == f"{name}: s: m\n"
     assert finding_rows.records()[0]["task"] == name
@@ -465,7 +517,10 @@ def test_the_task_is_the_script_s_name_when_unset(
 
 @pytest.mark.parametrize("writer", writers())
 def test_a_step_script_s_finding_names_the_job(
-    finding_rows: FindingRows, writer: object, capfd: pytest.CaptureFixture[str]
+    finding_rows: FindingRows,
+    writer: object,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The runner's step script, directly under RUNNER_TEMP: GITHUB_JOB."""
     finding_rows.file.unlink(missing_ok=True)
@@ -478,13 +533,17 @@ def test_a_step_script_s_finding_names_the_job(
         RUNNER_TEMP=str(finding_rows.root),
         GITHUB_JOB="attach",
         capfd=capfd,
+        monkeypatch=monkeypatch,
     )
     assert done.stderr == "attach: s: m\n"
     assert finding_rows.records()[0]["task"] == "attach"
 
 
 def test_a_script_elsewhere_keeps_its_name_in_a_job(
-    finding_rows: FindingRows, capfd: pytest.CaptureFixture[str], env: support.Env
+    finding_rows: FindingRows,
+    capfd: pytest.CaptureFixture[str],
+    env: support.Env,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Not directly under RUNNER_TEMP, or no job: the script's name."""
     cases = {
@@ -507,6 +566,7 @@ def test_a_script_elsewhere_keeps_its_name_in_a_job(
                 ORG_FINDINGS=str(finding_rows.file),
                 **planted,
                 capfd=capfd,
+                monkeypatch=monkeypatch,
             )
             assert done.stderr == f"{name}: s: m\n"
             assert finding_rows.records()[0]["task"] == name
@@ -514,7 +574,10 @@ def test_a_script_elsewhere_keeps_its_name_in_a_job(
 
 @pytest.mark.parametrize("writer", writers())
 def test_findings_append(
-    finding_rows: FindingRows, writer: object, capfd: pytest.CaptureFixture[str]
+    finding_rows: FindingRows,
+    writer: object,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A second finding is a second line of the same file."""
     finding_rows.file.unlink(missing_ok=True)
@@ -527,6 +590,7 @@ def test_findings_append(
             MISE_TASK_NAME="t",
             ORG_FINDINGS=str(finding_rows.file),
             capfd=capfd,
+            monkeypatch=monkeypatch,
         )
     messages: list[object] = [r["message"] for r in finding_rows.records()]
     expected: list[object] = ["one", "two"]
@@ -567,7 +631,12 @@ class RunnerRows:
         self.root = Path(str(tmp_path))
 
     def on_a_runner(
-        self, writer: Writer, entry: str, *, capfd: pytest.CaptureFixture[str]
+        self,
+        writer: Writer,
+        entry: str,
+        *,
+        capfd: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
     ) -> list[Path]:
         """Run one call as a job's step does, ORG_FINDINGS unset (#1976).
 
@@ -589,6 +658,7 @@ class RunnerRows:
             RUNNER_TEMP=str(temp),
             GITHUB_JOB="mutants-rust",
             capfd=capfd,
+            monkeypatch=monkeypatch,
         )
         assert done.returncode == 0, done.stderr
         files = sorted(p for p in temp.rglob("*") if p.is_file())
@@ -606,10 +676,15 @@ def runner_rows(tmp_path: Path) -> RunnerRows:
 
 @pytest.mark.parametrize("writer", writers())
 def test_on_a_runner_the_writer_names_the_file(
-    runner_rows: RunnerRows, writer: object, capfd: pytest.CaptureFixture[str]
+    runner_rows: RunnerRows,
+    writer: object,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Unset on a runner: one record in findings/<job>-<16 hex>.jsonl."""
-    files = runner_rows.on_a_runner(writer, "plain", capfd=capfd)
+    files = runner_rows.on_a_runner(
+        writer, "plain", capfd=capfd, monkeypatch=monkeypatch
+    )
     assert len(files) == 1, files
     expected: list[dict[str, object]] = [
         {
@@ -625,20 +700,30 @@ def test_on_a_runner_the_writer_names_the_file(
 
 @pytest.mark.parametrize("writer", writers())
 def test_one_process_writes_one_file(
-    runner_rows: RunnerRows, writer: object, capfd: pytest.CaptureFixture[str]
+    runner_rows: RunnerRows,
+    writer: object,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Two findings of one process land in one file, in order."""
-    files = runner_rows.on_a_runner(writer, "twice", capfd=capfd)
+    files = runner_rows.on_a_runner(
+        writer, "twice", capfd=capfd, monkeypatch=monkeypatch
+    )
     assert len(files) == 1, files
     assert len(records(files[0])) == 2
 
 
 @pytest.mark.parametrize("writer", writers())
 def test_two_processes_write_two_files(
-    runner_rows: RunnerRows, writer: object, capfd: pytest.CaptureFixture[str]
+    runner_rows: RunnerRows,
+    writer: object,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Two legs of one matrix share GITHUB_JOB and never a file."""
-    first = runner_rows.on_a_runner(writer, "plain", capfd=capfd)
+    first = runner_rows.on_a_runner(
+        writer, "plain", capfd=capfd, monkeypatch=monkeypatch
+    )
     temp = runner_rows.root / "runner"
     done = writer.run(
         runner_rows.root,
@@ -649,6 +734,7 @@ def test_two_processes_write_two_files(
         RUNNER_TEMP=str(temp),
         GITHUB_JOB="mutants-rust",
         capfd=capfd,
+        monkeypatch=monkeypatch,
     )
     assert done.returncode == 0, done.stderr
     both = sorted(temp.rglob("*.jsonl"))
