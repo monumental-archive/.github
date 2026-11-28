@@ -217,6 +217,10 @@ def outcomes(
     }
 
 
+# Every mutation run's head: the leg's own timeout, fixed (#1432, item 5).
+TIMED = "cargo mutants --output OUT --timeout-multiplier 5 --minimum-test-timeout 20 "
+
+
 class Planted(unittest.TestCase):
     """A planted tree, a stub PATH and a belt with stub provisioning."""
 
@@ -381,7 +385,7 @@ class Verdict(Planted):
             METADATA,
             "cargo mutants --list --no-config --package alpha",
             "cargo mutants --list --package alpha",
-            "cargo mutants --output OUT --package alpha",
+            TIMED + "--package alpha",
         ]
         self.assertEqual(self.calls(log), want)
 
@@ -597,7 +601,7 @@ class SiteRecords(Planted):
             METADATA,
             "cargo mutants --list --no-config --package alpha",
             f"cargo mutants --list {derived} --package alpha",
-            f"cargo mutants --output OUT {derived} --package alpha",
+            TIMED + f"{derived} --package alpha",
         ]
         self.assertEqual(self.calls(log), want)
 
@@ -740,11 +744,11 @@ class Pgrx(Planted):
             "major 18",
             "cargo mutants --list --no-config --package alpha",
             "cargo mutants --list --package alpha",
-            "cargo mutants --output OUT --package alpha",
+            TIMED + "--package alpha",
             "major 18",
             "cargo mutants --list --no-config --package ext --features pg_test",
             "cargo mutants --list --package ext --features pg_test",
-            "cargo mutants --output OUT --package ext --features pg_test",
+            TIMED + "--package ext --features pg_test",
         ]
         self.assertEqual(self.calls(log), want)
 
@@ -829,10 +833,7 @@ class Shards(Planted):
             "cargo mutants --list --no-config --package alpha",
             "cargo mutants --list --package alpha",
             ("cargo mutants --list --shard 1/4 --sharding round-robin --package alpha"),
-            (
-                "cargo mutants --output OUT --shard 1/4 --sharding round-robin"
-                " --package alpha"
-            ),
+            (TIMED + "--shard 1/4 --sharding round-robin --package alpha"),
         ]
         self.assertEqual(self.calls(log), want)
         self.assertEqual(self.summary(), "1/4\t2\t1\t1\t0\twhole\n")
@@ -852,10 +853,7 @@ class Shards(Planted):
         ]
         self.assertEqual(done.stdout.splitlines(), want)
         self.assertNotIn(
-            (
-                "cargo mutants --output OUT --shard 3/4 --sharding round-robin"
-                " --package alpha"
-            ),
+            (TIMED + "--shard 3/4 --sharding round-robin --package alpha"),
             self.calls(log),
         )
         self.assertEqual(self.summary(), "3/4\t0\t0\t0\t0\twhole\n")

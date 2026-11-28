@@ -581,17 +581,6 @@ jobs:
         run: '"${ORG_PYTHON}" .org-canon/mise/squash_message.py'
       # (no blank line above: lint:shell-embedded captures trailing
       # blanks into the run: block and shfmt refuses them)
-      # A MUTATION ROW'S TOOL, BY NAME (#1432). The belt pins
-      # cargo-mutants, gomu and cosmic-ray lazy, so the bare install
-      # above skips them; a `ci:mutants` row installs its own language's,
-      # from the lock, as repo-mutants.yml's jobs do. StrykerJS is the
-      # repository's, from its own tracked lockfile (#1358):
-      # mise/mutation-install.sh.
-      - name: Install this mutation row's tool, by name
-        if: ${{ matrix.leg == 'mutants' && matrix.language }}
-        env:
-          LANGUAGE: ${{ matrix.language }}
-        run: bash .org-canon/mise/mutation-install.sh "${LANGUAGE}"
       # This leg's belt task, `ci:lint`, `ci:test`, `ci:properties` or
       # `ci:mutants` (#1740, #1432); `ci` is the four of them. A lint
       # shard runs its share of `ci:lint`'s tasks instead (#2049), a

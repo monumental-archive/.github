@@ -70,6 +70,11 @@
 # to stryker.config.json or to `@stryker-mutator/*` in a tracked
 # lockfile, judges the whole population.
 #
+# THE TIMEOUT IS FIXED IN THE LEG (#1432, item 5): StrykerJS's own
+# defaults, `--timeoutMS 5000 --timeoutFactor 1.5` (the unmutated run's
+# time times 1.5, plus 5 s), passed on every run so the config cannot
+# change them. Timeout is killed.
+#
 # PROGRESS IN THE JOB LOG. StrykerJS's output, with its
 # `progress-append-only` reporter, is copied to the log as it runs, so a
 # shard stopped by its timeout shows how far it got; the scratch copy is
@@ -173,6 +178,7 @@ fi
 rm -f "${report}"
 status=0
 "${stryker}" run "${adoption}" --inPlace --mutate "${mutate}" \
+  --timeoutMS 5000 --timeoutFactor 1.5 \
   --reporters json,progress-append-only 2>&1 | tee "${scratch}/stryker.log" || status=$?
 
 left=$(git status --porcelain --untracked-files=no)

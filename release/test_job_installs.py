@@ -2400,7 +2400,6 @@ LEG_BOUND = {
     ),
     "Keep the coverage reports for the badge (default branch only)": TEST_ONLY,
     "Keep the coverage figures for the release": TEST_ONLY,
-    "Install this mutation row's tool, by name": "matrix.leg == 'mutants'",
 }
 
 

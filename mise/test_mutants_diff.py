@@ -7,9 +7,9 @@ the scope come from real git, never a stand-in. Each row asserts what
 the helper wrote and printed.
 
 The pinned diff is held against the settings that made cosmic-ray's own
-git filter select nothing and exit 0 (measured, #1432): a clone's
-`diff.noprefix`, `diff.mnemonicPrefix` and `color.diff=always`, and a
-user's, planted through GIT_CONFIG_COUNT, which outranks every file.
+git filter select nothing and exit 0 (measured, #1432): a clone's and a
+user's `diff.noprefix`, `diff.mnemonicPrefix` and `color.diff=always`,
+planted in the fixture's own config files.
 
 GIT ENVIRONMENT IS SCRUBBED (#857): git exports GIT_DIR to hooks run in
 a linked worktree, and a fixture that inherited it would write into the
@@ -55,6 +55,7 @@ class Tree(unittest.TestCase):
         self.tree = self.root / "tree"
         self.tree.mkdir()
         self.env = hermetic.env(self.root)
+        self.runs = 0
         self.git("init", "-q", "-b", "main")
         self.git("config", "commit.gpgsign", "false")
         self.write("pkg/m.py", BASE)
@@ -95,13 +96,14 @@ class Tree(unittest.TestCase):
         return self.git("rev-parse", "HEAD")
 
     def scope(self, language: str = "python", **env: str) -> tuple[int, str, str, Path]:
-        """Run `scope` for a language.
+        """Run `scope` for a language, into a directory of its own.
 
         Returns:
             The status, stdout, stderr and the directory it wrote.
 
         """
-        out = self.root / "scope"
+        self.runs += 1
+        out = self.root / f"scope-{self.runs}"
         done = hermetic.call_main(
             lambda: helper.main(["scope", language, str(out)]),
             env=self.env | env,
@@ -128,21 +130,32 @@ class Lines(Tree):
         self.assertEqual(lines({"pkg/m.py": {6}}), helper.read_lines(where))
 
     def test_settings_outside_the_tree_change_nothing(self) -> None:
-        """noprefix, mnemonicPrefix and colour, in the clone and the user's."""
+        """noprefix, mnemonicPrefix and colour: the same selection as none.
+
+        Each setting is planted twice over: in the clone's own config and
+        in the user's (the fixture HOME's .gitconfig), where cosmic-ray's
+        filter selected nothing and exited 0 (#1432).
+        """
         self.write("pkg/m.py", BASE.replace("a - b", "a - b - 0"))
         self.commit("pr")
-        self.git("config", "diff.noprefix", "true")
-        planted = {
-            "GIT_CONFIG_COUNT": "3",
-            "GIT_CONFIG_KEY_0": "diff.mnemonicPrefix",
-            "GIT_CONFIG_VALUE_0": "true",
-            "GIT_CONFIG_KEY_1": "color.diff",
-            "GIT_CONFIG_VALUE_1": "always",
-            "GIT_CONFIG_KEY_2": "diff.algorithm",
-            "GIT_CONFIG_VALUE_2": "patience",
+        _, _, _, plain = self.scope(ORG_MUTANTS_BASE=self.base)
+        want = helper.read_lines(plain)
+        settings = {
+            "diff.noprefix": "true",
+            "diff.mnemonicPrefix": "true",
+            "color.diff": "always",
         }
-        _, _, _, where = self.scope(ORG_MUTANTS_BASE=self.base, **planted)
-        self.assertEqual(lines({"pkg/m.py": {6}}), helper.read_lines(where))
+        for key, value in settings.items():
+            self.git("config", key, value)
+            self.git("config", "--global", key, value)
+        self.assertIn("always", self.git("config", "--global", "color.diff"))
+        _, _, _, planted = self.scope(ORG_MUTANTS_BASE=self.base)
+        self.assertEqual(lines({"pkg/m.py": {6}}), want)
+        self.assertEqual(want, helper.read_lines(planted))
+        self.assertEqual(
+            (plain / "patch.diff").read_text(encoding="utf-8"),
+            (planted / "patch.diff").read_text(encoding="utf-8"),
+        )
 
     def test_a_deletion_changes_no_line(self) -> None:
         """A line only deleted touches nothing on HEAD's side."""

@@ -77,7 +77,7 @@ CONFIG: dict[str, object] = {
 SOURCE = "export const add = (a: number, b: number): number => a + b;\n"
 CALL = (
     "stryker run stryker.config.json --inPlace --mutate src/add.ts"
-    " --reporters json,progress-append-only"
+    " --timeoutMS 5000 --timeoutFactor 1.5 --reporters json,progress-append-only"
 )
 # The share line every run of the planted one-file tree prints first.
 SHARED = f"{LABEL}: shard 0/1: 1 of 1 files"
@@ -317,6 +317,7 @@ class Shards(Planted):
         want = [
             (
                 "stryker run stryker.config.json --inPlace --mutate src/sub.ts"
+                " --timeoutMS 5000 --timeoutFactor 1.5"
                 " --reporters json,progress-append-only"
             )
         ]

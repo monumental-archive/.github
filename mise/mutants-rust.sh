@@ -57,6 +57,12 @@
 # base, or a change to .cargo/mutants.toml or to cargo-mutants in a
 # tracked lockfile, judges the whole population.
 #
+# THE TIMEOUT IS FIXED IN THE LEG (#1432, item 5): five times the
+# unmutated baseline's test time, never under 20 s — cargo-mutants' own
+# defaults, passed on every run so a `.cargo/mutants.toml` cannot change
+# them. Relative to the same runner's baseline, a slow mutant times out
+# (caught) on a fast runner and a slow one alike.
+#
 # THIS FILE IS THE SEQUENCE; mutants_rust.py READS AND JUDGES (#1486).
 # Every step that parses or decides — the reason rule, the default
 # major, the listings' counts, which exit statuses mean judged, the
@@ -176,6 +182,9 @@ rc=0
 scratch=$(mktemp -d)
 trap 'rc=$?; rm -rf "${scratch}"; [ -n "${org_done:-}" ] || [ "${rc}" -ne 0 ] || rc=1; exit "${rc}"' EXIT
 
+# The leg's own timeout, on every run (#1432, item 5; header).
+timing=(--timeout-multiplier 5 --minimum-test-timeout 20)
+
 # What the change touched, where the gate asks (#1432): a diff scope
 # hands every configured listing and the run `--in-diff`.
 scoped=()
@@ -218,7 +227,7 @@ mutate() {
     --all "${every}" --listed "${out}/listed.txt" --here "${here}"
   printf 'run\t%s\t%s\n' "${name}" "${out}" >> "${runs}"
   [[ ! -e ${out}/empty ]] || return 0
-  cargo mutants --output "${out}" ${sharding[@]+"${sharding[@]}"} ${scoped[@]+"${scoped[@]}"} \
+  cargo mutants --output "${out}" "${timing[@]}" ${sharding[@]+"${sharding[@]}"} ${scoped[@]+"${scoped[@]}"} \
     ${excludes[@]+"${excludes[@]}"} "$@" || status=$?
   echo "${status}" > "${out}/status"
 }
