@@ -52,13 +52,14 @@ reached at all.
 """
 
 import hashlib
+import itertools
 import json
 import os
 import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from tempfile import TemporaryDirectory
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -66,6 +67,9 @@ from belt import decoded, workflow_yaml
 from belt.release import package_crates
 from belt.typed_pytest import fixture
 from tests import support
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 CANON = support.CANON
 WORKFLOW = CANON / ".github" / "workflows" / "build-rust-crate.yml"
@@ -232,53 +236,78 @@ class Job:
     unwritten: tuple[str, ...] = ()
 
 
-def run_steps(
-    excludes: str,
-    second: dict[str, bytes] | None = None,
-    members: tuple[str, ...] = MEMBERS,
-    publish: dict[str, list[str]] | None = None,
-    unwritten: tuple[str, ...] = (),
-    *,
-    capfd: pytest.CaptureFixture[str],
+@dataclass
+class Packaging:
+    """One workspace laid out for the job: its env, tree and logs."""
+
+    environ: dict[str, str]
+    work: Path
+    cargo_log: Path
+    outputs: Path
+
+    def ran(self, status: int, said: tuple[str, str]) -> Run:
+        """Run the shipped step bodies after the helper, as the job does.
+
+        Returns:
+            The run's status, output, cargo log and what it left behind.
+
+        """
+        out, err = said
+        work = self.work
+        for name in STEPS:
+            if status != 0:
+                break
+            result = subprocess.run(
+                [BASH, "-c", step_body(name)],
+                env=self.environ,
+                capture_output=True,
+                text=True,
+                check=False,
+                cwd=work,
+            )
+            out, err = out + result.stdout, err + result.stderr
+            status = result.returncode
+        log = self.cargo_log
+        return Run(
+            status,
+            out,
+            err,
+            log.read_text().splitlines() if log.exists() else [],
+            sorted(p.name for p in (work / "target" / "package").glob("*.crate")),
+            self.outputs.read_text(),
+            read_plan(work / "plan" / "plan.json"),
+        )
+
+
+@fixture
+def package(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
     canon: support.Canon,
     env: support.Env,
-) -> Run:
-    """Run the shipped step bodies in order, the helper in this process.
-
-    The arguments are `Job`'s fields.
+) -> Callable[..., Packaging]:
+    """Lay out a workspace for the job, the arguments `Job`'s fields.
 
     Returns:
-        The run's status, output, cargo log and what it left behind.
+        A function that lays out one workspace and returns it.
 
     """
-    return steps(
-        Job(excludes, second, members, publish, unwritten),
-        capfd=capfd,
-        canon=canon,
-        env=env,
-    )
+    made = itertools.count()
 
-
-def steps(
-    job: Job,
-    *,
-    capfd: pytest.CaptureFixture[str],
-    canon: support.Canon,
-    env: support.Env,
-) -> Run:
-    """Run the shipped step bodies in order, as the job does.
-
-    Returns:
-        The run's status, output, cargo log and what it left behind.
-
-    """
-    with TemporaryDirectory() as d:
-        tmp = Path(d)
+    def lay_out(
+        excludes: str,
+        second: dict[str, bytes] | None = None,
+        members: tuple[str, ...] = MEMBERS,
+        publish: dict[str, list[str]] | None = None,
+        unwritten: tuple[str, ...] = (),
+    ) -> Packaging:
+        job = Job(excludes, second, members, publish, unwritten)
+        tmp = tmp_path / f"job{next(made)}"
         stubs, first, planted, work = (
             tmp / n for n in ("bin", "first", "second", "work")
         )
         for p in (stubs, first, planted, work):
-            p.mkdir()
+            p.mkdir(parents=True)
         (stubs / "cargo").write_text(CARGO_STUB)
         (stubs / "cargo").chmod(0o755)
         # The inventory step reads the policy the release asserts.
@@ -305,36 +334,13 @@ def steps(
             STUB_METADATA=str(tmp / "metadata.json"),
             STUB_UNWRITTEN=" ".join(job.unwritten),
         )
-        with pytest.MonkeyPatch.context() as patched:
-            for name, value in environ.items():
-                patched.setenv(name, value)
-            patched.chdir(work)
-            patched.setattr(sys, "argv", [COMMAND])
-            rc = package_crates.main([])
-        out, err = capfd.readouterr()
-        for name in STEPS:
-            if rc != 0:
-                break
-            result = subprocess.run(
-                [BASH, "-c", step_body(name)],
-                env=environ,
-                capture_output=True,
-                text=True,
-                check=False,
-                cwd=work,
-            )
-            out, err, rc = out + result.stdout, err + result.stderr, result.returncode
-        package = work / "target" / "package"
-        plan = work / "plan" / "plan.json"
-        return Run(
-            rc,
-            out,
-            err,
-            log.read_text().splitlines() if log.exists() else [],
-            sorted(p.name for p in package.glob("*.crate")),
-            outputs.read_text(),
-            read_plan(plan),
-        )
+        for name, value in environ.items():
+            monkeypatch.setenv(name, value)
+        monkeypatch.chdir(work)
+        monkeypatch.setattr(sys, "argv", [COMMAND])
+        return Packaging(environ, work, log, outputs)
+
+    return lay_out
 
 
 def read_plan(plan: Path) -> list[dict[str, object]]:
@@ -377,10 +383,12 @@ def test_the_shipped_step_calls_the_helper() -> None:
 
 # One row per branch of the Package step (#1273).
 def test_an_excluded_member_is_packaged_hashed_and_planned(
-    capfd: pytest.CaptureFixture[str], canon: support.Canon, env: support.Env
+    capfd: pytest.CaptureFixture[str], package: Callable[..., Packaging]
 ) -> None:
     """Ship the extension edtf excludes, uncompiled."""
-    run = run_steps(EXCLUDE, capfd=capfd, canon=canon, env=env)
+    packaging = package(EXCLUDE)
+    status = package_crates.main([])
+    run = packaging.ran(status, capfd.readouterr())
     assert run.returncode == 0, run.stdout + run.stderr
     cargo: list[str] = [
         f"package --workspace --locked --exclude {UNCOMPILABLE}",
@@ -403,13 +411,13 @@ def test_an_excluded_member_is_packaged_hashed_and_planned(
 
 
 def test_a_crate_rewritten_differently_fails_naming_both(
-    capfd: pytest.CaptureFixture[str], canon: support.Canon, env: support.Env
+    capfd: pytest.CaptureFixture[str], package: Callable[..., Packaging]
 ) -> None:
     """The verified bytes must be the bytes hashed and published."""
     planted = b"not the bytes that were verified\n"
-    run = run_steps(
-        EXCLUDE, second={"edtf-core": planted}, capfd=capfd, canon=canon, env=env
-    )
+    packaging = package(EXCLUDE, second={"edtf-core": planted})
+    status = package_crates.main([])
+    run = packaging.ran(status, capfd.readouterr())
     assert run.returncode != 0
     assert (
         f"::error::package-crates: edtf-core-{VERSION}.crate changed when"
@@ -421,26 +429,24 @@ def test_a_crate_rewritten_differently_fails_naming_both(
 
 
 def test_a_changed_excluded_crate_alone_is_not_a_mismatch(
-    capfd: pytest.CaptureFixture[str], canon: support.Canon, env: support.Env
+    capfd: pytest.CaptureFixture[str], package: Callable[..., Packaging]
 ) -> None:
     """Only crates the verified run wrote are compared."""
-    run = run_steps(
-        EXCLUDE,
-        second={UNCOMPILABLE: b"first written here\n"},
-        capfd=capfd,
-        canon=canon,
-        env=env,
-    )
+    packaging = package(EXCLUDE, second={UNCOMPILABLE: b"first written here\n"})
+    status = package_crates.main([])
+    run = packaging.ran(status, capfd.readouterr())
     assert run.returncode == 0, run.stdout + run.stderr
     assert "::error::package-crates: " not in run.stderr
 
 
 def test_a_verified_run_that_wrote_nothing_is_refused(
-    capfd: pytest.CaptureFixture[str], canon: support.Canon, env: support.Env
+    capfd: pytest.CaptureFixture[str], package: Callable[..., Packaging]
 ) -> None:
     """Every member excluded leaves nothing to compare (#1384)."""
     flags = "".join(f" --exclude {m}" for m in MEMBERS)
-    run = run_steps(flags, capfd=capfd, canon=canon, env=env)
+    packaging = package(flags)
+    status = package_crates.main([])
+    run = packaging.ran(status, capfd.readouterr())
     assert run.returncode == 1
     assert (
         run.stderr
@@ -452,10 +458,12 @@ def test_a_verified_run_that_wrote_nothing_is_refused(
 
 
 def test_a_failing_cargo_fails_the_step_with_its_status(
-    capfd: pytest.CaptureFixture[str], canon: support.Canon, env: support.Env
+    capfd: pytest.CaptureFixture[str], package: Callable[..., Packaging]
 ) -> None:
     """The uncompilable member, not excluded: cargo's 101 is the step's."""
-    run = steps(Job(""), capfd=capfd, canon=canon, env=env)
+    packaging = package("")
+    status = package_crates.main([])
+    run = packaging.ran(status, capfd.readouterr())
     assert run.returncode == 101
     assert "failed to compile pgrx-pg-sys" in run.stderr
     assert run.cargo == ONE_RUN
@@ -464,11 +472,13 @@ def test_a_failing_cargo_fails_the_step_with_its_status(
 
 # A workspace the job compiles entirely packages once.
 def test_one_verified_run_and_every_crate_hashed(
-    capfd: pytest.CaptureFixture[str], canon: support.Canon, env: support.Env
+    capfd: pytest.CaptureFixture[str], package: Callable[..., Packaging]
 ) -> None:
     """No --no-verify run when nothing is excluded."""
     compiles = ("edtf-core", "edtf-cli")
-    run = run_steps("", members=compiles, capfd=capfd, canon=canon, env=env)
+    packaging = package("", members=compiles)
+    status = package_crates.main([])
+    run = packaging.ran(status, capfd.readouterr())
     assert run.returncode == 0, run.stdout + run.stderr
     assert run.cargo == ONE_RUN
     packaged: list[str] = sorted(f"{m}-{VERSION}.crate" for m in compiles)
@@ -480,27 +490,28 @@ def test_one_verified_run_and_every_crate_hashed(
 
 
 def test_a_blank_exclusion_is_no_exclusion(
-    capfd: pytest.CaptureFixture[str], canon: support.Canon, env: support.Env
+    capfd: pytest.CaptureFixture[str], package: Callable[..., Packaging]
 ) -> None:
     """Whitespace-only flags take the one-run branch too."""
-    run = run_steps("  ", members=("edtf-core",), capfd=capfd, canon=canon, env=env)
+    packaging = package("  ", members=("edtf-core"))
+    status = package_crates.main([])
+    run = packaging.ran(status, capfd.readouterr())
     assert run.returncode == 0, run.stdout + run.stderr
     assert run.cargo == ONE_RUN
 
 
 # The Package step keeps exactly the helper's set (#1310).
 def test_a_publish_false_member_leaves_every_subject_list(
-    capfd: pytest.CaptureFixture[str], canon: support.Canon, env: support.Env
+    capfd: pytest.CaptureFixture[str], package: Callable[..., Packaging]
 ) -> None:
     """Packaged and verified, then removed before anything hashes it."""
-    run = run_steps(
+    packaging = package(
         "",
         members=("edtf-core", "edtf-cli", "edtf-internal"),
         publish={"edtf-cli": ["crates-io"], "edtf-internal": []},
-        capfd=capfd,
-        canon=canon,
-        env=env,
     )
+    status = package_crates.main([])
+    run = packaging.ran(status, capfd.readouterr())
     assert run.returncode == 0, run.stdout + run.stderr
     assert run.cargo == ONE_RUN
     said: list[str] = [
@@ -524,17 +535,14 @@ def test_a_publish_false_member_leaves_every_subject_list(
 
 
 def test_another_registry_only_is_not_a_subject(
-    capfd: pytest.CaptureFixture[str], canon: support.Canon, env: support.Env
+    capfd: pytest.CaptureFixture[str], package: Callable[..., Packaging]
 ) -> None:
     """A member publishing elsewhere is not crates.io's to serve."""
-    run = run_steps(
-        "",
-        members=("edtf-core", "edtf-mirror"),
-        publish={"edtf-mirror": ["x"]},
-        capfd=capfd,
-        canon=canon,
-        env=env,
+    packaging = package(
+        "", members=("edtf-core", "edtf-mirror"), publish={"edtf-mirror": ["x"]}
     )
+    status = package_crates.main([])
+    run = packaging.ran(status, capfd.readouterr())
     assert run.returncode == 0, run.stdout + run.stderr
     packaged: list[str] = [f"edtf-core-{VERSION}.crate"]
     assert packaged == run.packaged
@@ -548,12 +556,12 @@ def test_another_registry_only_is_not_a_subject(
 
 
 def test_an_excluded_publish_false_member_is_removed_too(
-    capfd: pytest.CaptureFixture[str], canon: support.Canon, env: support.Env
+    capfd: pytest.CaptureFixture[str], package: Callable[..., Packaging]
 ) -> None:
     """Packaged by the --no-verify run, then cut like any other."""
-    run = run_steps(
-        EXCLUDE, publish={UNCOMPILABLE: []}, capfd=capfd, canon=canon, env=env
-    )
+    packaging = package(EXCLUDE, publish={UNCOMPILABLE: []})
+    status = package_crates.main([])
+    run = packaging.ran(status, capfd.readouterr())
     assert run.returncode == 0, run.stdout + run.stderr
     packaged: list[str] = [
         f"edtf-cli-{VERSION}.crate",
@@ -564,17 +572,12 @@ def test_an_excluded_publish_false_member_is_removed_too(
 
 
 def test_a_named_crate_cargo_did_not_write_fails_by_name(
-    capfd: pytest.CaptureFixture[str], canon: support.Canon, env: support.Env
+    capfd: pytest.CaptureFixture[str], package: Callable[..., Packaging]
 ) -> None:
     """Nothing the publisher will upload goes unhashed."""
-    run = run_steps(
-        "",
-        members=("edtf-core", "edtf-cli"),
-        unwritten=("edtf-cli",),
-        capfd=capfd,
-        canon=canon,
-        env=env,
-    )
+    packaging = package("", members=("edtf-core", "edtf-cli"), unwritten=("edtf-cli"))
+    status = package_crates.main([])
+    run = packaging.ran(status, capfd.readouterr())
     assert run.returncode != 0
     assert (
         f"::error::package-crates: edtf-cli {VERSION} publishes to crates.io,"

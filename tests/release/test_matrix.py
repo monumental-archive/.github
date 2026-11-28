@@ -17,10 +17,8 @@ as those runs read it, so a Renovate roll of the live file moves nothing
 here.
 """
 
-import io
 import sys
 import tempfile
-from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
 import pytest
@@ -52,19 +50,6 @@ def _outside_mise(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 pytestmark = pytest.mark.usefixtures("_outside_mise")
-
-
-def run(*argv: str) -> tuple[int, str, str]:
-    """Run the helper.
-
-    Returns:
-        The exit status, stdout and stderr.
-
-    """
-    out, err = io.StringIO(), io.StringIO()
-    with redirect_stdout(out), redirect_stderr(err):
-        code = matrix.main(list(argv))
-    return code, out.getvalue(), err.getvalue()
 
 
 def recorded(name: str) -> tuple[str, str]:
@@ -107,30 +92,37 @@ def rows_state(tmp_path: Path) -> Rows:
     return Rows(tmp_path)
 
 
-def refused(argv: tuple[str, ...], message: str) -> None:
+def refused(
+    argv: tuple[str, ...], message: str, *, capfd: pytest.CaptureFixture[str]
+) -> None:
     """Assert a run refuses with exactly `message` and no outputs."""
-    assert run(*argv) == (1, "", message + "\n")
+    status = matrix.main([*argv])
+    out, err = capfd.readouterr()
+    assert (status, out, err) == (1, "", message + "\n")
 
 
-def assert_recorded(name: str, *argv: str) -> None:
+def assert_recorded(name: str, *argv: str, capfd: pytest.CaptureFixture[str]) -> None:
     """Assert a mode prints a recorded request's outputs and notices."""
     outputs, notices = recorded(name)
-    assert run(*argv) == (0, outputs, notices)
+    status = matrix.main([*argv])
+    out, err = capfd.readouterr()
+    assert (status, out, err) == (0, outputs, notices)
 
 
 @pytest.mark.usefixtures("rows_state")
-def test_stele_go_binary() -> None:
+def test_stele_go_binary(capfd: pytest.CaptureFixture[str]) -> None:
     """Stele's four Go targets."""
     assert_recorded(
         "stele-go-binary",
         "targets",
         "go-binary",
         "linux-amd64,linux-arm64,darwin-amd64,darwin-arm64",
+        capfd=capfd,
     )
 
 
 @pytest.mark.usefixtures("rows_state")
-def test_release_lab_rust_binary() -> None:
+def test_release_lab_rust_binary(capfd: pytest.CaptureFixture[str]) -> None:
     """Release-lab's four Rust targets."""
     assert_recorded(
         "lab-rust-binary",
@@ -138,25 +130,28 @@ def test_release_lab_rust_binary() -> None:
         "rust-binary",
         "x86_64-unknown-linux-musl,aarch64-unknown-linux-musl,"
         "x86_64-apple-darwin,aarch64-apple-darwin",
+        capfd=capfd,
     )
 
 
 @pytest.mark.usefixtures("rows_state")
-def test_release_lab_pgrx_extension() -> None:
+def test_release_lab_pgrx_extension(capfd: pytest.CaptureFixture[str]) -> None:
     """Release-lab's five majors, ten legs, and the glibc floor."""
-    assert_recorded("lab-pgrx-extension", "pgrx-extension", MAPPING, "14,15,16,17,18")
+    assert_recorded(
+        "lab-pgrx-extension", "pgrx-extension", MAPPING, "14,15,16,17,18", capfd=capfd
+    )
 
 
 @pytest.mark.usefixtures("rows_state")
-def test_release_lab_pgrx_images() -> None:
+def test_release_lab_pgrx_images(capfd: pytest.CaptureFixture[str]) -> None:
     """Release-lab's five image majors; the step printed no notices."""
-    assert_recorded("lab-pgrx-images", "pgrx-images", "14,15,16,17,18")
+    assert_recorded("lab-pgrx-images", "pgrx-images", "14,15,16,17,18", capfd=capfd)
 
 
 @pytest.mark.usefixtures("rows_state")
-def test_canon_base_attest() -> None:
+def test_canon_base_attest(capfd: pytest.CaptureFixture[str]) -> None:
     """The canon's ten pinned bases, build then smoke."""
-    assert_recorded("canon-base-attest", "base-images", MAPPING)
+    assert_recorded("canon-base-attest", "base-images", MAPPING, capfd=capfd)
 
 
 RUNNERS = (
@@ -174,11 +169,13 @@ RUNNERS = (
 @pytest.mark.usefixtures("rows_state")
 @pytest.mark.parametrize(("cls", "target", "runner"), RUNNERS)
 def test_each_known_target_runs_on_its_runner(
-    cls: object, target: object, runner: object
+    cls: object, target: object, runner: object, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """One row per table entry, outputs and notice whole."""
     cell = f'{{"target":"{target}","runner":"{runner}"}}'
-    assert run("targets", cls, target) == (
+    status = matrix.main(["targets", cls, target])
+    out, err = capfd.readouterr()
+    assert (status, out, err) == (
         0,
         f'matrix={{"include":[{cell}]}}\nexpected=["{target}"]\n',
         f"::notice::will build {target} on {runner}\n",
@@ -196,50 +193,59 @@ def test_the_tables_hold_exactly_the_canon_targets() -> None:
 
 
 @pytest.mark.usefixtures("rows_state")
-def test_an_empty_request_is_refused() -> None:
+def test_an_empty_request_is_refused(capfd: pytest.CaptureFixture[str]) -> None:
     """Nothing requested, after spaces and the first line."""
     for cls in ("go-binary", "rust-binary"):
         for request in ("", "  ", "\nlinux-amd64"):
             refused(
                 ("targets", cls, request),
                 f"::error::matrix: no targets requested — {NOTHING}",
+                capfd=capfd,
             )
 
 
 @pytest.mark.usefixtures("rows_state")
-def test_an_unknown_go_target_names_the_go_form() -> None:
+def test_an_unknown_go_target_names_the_go_form(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """The Go hint names the target form."""
     refused(
         ("targets", "go-binary", "linux-amd64,plan9-386"),
         f"::error::matrix: unknown target plan9-386; {GO_HINT}",
+        capfd=capfd,
     )
 
 
 @pytest.mark.usefixtures("rows_state")
-def test_an_unknown_rust_target_is_refused() -> None:
+def test_an_unknown_rust_target_is_refused(capfd: pytest.CaptureFixture[str]) -> None:
     """The Rust hint is bare."""
     refused(
         ("targets", "rust-binary", "x86_64-pc-windows-msvc"),
         "::error::matrix: unknown target x86_64-pc-windows-msvc; canon targets only",
+        capfd=capfd,
     )
 
 
 @pytest.mark.usefixtures("rows_state")
-def test_another_class_target_is_unknown() -> None:
+def test_another_class_target_is_unknown(capfd: pytest.CaptureFixture[str]) -> None:
     """The tables are per class: a Go target is no Rust target."""
     refused(
         ("targets", "rust-binary", "linux-amd64"),
         "::error::matrix: unknown target linux-amd64; canon targets only",
+        capfd=capfd,
     )
 
 
 @pytest.mark.usefixtures("rows_state")
 @pytest.mark.parametrize("asked", [",linux-amd64", "linux-amd64,,darwin-arm64", ","])
-def test_an_empty_field_is_an_unknown_target(asked: object) -> None:
+def test_an_empty_field_is_an_unknown_target(
+    asked: object, capfd: pytest.CaptureFixture[str]
+) -> None:
     """A leading or inner empty field is kept, and refused."""
     refused(
         ("targets", "go-binary", asked),
         f"::error::matrix: unknown target ; {GO_HINT}",
+        capfd=capfd,
     )
 
 
@@ -247,20 +253,26 @@ def test_an_empty_field_is_an_unknown_target(asked: object) -> None:
 @pytest.mark.parametrize(
     "asked", ["linux-amd64,linux-amd64", "linux-amd64, linux-amd64,"]
 )
-def test_a_duplicate_is_refused(asked: object) -> None:
+def test_a_duplicate_is_refused(
+    asked: object, capfd: pytest.CaptureFixture[str]
+) -> None:
     """The same target twice, spaced or not."""
     refused(
         ("targets", "go-binary", asked),
         "::error::matrix: duplicate target requested",
+        capfd=capfd,
     )
 
 
 @pytest.mark.usefixtures("rows_state")
-def test_an_unknown_target_is_named_before_a_duplicate() -> None:
+def test_an_unknown_target_is_named_before_a_duplicate(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """The shell checked every target before counting duplicates."""
     refused(
         ("targets", "go-binary", "linux-amd64,linux-amd64,plan9-386"),
         f"::error::matrix: unknown target plan9-386; {GO_HINT}",
+        capfd=capfd,
     )
 
 
@@ -268,47 +280,62 @@ def test_an_unknown_target_is_named_before_a_duplicate() -> None:
 @pytest.mark.parametrize(
     "asked", [" linux-amd64 ", "linux-amd64,", "linux-amd64\ndarwin-arm64"]
 )
-def test_the_request_splits_as_the_shell_split_it(asked: object) -> None:
+def test_the_request_splits_as_the_shell_split_it(
+    asked: object, capfd: pytest.CaptureFixture[str]
+) -> None:
     """Spaces removed, one trailing comma dropped, the first line only."""
-    code, out, _ = run("targets", "go-binary", asked)
+    code = matrix.main(["targets", "go-binary", asked])
+    out = capfd.readouterr().out
     assert code == 0
     assert 'expected=["linux-amd64"]\n' in out
 
 
 @pytest.mark.usefixtures("rows_state")
-def test_the_order_requested_is_the_order_planned() -> None:
+def test_the_order_requested_is_the_order_planned(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """No sorting: the caller's order is the matrix's."""
-    _, out, _ = run("targets", "go-binary", "darwin-arm64,linux-amd64")
+    matrix.main(["targets", "go-binary", "darwin-arm64,linux-amd64"])
+    out = capfd.readouterr().out
     assert 'expected=["darwin-arm64","linux-amd64"]\n' in out
 
 
 @pytest.mark.usefixtures("rows_state")
 @pytest.mark.parametrize("asked", ["", " "])
-def test_pgrx_extension_an_empty_request_is_refused(asked: object) -> None:
+def test_pgrx_extension_an_empty_request_is_refused(
+    asked: object, capfd: pytest.CaptureFixture[str]
+) -> None:
     """Nothing requested."""
     refused(
         ("pgrx-extension", MAPPING, asked),
         f"::error::matrix: no PG majors requested — {NOTHING}",
+        capfd=capfd,
     )
 
 
 @pytest.mark.usefixtures("rows_state")
 @pytest.mark.parametrize("major", ["13", "19"])
-def test_a_major_with_no_pinned_base_image_is_refused(major: object) -> None:
+def test_a_major_with_no_pinned_base_image_is_refused(
+    major: object, capfd: pytest.CaptureFixture[str]
+) -> None:
     """A major the mapping does not carry, numeric or not."""
     refused(
         ("pgrx-extension", MAPPING, f"14,{major}"),
         f"::error::matrix: pg{major} {NO_IMAGE}",
+        capfd=capfd,
     )
 
 
 @pytest.mark.usefixtures("rows_state")
 @pytest.mark.parametrize("major", ["x", "pg14", ""])
-def test_a_non_numeric_major_is_refused(major: object) -> None:
+def test_a_non_numeric_major_is_refused(
+    major: object, capfd: pytest.CaptureFixture[str]
+) -> None:
     """A field that is not a number is named as such, not as unpinned."""
     refused(
         ("pgrx-extension", MAPPING, f"{major},14"),
         f"::error::matrix: {major} is not a PG major",
+        capfd=capfd,
     )
 
 
@@ -322,34 +349,43 @@ def test_a_non_numeric_major_is_refused(major: object) -> None:
     ],
 )
 def test_a_major_pinned_for_one_role_only_is_refused(
-    rows_state: Rows, text: object
+    rows_state: Rows, text: object, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """Both a build and a smoke image, or no plan."""
     refused(
         ("pgrx-extension", rows_state.mapping(text), "14"),
         f"::error::matrix: pg14 {NO_IMAGE}",
+        capfd=capfd,
     )
 
 
 @pytest.mark.usefixtures("rows_state")
-def test_pgrx_extension_a_duplicate_is_refused() -> None:
+def test_pgrx_extension_a_duplicate_is_refused(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """The same major twice."""
     refused(
         ("pgrx-extension", MAPPING, "16,17,16"),
         "::error::matrix: duplicate PG major requested",
+        capfd=capfd,
     )
 
 
 @pytest.mark.usefixtures("rows_state")
-def test_a_duplicate_is_named_before_an_unpinned_major() -> None:
+def test_a_duplicate_is_named_before_an_unpinned_major(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """The request's own rules run before the mapping's pins (#1531)."""
     refused(
         ("pgrx-extension", MAPPING, "16,13,16"),
         "::error::matrix: duplicate PG major requested",
+        capfd=capfd,
     )
 
 
-def test_each_major_builds_on_both_arches(rows_state: Rows) -> None:
+def test_each_major_builds_on_both_arches(
+    rows_state: Rows, capfd: pytest.CaptureFixture[str]
+) -> None:
     """Two legs per major, amd64 first, both images on each."""
     mapping = rows_state.mapping(
         '[build]\n"16" = "b@sha256:1"\n[smoke]\n"16" = "s@sha256:2"\n'
@@ -366,18 +402,25 @@ def test_each_major_builds_on_both_arches(rows_state: Rows) -> None:
         "::notice::will build pg16 on ubuntu-24.04\n"
         "::notice::will build pg16 on ubuntu-24.04-arm\n"
     )
-    assert run("pgrx-extension", mapping, "16") == (0, outputs, notices)
+    status = matrix.main(["pgrx-extension", mapping, "16"])
+    out, err = capfd.readouterr()
+    assert (status, out, err) == (0, outputs, notices)
 
 
-def test_a_mapping_with_no_floor_prints_null(rows_state: Rows) -> None:
+def test_a_mapping_with_no_floor_prints_null(
+    rows_state: Rows, capfd: pytest.CaptureFixture[str]
+) -> None:
     """Jq's `-r .floor.glibc` printed null; the floor check is the build's."""
     mapping = rows_state.mapping('[build]\n"16" = "b"\n[smoke]\n"16" = "s"\n')
-    _, out, _ = run("pgrx-extension", mapping, "16")
+    matrix.main(["pgrx-extension", mapping, "16"])
+    out = capfd.readouterr().out
     assert out.endswith("floor=null\n")
 
 
 @pytest.mark.usefixtures("rows_state")
-def test_pg19_is_planned_from_the_real_mapping() -> None:
+def test_pg19_is_planned_from_the_real_mapping(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """The tracked mapping serves Postgres 19 (#1848).
 
     The pins are read from the file itself, so a Renovate roll of
@@ -388,7 +431,8 @@ def test_pg19_is_planned_from_the_real_mapping() -> None:
         "::notice::will build pg19 on ubuntu-24.04\n"
         "::notice::will build pg19 on ubuntu-24.04-arm\n"
     )
-    code, out, err = run("pgrx-extension", str(TRACKED), "19")
+    code = matrix.main(["pgrx-extension", str(TRACKED), "19"])
+    out, err = capfd.readouterr()
     assert (code, err) == (0, notices)
     pins = matrix.load(TRACKED)
     build, smoke = pins.roles["build"]["19"], pins.roles["smoke"]["19"]
@@ -405,14 +449,19 @@ def test_pg19_is_planned_from_the_real_mapping() -> None:
 NAME = "docker/pgrx-base-images.toml"
 
 
-def test_a_mapping_that_is_not_toml_is_refused(rows_state: Rows) -> None:
+def test_a_mapping_that_is_not_toml_is_refused(
+    rows_state: Rows, capfd: pytest.CaptureFixture[str]
+) -> None:
     """Named as not TOML, with the parser's reason."""
-    code, out, err = run("pgrx-extension", rows_state.mapping("[build\n"), "16")
+    code = matrix.main(["pgrx-extension", rows_state.mapping("[build\n"), "16"])
+    out, err = capfd.readouterr()
     assert (code, out) == (1, "")
     assert err.startswith(f"::error::matrix: {NAME} is not TOML: "), err
 
 
-def test_each_wrong_shape_is_refused_by_name(rows_state: Rows) -> None:
+def test_each_wrong_shape_is_refused_by_name(
+    rows_state: Rows, capfd: pytest.CaptureFixture[str]
+) -> None:
     """A role or the floor that is not a table, a pin that is not a string."""
     for text, said in (
         ('build = "x16"\n', f"[build] in {NAME} is not a table of majors"),
@@ -427,41 +476,49 @@ def test_each_wrong_shape_is_refused_by_name(rows_state: Rows) -> None:
             refused(
                 (argv[0], rows_state.mapping(text), *argv[1:]),
                 f"::error::matrix: {said}",
+                capfd=capfd,
             )
 
 
 @pytest.mark.usefixtures("rows_state")
 @pytest.mark.parametrize("asked", ["", "  "])
-def test_pgrx_images_an_empty_request_is_refused(asked: object) -> None:
+def test_pgrx_images_an_empty_request_is_refused(
+    asked: object, capfd: pytest.CaptureFixture[str]
+) -> None:
     """Nothing requested."""
     refused(
         ("pgrx-images", asked),
         f"::error::matrix: no PG majors requested — {NOTHING}",
+        capfd=capfd,
     )
 
 
 @pytest.mark.usefixtures("rows_state")
 @pytest.mark.parametrize("major", ["x", "1a", "pg14", "-1", "1.5", "٣"])
-def test_pgrx_images_a_non_numeric_major_is_refused(major: object) -> None:
+def test_pgrx_images_a_non_numeric_major_is_refused(
+    major: object, capfd: pytest.CaptureFixture[str]
+) -> None:
     """ASCII digits only, as `^[0-9]+$` held it."""
     refused(
         ("pgrx-images", f"14,{major}"),
         f"::error::matrix: {major} is not a PG major",
+        capfd=capfd,
     )
 
 
 @pytest.mark.usefixtures("rows_state")
-def test_an_empty_field_is_not_a_major() -> None:
+def test_an_empty_field_is_not_a_major(capfd: pytest.CaptureFixture[str]) -> None:
     """A leading empty field is kept, and refused."""
-    refused(("pgrx-images", ",14"), "::error::matrix:  is not a PG major")
+    refused(("pgrx-images", ",14"), "::error::matrix:  is not a PG major", capfd=capfd)
 
 
 @pytest.mark.usefixtures("rows_state")
-def test_pgrx_images_a_duplicate_is_refused() -> None:
+def test_pgrx_images_a_duplicate_is_refused(capfd: pytest.CaptureFixture[str]) -> None:
     """The same major twice would build and push one image twice (#1531)."""
     refused(
         ("pgrx-images", "14,14"),
         "::error::matrix: duplicate PG major requested",
+        capfd=capfd,
     )
 
 
@@ -498,29 +555,35 @@ def test_a_clean_list_is_returned_in_order() -> None:
     "ref", ["postgres:14-bookworm", "postgres:14@sha512:ab", "postgres@"]
 )
 def test_a_reference_with_no_digest_is_refused_bare(
-    rows_state: Rows, ref: object
+    rows_state: Rows, ref: object, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """The heredoc's SystemExit wording, unprefixed as it always was."""
     refused(
         ("base-images", rows_state.mapping(f'[smoke]\n"14" = "{ref}"\n')),
         f"matrix: smoke.14: no digest in {ref!r}",
+        capfd=capfd,
     )
 
 
 @pytest.mark.parametrize(
     "text", ["", '[floor]\nglibc = "2.36"\n', "[build]\n[smoke]\n"]
 )
-def test_an_empty_file_is_refused(rows_state: Rows, text: object) -> None:
+def test_an_empty_file_is_refused(
+    rows_state: Rows, text: object, capfd: pytest.CaptureFixture[str]
+) -> None:
     """A mapping that pins nothing approves nothing."""
     refused(
         ("base-images", rows_state.mapping(text)),
         "::error::matrix: no pinned base images found — an empty"
         " approval"
         " set approves nothing",
+        capfd=capfd,
     )
 
 
-def test_a_cell_names_the_repository_without_its_tag(rows_state: Rows) -> None:
+def test_a_cell_names_the_repository_without_its_tag(
+    rows_state: Rows, capfd: pytest.CaptureFixture[str]
+) -> None:
     """Docker Hub's short names are expanded; keys sort as strings."""
     mapping = rows_state.mapping(
         '[build]\n"9" = "ghcr.io/o/pg:9@sha256:1"\n"10" = "postgres:10@sha256:2"\n'
@@ -537,7 +600,9 @@ def test_a_cell_names_the_repository_without_its_tag(rows_state: Rows) -> None:
         "::notice::will attest build pg10: postgres:10@sha256:2\n"
         "::notice::will attest build pg9: ghcr.io/o/pg:9@sha256:1\n"
     )
-    assert run("base-images", mapping) == (
+    status = matrix.main(["base-images", mapping])
+    out, err = capfd.readouterr()
+    assert (status, out, err) == (
         0,
         f'matrix={{"include":[{ten},{nine}]}}\n',
         notices,
@@ -556,8 +621,11 @@ def test_a_cell_names_the_repository_without_its_tag(rows_state: Rows) -> None:
         ("pgrx-extension", MAPPING),
     ],
 )
-def test_malformed_command_lines(argv: object) -> None:
+def test_malformed_command_lines(
+    argv: object, capfd: pytest.CaptureFixture[str]
+) -> None:
     """A missing argument or an unknown class prints the usage."""
-    code, out, err = run(*argv)
+    code = matrix.main([*argv])
+    out, err = capfd.readouterr()
     assert (code, out) == (2, "")
     assert err.startswith("matrix: usage: belt matrix targets")
