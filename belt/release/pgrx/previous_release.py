@@ -23,7 +23,11 @@ A candidate no release carries burned, or lost its release, and is passed
 over. No installable candidate at all is the one meaning of first publish.
 
 Stdlib only, so the logic sits under the coverage and mutation legs
-(#1352).
+(#1352). The answers are pure functions of the listing, the `sql/`
+directory's file names and the version (`parse_listing`, `graph_of`,
+`predecessor`, `judge`, `wanted`); the modes below read the forge with
+`gh` and the directory with one listing, unpack with `tar`, and call
+them.
 
     belt previous-release guard --repo R --version V --crate-dir D
         Refuse a control file that strands existing installations. The
@@ -69,9 +73,12 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
 from belt import findings, workflow_command
+
+if TYPE_CHECKING:
+    from collections.abc import Collection, Iterable
 
 # The runner's own, resolved on PATH once.
 GH = shutil.which("gh") or "gh"
@@ -139,12 +146,12 @@ def version_key(version: str) -> tuple[int, ...]:
     return tuple(int(part) for part in core.split("."))
 
 
-def upgrade_graph(sql_dir: Path, name: str) -> Graph:
-    """Read the extension's upgrade graph from its `sql/` directory.
+def graph_of(scripts: Iterable[str], name: str) -> Graph:
+    """Read the extension's upgrade graph from its `sql/` file names.
 
     Returns:
         The versions something upgrades TO, and every version named
-        (both halves), newest first; empty where the directory is absent.
+        (both halves), newest first; empty where no name is an edge.
 
     """
     edge = re.compile(
@@ -152,9 +159,8 @@ def upgrade_graph(sql_dir: Path, name: str) -> Graph:
     )
     targets: set[str] = set()
     versions: set[str] = set()
-    entries = sql_dir.iterdir() if sql_dir.is_dir() else ()
-    for entry in entries:
-        match = edge.match(entry.name)
+    for script in scripts:
+        match = edge.match(script)
         if match:
             versions.update(match.groups())
             targets.add(match.group(2))
@@ -162,6 +168,27 @@ def upgrade_graph(sql_dir: Path, name: str) -> Graph:
         sorted(targets, key=version_key, reverse=True),
         sorted(versions, key=version_key, reverse=True),
     )
+
+
+def scripts_in(sql_dir: Path) -> list[str]:
+    """List the file names in a `sql/` directory.
+
+    Returns:
+        The names; none where the directory is absent.
+
+    """
+    entries = sql_dir.iterdir() if sql_dir.is_dir() else ()
+    return [entry.name for entry in entries if entry.is_file()]
+
+
+def upgrade_graph(sql_dir: Path, name: str) -> Graph:
+    """Read the extension's upgrade graph from its `sql/` directory.
+
+    Returns:
+        What `graph_of` reads from the directory's file names.
+
+    """
+    return graph_of(scripts_in(sql_dir), name)
 
 
 def carrier(rows: list[tuple[str, str]], name: str, version: str) -> str | None:
@@ -176,7 +203,7 @@ def carrier(rows: list[tuple[str, str]], name: str, version: str) -> str | None:
 
 
 def predecessor(
-    rows: list[tuple[str, str]], sql_dir: Path, name: str, version: str
+    rows: list[tuple[str, str]], graph: Graph, name: str, version: str
 ) -> Predecessor | None:
     """Answer which release came before `version` of this extension.
 
@@ -187,7 +214,7 @@ def predecessor(
 
     """
     ceiling = version_key(version)
-    for candidate in upgrade_graph(sql_dir, name).targets:
+    for candidate in graph.targets:
         if version_key(candidate) >= ceiling:
             continue
         tag = carrier(rows, name, candidate)
@@ -212,12 +239,23 @@ def listing(repo: str) -> tuple[int, list[tuple[str, str]]]:
         text=True,
         check=False,
     )
+    return result.returncode, parse_listing(result.stdout)
+
+
+def parse_listing(text: str) -> list[tuple[str, str]]:
+    """Read the listing's lines, `TAG<TAB>ASSET` each.
+
+    Returns:
+        `(tag, asset)` per line that has a tab; any other line is not an
+        asset and is passed over.
+
+    """
     rows = []
-    for line in result.stdout.splitlines():
+    for line in text.splitlines():
         tag, sep, asset = line.partition("\t")
         if sep:
             rows.append((tag, asset))
-    return result.returncode, rows
+    return rows
 
 
 def extension_name(crate_dir: str) -> str:
@@ -228,6 +266,51 @@ def extension_name(crate_dir: str) -> str:
 
     """
     return crate_dir.rstrip("/").rsplit("/", 1)[-1].replace("-", "_")
+
+
+class Verdict(NamedTuple):
+    """The guard's answer: whether it refuses, and what it says."""
+
+    refused: bool
+    message: str
+
+
+def judge(
+    rows: list[tuple[str, str]], scripts: Collection[str], crate_dir: str, version: str
+) -> Verdict:
+    """Decide whether this release strands an existing installation.
+
+    `scripts` are the file names in the crate's `sql/` directory.
+
+    Returns:
+        A refusal naming the missing upgrade script and the predecessor's
+        release; otherwise the path that needs none, or the script found.
+
+    """
+    name = extension_name(crate_dir)
+    if carrier(rows, name, version) is not None:
+        return Verdict(
+            refused=False, message=f"re-run of {version}; upgrade path not applicable"
+        )
+    prev = predecessor(rows, graph_of(scripts, name), name, version)
+    if prev is None:
+        return Verdict(
+            refused=False,
+            message="no previous release; first publish needs no upgrade path",
+        )
+    script = f"{name}--{prev.version}--{version}.sql"
+    if script not in scripts:
+        return Verdict(
+            refused=True,
+            message=(
+                f"no upgrade path {crate_dir}/sql/{script} from published"
+                f" {prev.version} ({prev.tag}) — existing installations would"
+                " be stranded"
+            ),
+        )
+    return Verdict(
+        refused=False, message=f"upgrade path {prev.version} -> {version} present"
+    )
 
 
 def guard(repo: str, version: str, crate_dir: str) -> int:
@@ -241,26 +324,11 @@ def guard(repo: str, version: str, crate_dir: str) -> int:
     status, rows = listing(repo)
     if status != 0:
         return status
-    name = extension_name(crate_dir)
-    if carrier(rows, name, version) is not None:
-        workflow_command.notice(f"re-run of {version}; upgrade path not applicable")
-        return 0
-    prev = predecessor(rows, Path(crate_dir) / "sql", name, version)
-    if prev is None:
-        workflow_command.notice(
-            "no previous release; first publish needs no upgrade path"
-        )
-        return 0
-    upgrade = f"{crate_dir}/sql/{name}--{prev.version}--{version}.sql"
-    if not Path(upgrade).is_file():
-        findings.finding(
-            "",
-            f"no upgrade path {upgrade} from published {prev.version}"
-            f" ({prev.tag}) — existing installations would be stranded",
-            annotate=True,
-        )
+    verdict = judge(rows, scripts_in(Path(crate_dir) / "sql"), crate_dir, version)
+    if verdict.refused:
+        findings.finding("", verdict.message, annotate=True)
         return 1
-    workflow_command.notice(f"upgrade path {prev.version} -> {version} present")
+    workflow_command.notice(verdict.message)
     return 0
 
 
@@ -281,6 +349,30 @@ class Args(argparse.Namespace):
     controls: list[str]
 
 
+def wanted(
+    rows: list[tuple[str, str]],
+    scripts: Collection[str],
+    crate_dir: str,
+    version: str,
+    cell: tuple[str, str],
+) -> tuple[Predecessor, str] | None:
+    """Name the predecessor's tarball of one `(pg, arch)` cell.
+
+    Returns:
+        The predecessor and its asset's name; None on a re-run of this
+        version or with no predecessor.
+
+    """
+    name = extension_name(crate_dir)
+    if carrier(rows, name, version) is not None:
+        return None
+    prev = predecessor(rows, graph_of(scripts, name), name, version)
+    if prev is None:
+        return None
+    pg, arch = cell
+    return prev, f"{name}-{prev.version}-pg{pg}-linux-{arch}.tar.gz"
+
+
 def fetch(args: Args) -> int:
     """Fetch and extract the predecessor's tarball of this cell.
 
@@ -293,16 +385,14 @@ def fetch(args: Args) -> int:
     status, rows = listing(args.repo)
     if status != 0:
         return status
-    name = extension_name(args.crate_dir)
-    prev = None
-    if carrier(rows, name, args.version) is None:
-        prev = predecessor(rows, Path(args.crate_dir) / "sql", name, args.version)
-    if prev is None:
+    scripts = scripts_in(Path(args.crate_dir) / "sql")
+    cell = wanted(rows, scripts, args.crate_dir, args.version, (args.pg, args.arch))
+    if cell is None:
         workflow_command.notice(
             "no previous release; upgrade execution skipped", stream=sys.stderr
         )
         return 0
-    asset = f"{name}-{prev.version}-pg{args.pg}-linux-{args.arch}.tar.gz"
+    prev, asset = cell
     download = subprocess.run(
         [
             GH,
@@ -354,7 +444,8 @@ def answer(args: Args) -> int:
     status, rows = listing(args.repo)
     if status != 0:
         return status
-    prev = predecessor(rows, *control_parts(args.control), args.version)
+    sql_dir, name = control_parts(args.control)
+    prev = predecessor(rows, upgrade_graph(sql_dir, name), name, args.version)
     if prev is not None:
         print(f"{prev.version}\t{prev.tag}")
     return 0
@@ -378,7 +469,7 @@ def record(args: Args) -> int:
         if graph.versions:
             carried = [v for v in graph.versions if carrier(rows, name, v)]
             lines[name] = " ".join([name, *carried])
-        prev = predecessor(rows, sql_dir, name, args.version)
+        prev = predecessor(rows, graph, name, args.version)
         answers.append("\t".join([name, *(prev or ("", ""))]))
     header = RECORD_HEADER.format(
         observed=dt.datetime.now(dt.UTC).date().isoformat(),

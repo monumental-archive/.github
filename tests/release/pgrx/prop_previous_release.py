@@ -2,8 +2,9 @@
 
 The properties of `test_pgrx_build.py`'s PreviousRelease and
 OnePredecessor rows (#1556, #1592), over generated upgrade graphs,
-release listings, versions and crate directories. `gh` and `tar` are
-replaced in-process by the row's answers.
+release listings, versions and crate directories. Each property tests
+one of the helper's pure functions; what `gh` and `tar` answer is the
+I/O layer's, held by the table rows in test_pgrx_build.py.
 
 The predecessor is no longer GitHub's latest release (#1592): it is the
 newest version the extension's upgrade graph upgrades TO, LOWER than the
@@ -15,37 +16,29 @@ and that release's tag whatever it is named. So:
   line never upgrades from a newer one), whatever order the
   listing and the directory come in, with the first release in listing
   order that carries it; nothing when no target is carried.
-- V: the guard refuses exactly when the listing was read, this version
-  is not already carried, a predecessor exists, and the upgrade script
-  `<crate>/sql/<name>--<prev>--<version>.sql` is absent; the refusal
-  names that path and the predecessor's release. Every other path
-  exits 0, and a failed listing read exits with gh's own status.
+- V: the guard refuses exactly when this version is not already
+  carried, a predecessor exists, and the upgrade script
+  `<name>--<prev>--<version>.sql` is not among the `sql/` directory's
+  files; the refusal names `<crate>/sql/` and that script, and the
+  predecessor's release.
+- V: fetch wants the predecessor's tarball of the cell exactly when the
+  guard has a predecessor to check, and names it by the cell.
 - V: the extension's name is what `basename DIR | tr - _` prints, for
   any crate directory below the checkout, trailing slashes or not.
-- R: on any listing text and any `gh` answer, guard and fetch exit with
-  0, 1 or the tool's own status; neither dies with anything else.
+- R: any listing text is read without a raise, each row a tab-split
+  line of it, and judged.
 
 Run by `test:python-properties` under the belt's Hypothesis profile;
 the ordinary suite (`mise run test`) never imports this file.
 """
 
-import contextlib
-import io
 import posixpath
-import sys
-import tempfile
-from pathlib import Path
-from typing import TYPE_CHECKING
 
-import pytest
 from hypothesis import example
 from hypothesis import strategies as st
 
 from belt.release.pgrx import previous_release as previous
 from belt.typed_hypothesis import given
-
-if TYPE_CHECKING:
-    pass
 
 # A small pool, so graphs and listings meet: 1.0.10 beside 1.0.2 is the
 # order a string sort gets wrong.
@@ -55,19 +48,6 @@ TAG = st.one_of(
     VERSION.map("v{}".format),
     st.from_regex(r"[a-z-]{1,8}v[0-9.]{1,6}", fullmatch=True),
 )
-
-
-def as_the_step(patched: pytest.MonkeyPatch, tmp: Path) -> None:
-    """Set one example's world: the stand-ins, outside mise, in `tmp`.
-
-    A run outside mise records nothing and is named by its file (#1934).
-    """
-    patched.setenv("MISE_TASK_NAME", "")
-    patched.setenv("ORG_FINDINGS", "")
-    patched.setattr(sys, "argv", ["previous_release.py"])
-    patched.setattr(previous, "GH", str(tmp / ".stubs" / "gh"))
-    patched.setattr(previous, "TAR", str(tmp / ".stubs" / "tar"))
-    patched.chdir(tmp)
 
 
 def not_dots(segment: str) -> bool:
@@ -149,44 +129,15 @@ def model(
     return newest, lower[newest]
 
 
-def lay(sql: Path, name: str, edges: list[tuple[str, str]]) -> None:
-    """Write the graph's scripts, empty, beside a README and a stranger's."""
-    sql.mkdir(parents=True, exist_ok=True)
-    (sql / "README.md").write_text("", encoding="utf-8")
-    (sql / "other--0.2.0--10.0.0.sql").write_text("", encoding="utf-8")
-    for frm, to in edges:
-        (sql / f"{name}--{frm}--{to}.sql").write_text("", encoding="utf-8")
-
-
-def stubs(
-    root: Path, listing: str, list_rc: int, tar_rc: int = 0, dl_rc: int = 0
-) -> None:
-    """Stand a `gh` and a `tar` in, answering as the row says.
-
-    `gh api` prints `listing` and exits `list_rc`; any other `gh` call
-    exits `dl_rc`; `tar` exits `tar_rc`. They are written under `root`.
-    """
-    root.mkdir(parents=True, exist_ok=True)
-    (root / "listing").write_text(listing, encoding="utf-8")
-    gh = (
-        "#!/bin/sh\n"
-        'case " $* " in *" api "*) cat "$(dirname "$0")/listing";'
-        f" exit {list_rc} ;; esac\n"
-        f"exit {dl_rc}\n"
-    )
-    for name, text in (("gh", gh), ("tar", f"#!/bin/sh\nexit {tar_rc}\n")):
-        (root / name).write_text(text, encoding="utf-8")
-        (root / name).chmod(0o755)
-
-
-def served(listing: list[tuple[str, str]]) -> str:
-    """Print a listing as the helper's jq does, a line per asset.
+def scripts(name: str, edges: list[tuple[str, str]]) -> list[str]:
+    """Name the graph's scripts, beside a README and a stranger's.
 
     Returns:
-        The lines.
+        The `sql/` directory's file names.
 
     """
-    return "".join(f"{tag}\t{asset}\n" for tag, asset in listing)
+    edge = [f"{name}--{frm}--{to}.sql" for frm, to in edges]
+    return ["README.md", "other--0.2.0--10.0.0.sql", *edge]
 
 
 # V: the predecessor is the definition's, in any order.
@@ -201,59 +152,60 @@ def test_the_greatest_carried_target(
 ) -> None:
     """The newest installable target below `version`, its first carrier."""
     want = model(listing, edges, "demo", version)
-    with tempfile.TemporaryDirectory() as tmp:
-        sql = Path(tmp) / "sql"
-        lay(sql, "demo", edges[::-1] if backwards else edges)
-        got = previous.predecessor(listing, sql, "demo", version)
+    names = scripts("demo", edges)
+    graph = previous.graph_of(names[::-1] if backwards else names, "demo")
+    got = previous.predecessor(listing, graph, "demo", version)
     assert want == (None if got is None else (got.version, got.tag))
 
 
 # V: a stranded installation, and only that, is refused.
-@given(st.data(), CRATE, EDGES, VERSION, st.sampled_from([0, 4]), st.booleans())
-def test_refused_exactly_when_stranded(  # ruff: ignore[too-many-arguments, too-many-positional-arguments] - one per drawn input
+@given(st.data(), CRATE, EDGES, VERSION, st.booleans())
+def test_refused_exactly_when_stranded(
     data: st.DataObject,
     crate: str,
     edges: list[tuple[str, str]],
     version: str,
-    list_rc: int,
     scripted: bool,  # ruff: ignore[boolean-type-hint-positional-argument] - drawn
 ) -> None:
-    """The model's verdict is the guard's."""
+    """The model's verdict is the guard's, and the refusal names the path."""
     name = posixpath.basename(crate).replace("-", "_")
     listing = data.draw(rows(name))
     rerun = any(a.startswith(f"{name}-{version}-pg") for _, a in listing)
     prev = model(listing, edges, name, version)
-    said = io.StringIO()
-    with (
-        tempfile.TemporaryDirectory() as tmp,
-        pytest.MonkeyPatch.context() as patched,
-        contextlib.redirect_stdout(said),
-        contextlib.redirect_stderr(said),
-    ):
-        stubs(Path(tmp) / ".stubs", served(listing), list_rc)
-        as_the_step(patched, Path(tmp))
-        lay(Path(crate) / "sql", name, edges)
-        script = ""
-        if prev is not None:
-            script = f"{crate}/sql/{name}--{prev[0]}--{version}.sql"
-            if scripted:
-                Path(script).write_text("", encoding="utf-8")
-        code = previous.guard("o/r", version, crate)
-    out = said.getvalue()
-    if list_rc:
-        want = list_rc
-    elif rerun or prev is None or scripted or (prev[0], version) in edges:
-        want = 0
+    names = scripts(name, edges)
+    if prev is not None and scripted:
+        names.append(f"{name}--{prev[0]}--{version}.sql")
+    verdict = previous.judge(listing, names, crate, version)
+    stranded = not (rerun or prev is None or scripted or (prev[0], version) in edges)
+    assert verdict.refused == stranded, verdict.message
+    if stranded and prev is not None:
+        assert verdict.message == (
+            f"no upgrade path {crate}/sql/{name}--{prev[0]}--{version}.sql"
+            f" from published {prev[0]} ({prev[1]})"
+            " — existing installations would be stranded"
+        )
+
+
+# V: fetch wants the predecessor the guard checks, named by the cell.
+@given(st.data(), CRATE, EDGES, VERSION, st.sampled_from(["16", "18"]))
+def test_fetch_wants_the_predecessor_s_cell(
+    data: st.DataObject,
+    crate: str,
+    edges: list[tuple[str, str]],
+    version: str,
+    pg: str,
+) -> None:
+    """None on a re-run or a first publish; else the model's, by cell."""
+    name = posixpath.basename(crate).replace("-", "_")
+    listing = data.draw(rows(name))
+    rerun = any(a.startswith(f"{name}-{version}-pg") for _, a in listing)
+    prev = model(listing, edges, name, version)
+    got = previous.wanted(listing, scripts(name, edges), crate, version, (pg, "arm64"))
+    if rerun or prev is None:
+        assert got is None
     else:
-        want = 1
-    assert code == want, out
-    # 1 is the model's refusal alone, which needs a predecessor.
-    if want == 1 and prev is not None:
-        assert (
-            f"::error::previous_release.py: no upgrade path {script} from"
-            f" published {prev[0]}"
-            f" ({prev[1]})"
-        ) in out
+        asset = f"{name}-{prev[0]}-pg{pg}-linux-arm64.tar.gz"
+        assert got == (previous.Predecessor(*prev), asset)
 
 
 # V: the name is `basename DIR | tr - _`.
@@ -265,39 +217,18 @@ def test_basename(crate: str, slashes: int) -> None:
     ).replace("-", "_")
 
 
-# R: any listing text and any gh answer are answered by a status.
-@given(
-    st.text(max_size=40),
-    st.sampled_from([0, 1, 4]),
-    st.sampled_from([0, 1]),
-    st.sampled_from([0, 2]),
-    VERSION,
-)
-def test_guard_and_fetch_answer(
-    listing: str, rc: int, dl_rc: int, tar_rc: int, version: str
-) -> None:
-    """A status, never a raise."""
-    with (
-        tempfile.TemporaryDirectory() as tmp,
-        pytest.MonkeyPatch.context() as patched,
-        contextlib.redirect_stdout(io.StringIO()),
-        contextlib.redirect_stderr(io.StringIO()),
-    ):
-        stubs(Path(tmp) / ".stubs", listing, rc, tar_rc, dl_rc)
-        as_the_step(patched, Path(tmp))
-        lay(Path("crate") / "sql", "crate", [("0.2.0", "1.0.2")])
-        code = previous.guard("o/r", version, "crate")
-        guarded: set[int] = {0, 1, rc}
-        assert code in guarded
-        args = previous.Args(
-            repo="o/r",
-            version=version,
-            crate_dir="crate",
-            pg="16",
-            arch="amd64",
-            tarball="prev.tar.gz",
-            dest="prev",
-        )
-        code = previous.fetch(args)
-        fetched: set[int] = {0, rc, tar_rc}
-        assert code in fetched
+# R: any listing text is read, and judged, without a raise.
+@given(st.text(max_size=40), VERSION)
+def test_any_listing_is_read_and_judged(text: str, version: str) -> None:
+    """Each row a tab-split line; a verdict, never a raise."""
+    listing = previous.parse_listing(text)
+    want = [
+        (tag, asset)
+        for tag, sep, asset in (line.partition("\t") for line in text.splitlines())
+        if sep
+    ]
+    assert listing == want
+    verdict = previous.judge(
+        listing, scripts("crate", [("0.2.0", "1.0.2")]), "crate", version
+    )
+    assert verdict.message
