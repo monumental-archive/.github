@@ -300,11 +300,12 @@ def account(root: Path, manifest: str, packages: list[dict[str, object]]) -> str
     for package in packages:
         crate = root / "crates" / decoded.as_str(package["name"], "name")
         package["manifest_path"] = str(crate / "Cargo.toml")
-    return json.dumps({
+    account: dict[str, object] = {
         "workspace_root": str(root),
         "workspace_members": [p["id"] for p in packages],
         "packages": packages,
-    })
+    }
+    return json.dumps(account)
 
 
 def test_no_workspace_package_table_skips_clean(

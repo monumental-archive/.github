@@ -156,7 +156,7 @@ def test_the_release_changelog_line_passes() -> None:
 
 
 @pytest.mark.parametrize("token", BY_POSITION)
-def test_every_digit_position_passes(token: object) -> None:
+def test_every_digit_position_passes(token: str) -> None:
     """Each enumerated entry, by where the first digit sits."""
     assert_green(token)
 

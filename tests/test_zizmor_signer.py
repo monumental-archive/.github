@@ -35,7 +35,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 import pytest
 
@@ -117,8 +117,31 @@ STANDIN = "a token"
 SIGNED = ["--signer-workflow", SIGNER_WORKFLOW, *ARGS]
 
 
+class Answer(Protocol):
+    """What the `answer` fixture hands a row."""
+
+    def __call__(self, findings: object, *, status: int | None = ...) -> None:
+        """Run answer."""
+        ...
+
+
+def answers(ran: signer.Ran) -> Callable[[list[str]], signer.Ran]:
+    """Stand in for run_zizmor: whatever it is asked, it answers `ran`.
+
+    Returns:
+        The stand-in.
+
+    """
+
+    def run_zizmor(args: list[str]) -> signer.Ran:
+        del args
+        return ran
+
+    return run_zizmor
+
+
 @fixture
-def answer(monkeypatch: pytest.MonkeyPatch) -> Callable[..., None]:
+def answer(monkeypatch: pytest.MonkeyPatch) -> Answer:
     """Have zizmor answer a finding array, as the task runs the CLI.
 
     zizmor's status is 14 for any answer but an empty array, unless the
@@ -132,7 +155,7 @@ def answer(monkeypatch: pytest.MonkeyPatch) -> Callable[..., None]:
     def answering(findings: object, *, status: int | None = None) -> None:
         code = status if status is not None else (14 if findings != [] else 0)
         ran = signer.Ran(code, json.dumps(findings).encode(), b"")
-        monkeypatch.setattr(signer, "run_zizmor", lambda *_args, **_kwargs: ran)
+        monkeypatch.setattr(signer, "run_zizmor", answers(ran))
         for name, value in {
             "GH_TOKEN": STANDIN,
             "MISE_TASK_NAME": TASK,
@@ -191,7 +214,7 @@ def test_the_fixture_is_the_ten_signer_findings() -> None:
 
 
 def test_all_ten_are_dropped_and_counted(
-    capfd: pytest.CaptureFixture[str], answer: Callable[..., None]
+    capfd: pytest.CaptureFixture[str], answer: Answer
 ) -> None:
     """The canon goes green, and says what it dropped."""
     answer(REAL)
@@ -219,7 +242,7 @@ def test_the_fixture_is_one_signer_mismatch() -> None:
 
 
 def test_the_signer_mismatch_is_dropped_and_counted(
-    capfd: pytest.CaptureFixture[str], answer: Callable[..., None]
+    capfd: pytest.CaptureFixture[str], answer: Answer
 ) -> None:
     """The signer's `# main` behind its branch head goes green, said aloud."""
     answer(MISMATCH)
@@ -234,7 +257,7 @@ def test_the_signer_mismatch_is_dropped_and_counted(
 
 
 def test_both_audits_together_are_dropped(
-    capfd: pytest.CaptureFixture[str], answer: Callable[..., None]
+    capfd: pytest.CaptureFixture[str], answer: Answer
 ) -> None:
     """The scheduled run carries both; each is counted on its own line."""
     answer([*REAL, *MISMATCH])
@@ -246,7 +269,7 @@ def test_both_audits_together_are_dropped(
 
 
 def test_another_owner_mismatch_is_kept(
-    capfd: pytest.CaptureFixture[str], answer: Callable[..., None]
+    capfd: pytest.CaptureFixture[str], answer: Answer
 ) -> None:
     """The same finding on another owner's repository still reds."""
     other = rewritten(
@@ -264,7 +287,7 @@ def test_another_owner_mismatch_is_kept(
 
 
 def test_a_mismatch_with_no_readable_reference_is_kept(
-    capfd: pytest.CaptureFixture[str], answer: Callable[..., None]
+    capfd: pytest.CaptureFixture[str], answer: Answer
 ) -> None:
     """A Hidden location with no `uses:` line names nothing; it is kept."""
     blind = rewritten(MISMATCH[0], "Hidden", "uses:", "calls:")
@@ -278,7 +301,7 @@ def test_a_mismatch_with_no_readable_reference_is_kept(
 
 
 def test_the_comment_alone_is_not_read_as_a_reference(
-    capfd: pytest.CaptureFixture[str], answer: Callable[..., None]
+    capfd: pytest.CaptureFixture[str], answer: Answer
 ) -> None:
     """Primary carries only `main`; dropping the Hidden location blinds it."""
     blind = copy.deepcopy(MISMATCH[0])
@@ -292,7 +315,7 @@ def test_the_comment_alone_is_not_read_as_a_reference(
     assert "1 finding(s) remain: ref-version-mismatch" in out
 
 
-def test_a_uses_in_prose_is_not_a_reference(answer: Callable[..., None]) -> None:
+def test_a_uses_in_prose_is_not_a_reference(answer: Answer) -> None:
     """A commented `uses:` beside the signer's is not read as a second ref."""
     prose = rewritten(
         MISMATCH[0],
@@ -307,7 +330,7 @@ def test_a_uses_in_prose_is_not_a_reference(answer: Callable[..., None]) -> None
 
 
 def test_a_second_reference_elsewhere_keeps_it(
-    capfd: pytest.CaptureFixture[str], answer: Callable[..., None]
+    capfd: pytest.CaptureFixture[str], answer: Answer
 ) -> None:
     """Every named reference must be the signer's, not just one of them."""
     two = rewritten(
@@ -324,7 +347,7 @@ def test_a_second_reference_elsewhere_keeps_it(
 
 
 def test_another_audit_on_the_signer_is_kept(
-    capfd: pytest.CaptureFixture[str], answer: Callable[..., None]
+    capfd: pytest.CaptureFixture[str], answer: Answer
 ) -> None:
     """An unrelated audit carrying the same locations still reds."""
     other_rule = copy.deepcopy(MISMATCH[0])
@@ -338,7 +361,7 @@ def test_another_audit_on_the_signer_is_kept(
 
 # Every finding the exemption does not name still reds.
 def test_another_repository_reusable_workflow_is_kept(
-    capfd: pytest.CaptureFixture[str], answer: Callable[..., None]
+    capfd: pytest.CaptureFixture[str], answer: Answer
 ) -> None:
     """The same audit on someone else's reusable workflow is reported."""
     other = repointed(
@@ -354,7 +377,7 @@ def test_another_repository_reusable_workflow_is_kept(
 
 
 def test_a_third_party_action_is_kept(
-    capfd: pytest.CaptureFixture[str], answer: Callable[..., None]
+    capfd: pytest.CaptureFixture[str], answer: Answer
 ) -> None:
     """A stale third-party action pin is exactly what the audit is for."""
     third = repointed(REAL[0], "actions/checkout@" + "b" * 40)
@@ -366,7 +389,7 @@ def test_a_third_party_action_is_kept(
 
 
 def test_a_repository_that_only_shares_the_prefix_is_kept(
-    answer: Callable[..., None],
+    answer: Answer,
 ) -> None:
     """`signer-fork` is not `signer`: repositories match whole."""
     near = repointed(
@@ -378,7 +401,7 @@ def test_a_repository_that_only_shares_the_prefix_is_kept(
 
 
 def test_kept_another_audit_on_the_signer_is_kept(
-    capfd: pytest.CaptureFixture[str], answer: Callable[..., None]
+    capfd: pytest.CaptureFixture[str], answer: Answer
 ) -> None:
     """The exemption is one rule wide, not the signer wide."""
     other_rule = copy.deepcopy(REAL[0])
@@ -391,7 +414,7 @@ def test_kept_another_audit_on_the_signer_is_kept(
 
 
 def test_a_finding_with_no_readable_reference_is_kept(
-    capfd: pytest.CaptureFixture[str], answer: Callable[..., None]
+    capfd: pytest.CaptureFixture[str], answer: Answer
 ) -> None:
     """When zizmor's shape gives no reference, nothing is assumed."""
     blind = copy.deepcopy(REAL[0])
@@ -405,21 +428,21 @@ def test_a_finding_with_no_readable_reference_is_kept(
     assert not out
 
 
-def test_a_reference_without_a_ref_is_kept(answer: Callable[..., None]) -> None:
+def test_a_reference_without_a_ref_is_kept(answer: Answer) -> None:
     """A Primary feature with no `@` is not a reference."""
     answer([repointed(REAL[0], "monumental-archive/signer")])
     assert signer.main(SIGNED) == HIGH
 
 
 # How the signer's repository is read and compared.
-def test_case_differences_do_not_matter(answer: Callable[..., None]) -> None:
+def test_case_differences_do_not_matter(answer: Answer) -> None:
     """GitHub owner and repository names are case-insensitive."""
     upper = repointed(REAL[0], SIGNER_REF.replace("signer", "Signer", 1))
     answer([upper])
     assert signer.main(SIGNED) == 0
 
 
-def test_an_ignored_finding_is_not_reported(answer: Callable[..., None]) -> None:
+def test_an_ignored_finding_is_not_reported(answer: Answer) -> None:
     """Per-site `zizmor: ignore` comments are zizmor's, not this filter's."""
     ignored = repointed(REAL[0], "actions/checkout@" + "d" * 40)
     ignored["ignored"] = True
@@ -428,7 +451,7 @@ def test_an_ignored_finding_is_not_reported(answer: Callable[..., None]) -> None
 
 
 def test_no_findings_is_green_and_counts_zero(
-    capfd: pytest.CaptureFixture[str], answer: Callable[..., None]
+    capfd: pytest.CaptureFixture[str], answer: Answer
 ) -> None:
     """An empty run drops nothing and passes."""
     answer([])
@@ -440,7 +463,7 @@ def test_no_findings_is_green_and_counts_zero(
 
 # Reports the filter will not guess about: exit 1, by name.
 def test_a_signer_declaration_with_no_repository_is_refused(
-    capfd: pytest.CaptureFixture[str], answer: Callable[..., None]
+    capfd: pytest.CaptureFixture[str], answer: Answer
 ) -> None:
     """A declaration that names no owner/repo cannot exempt anything."""
     answer(REAL)
@@ -451,7 +474,7 @@ def test_a_signer_declaration_with_no_repository_is_refused(
 
 
 def test_a_finding_of_the_wrong_shape_is_refused_not_raised(
-    capfd: pytest.CaptureFixture[str], answer: Callable[..., None]
+    capfd: pytest.CaptureFixture[str], answer: Answer
 ) -> None:
     """The shrunk examples (#1555): refused by name, never a traceback."""
     shapes: tuple[tuple[dict[str, object], str], ...] = (
@@ -485,7 +508,7 @@ def test_a_finding_of_the_wrong_shape_is_refused_not_raised(
 
 
 def test_a_finding_with_no_primary_location_is_refused(
-    capfd: pytest.CaptureFixture[str], answer: Callable[..., None]
+    capfd: pytest.CaptureFixture[str], answer: Answer
 ) -> None:
     """A remaining finding with no location at fault: refused by name."""
     third = repointed(REAL[0], "actions/checkout@" + "d" * 40)
@@ -502,7 +525,7 @@ def test_a_finding_with_no_primary_location_is_refused(
 
 
 def test_input_that_is_not_the_finding_array_is_refused(
-    capfd: pytest.CaptureFixture[str], answer: Callable[..., None]
+    capfd: pytest.CaptureFixture[str], answer: Answer
 ) -> None:
     """A SARIF document or an error object is not silently empty."""
     answer({"runs": []})

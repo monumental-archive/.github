@@ -20,7 +20,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -132,7 +132,7 @@ def test_org_domains_are_the_three_with_no_dependency_trigger() -> None:
         for domain, triggers in DELIVERED.identity.items()
     ],
 )
-def test_every_identity_domain_names_at_least_one_trigger(triggers: object) -> None:
+def test_every_identity_domain_names_at_least_one_trigger(triggers: list[str]) -> None:
     """An identity domain with no trigger could never be checked for."""
     assert triggers
 
@@ -192,7 +192,7 @@ def test_a_repository_may_not_lower_a_domain_it_claims() -> None:
 
 
 @pytest.mark.parametrize("domain", DELIVERED.org)
-def test_org_domains_may_not_be_named_at_all(domain: object) -> None:
+def test_org_domains_may_not_be_named_at_all(domain: str) -> None:
     """project, types and test are strictness, not identity."""
     problems = check(
         {"linter": {"domains": {domain: "all"}}},
@@ -218,7 +218,7 @@ def test_rules_may_not_travel_with_the_declaration() -> None:
 @pytest.mark.parametrize(
     "key", ["overrides", "formatter", "assist", "files", "extends"]
 )
-def test_other_biome_sections_are_refused(key: object) -> None:
+def test_other_biome_sections_are_refused(key: str) -> None:
     """An overrides block is a per-path weakening surface; so is formatter."""
     check({key: {}}, admissible=False)
 
@@ -269,7 +269,7 @@ def test_an_unrelated_dependency_demands_nothing() -> None:
 
 
 @pytest.mark.parametrize("package", DELIVERED.identity["qwik"])
-def test_either_trigger_of_a_two_package_domain_counts(package: object) -> None:
+def test_either_trigger_of_a_two_package_domain_counts(package: str) -> None:
     """Qwik ships under two names; both oblige."""
     missing = biome_config.omissions(
         set(),
@@ -313,7 +313,7 @@ def declared_packages_test(tmp_path: Path) -> DeclaredPackagesTest:
 
 @pytest.mark.parametrize("section", biome_config.MANIFEST_SECTIONS)
 def test_every_dependency_section_is_read(
-    declared_packages_test: DeclaredPackagesTest, section: object
+    declared_packages_test: DeclaredPackagesTest, section: str
 ) -> None:
     """A framework declared as a peer dependency is still a framework."""
     path = declared_packages_test.manifest({section: {"react": "19"}})
@@ -386,7 +386,7 @@ def test_every_unclaimed_identity_domain_is_none(generate_test: GenerateTest) ->
 
 @pytest.mark.parametrize("domain", DELIVERED.org)
 def test_org_domains_are_all_whatever_the_repository_said(
-    generate_test: GenerateTest, domain: object
+    generate_test: GenerateTest, domain: str
 ) -> None:
     """project, types and test never move."""
     assert generate_test.written[domain] == "all"
@@ -480,8 +480,8 @@ def test_naming_that_rule_does_not_disable_its_whole_group() -> None:
 # none). Repeated here as literals ON PURPOSE — this is the mutation
 # check, and reading the list out of the file under test would make
 # the assertion vacuous.
-GLOBS: ClassVar[list[str]] = ["**/*.test.ts", "**/test/**", "**/tests/**"]
-SILENCED: ClassVar[set[tuple[str, str]]] = {
+GLOBS: list[str] = ["**/*.test.ts", "**/test/**", "**/tests/**"]
+SILENCED: set[tuple[str, str]] = {
     ("complexity", "noExcessiveLinesPerFunction"),
     ("performance", "noAwaitInLoops"),
     ("performance", "useTopLevelRegex"),
@@ -543,7 +543,7 @@ def test_the_glob_list_is_exactly_the_closed_list(
 
 @pytest.mark.parametrize("absent", ["spec", "__tests__", "tsx", ".js"])
 def test_the_shapes_the_org_does_not_have_are_absent(
-    file_override_test: FileOverrideTest, absent: object
+    file_override_test: FileOverrideTest, absent: str
 ) -> None:
     """`*.spec.*` and `__tests__/**` exist in no org repo, so are unnamed."""
     includes = decoded.as_array(file_override_test.entry()["includes"], "includes")
@@ -628,7 +628,7 @@ def test_nomisplacedassertion_is_not_in_the_override(
 
 @pytest.mark.parametrize("claimed", CLAIMS)
 def test_the_override_survives_generation_untouched(
-    file_override_test: FileOverrideTest, claimed: object
+    file_override_test: FileOverrideTest, claimed: set[str]
 ) -> None:
     """A repository's identity moves domains and nursery, never this."""
     config, _silenced = biome_config.generate(
@@ -836,7 +836,7 @@ def test_no_domain_is_stated_rather_than_left_blank() -> None:
 @pytest.mark.parametrize(
     "domain", [pytest.param(domain, id=rule) for rule, domain in NURSERY.items()]
 )
-def test_every_stated_domain_is_a_domain_the_org_knows(domain: object) -> None:
+def test_every_stated_domain_is_a_domain_the_org_knows(domain: str) -> None:
     """A row naming a domain outside the table could never be claimed."""
     known = {*DELIVERED.identity, *DELIVERED.org, biome_config.NO_DOMAIN}
     assert domain in known
@@ -899,7 +899,7 @@ def test_a_rule_with_no_domain_stays_on_everywhere() -> None:
 
 
 @pytest.mark.parametrize("domain", DELIVERED.org)
-def test_org_fixed_domains_are_never_silenced(domain: object) -> None:
+def test_org_fixed_domains_are_never_silenced(domain: str) -> None:
     """project, types and test are the org's level, not repo identity."""
     block, silenced = build(set(), {"aRule": domain})
     assert block["aRule"] == "on"
@@ -972,7 +972,7 @@ def declared(body: object, manifests: dict[str, object]) -> tuple[Path, list[Pat
     ],
 )
 def test_an_org_config_it_cannot_read_is_refused_by_name(
-    text: object, said: object, capfd: pytest.CaptureFixture[str]
+    text: str, said: str, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """Not JSON, or a linter / rules / nursery not an object: named."""
     tree = Path(tempfile.mkdtemp())
@@ -1424,7 +1424,7 @@ def run_body(task: str, *, env: support.Env) -> subprocess.CompletedProcess[str]
 
 @pytest.mark.parametrize("task", ["lint:biome", "fix:biome"])
 def test_a_tsconfig_tsc_refuses_ends_both_tasks_by_name(
-    task: object, env: support.Env
+    task: str, env: support.Env
 ) -> None:
     """The compiler's own message is printed under the tsconfig's name."""
     done = run_body(task, env=env)

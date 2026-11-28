@@ -268,7 +268,7 @@ FILES = [
 @pytest.mark.parametrize("n", [2, 3])
 def test_two_and_three_shards_run_the_suite_once(
     runner: Runner,
-    n: object,
+    n: int,
     monkeypatch: pytest.MonkeyPatch,
     capfd: pytest.CaptureFixture[str],
 ) -> None:
@@ -339,7 +339,7 @@ TESTS = [
 @pytest.mark.parametrize("n", [2, 3])
 def test_nextest_two_and_three_shards_run_the_suite_once(
     runner: Runner,
-    n: object,
+    n: int,
     monkeypatch: pytest.MonkeyPatch,
     capfd: pytest.CaptureFixture[str],
 ) -> None:
@@ -469,7 +469,7 @@ def test_pytest_a_shard_dealt_nothing_runs_true(
 @pytest.mark.parametrize("n", [2, 3])
 def test_go_test_two_and_three_shards_run_the_suite_once(
     runner: Runner,
-    n: object,
+    n: int,
     monkeypatch: pytest.MonkeyPatch,
     capfd: pytest.CaptureFixture[str],
 ) -> None:

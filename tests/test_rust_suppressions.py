@@ -119,7 +119,7 @@ def test_a_raw_identifier_is_not_a_raw_string() -> None:
 
 
 @pytest.mark.parametrize("text", ["/* open", '"open', "'\\", 'r#"open', "#![allow(x"])
-def test_unterminated_input_ends_the_scan(text: object) -> None:
+def test_unterminated_input_ends_the_scan(text: str) -> None:
     """An unclosed comment, string, char or attribute ends cleanly."""
     want: Found = [(1, "#![allow(x")]
     assert (want if text.startswith("#!") else NOTHING) == allows(text)
@@ -150,7 +150,7 @@ def test_every_table_and_both_forms_are_found() -> None:
         '[package]\nname = "a"\n',
     ],
 )
-def test_shapes_that_are_no_lint_table_are_passed_over(text: object) -> None:
+def test_shapes_that_are_no_lint_table_are_passed_over(text: str) -> None:
     """`workspace = true`, a scalar workspace, no lints at all."""
     assert rsup.manifest_allows(decoded.load_toml(text)) == NO_KEYS
 

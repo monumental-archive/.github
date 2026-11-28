@@ -341,7 +341,7 @@ def test_obligations_over_the_document(
 )
 def test_each_refusal_exits_two_and_names_its_field(
     doc: object,
-    message: object,
+    message: str,
     capfd: pytest.CaptureFixture[str],
     fed: Callable[[object], None],
 ) -> None:

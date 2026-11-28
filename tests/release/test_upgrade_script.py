@@ -50,16 +50,13 @@ of them, the byte-for-byte reproduction among them (#1807).
 import itertools
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import Protocol
 
 import pytest
 
 from belt.release.pgrx import upgrade_script
 from belt.typed_pytest import fixture
 from tests import support
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
 
 CANON = support.CANON
 TESTDATA = Path(__file__).resolve().parent / "testdata"
@@ -88,8 +85,24 @@ class Run:
     stderr: str
 
 
+class Derive(Protocol):
+    """What the `derive` fixture hands a row."""
+
+    def __call__(
+        self,
+        prev: str,
+        new: str,
+        *,
+        ext: str = ...,
+        versions: tuple[str, str] = ...,
+        data: str | None = ...,
+    ) -> list[str]:
+        """Run derive."""
+        ...
+
+
 @fixture
-def derive(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Callable[..., list[str]]:
+def derive(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Derive:
     """Lay out one derivation of an upgrade script from two schema texts.
 
     Returns:
@@ -177,7 +190,7 @@ def a_function(name: str, returns: str = "INT /* i32 */", args: str = "") -> str
 
 # The psql guard must fit 80 columns AND stay one line (#792, #801).
 def test_the_real_derived_script_is_reproduced_byte_for_byte(
-    capfd: pytest.CaptureFixture[str], derive: Callable[..., list[str]]
+    capfd: pytest.CaptureFixture[str], derive: Derive
 ) -> None:
     """The oracle row: real inputs, real published output.
 
@@ -194,7 +207,7 @@ def test_the_real_derived_script_is_reproduced_byte_for_byte(
 
 
 def test_the_guard_is_one_line_carrying_both_meta_commands(
-    capfd: pytest.CaptureFixture[str], derive: Callable[..., list[str]]
+    capfd: pytest.CaptureFixture[str], derive: Derive
 ) -> None:
     r"""#801's invariant: only `\echo` lines are ignored by the loader.
 
@@ -213,7 +226,7 @@ def test_the_guard_is_one_line_carrying_both_meta_commands(
 
 
 def test_every_emitted_line_fits_the_orgs_eighty_columns(
-    capfd: pytest.CaptureFixture[str], derive: Callable[..., list[str]]
+    capfd: pytest.CaptureFixture[str], derive: Derive
 ) -> None:
     """The org's derived files meet the org's own rules (#792, ruled (a))."""
     args = derive(REAL_PREV, REAL_NEW)
@@ -225,7 +238,7 @@ def test_every_emitted_line_fits_the_orgs_eighty_columns(
 
 
 def test_the_longest_name_that_fits_is_emitted_at_exactly_eighty(
-    capfd: pytest.CaptureFixture[str], derive: Callable[..., list[str]]
+    capfd: pytest.CaptureFixture[str], derive: Derive
 ) -> None:
     """The ceiling is a measured boundary, not a rounded one."""
     name = "e" * LONGEST_NAME_THAT_FITS
@@ -238,7 +251,7 @@ def test_the_longest_name_that_fits_is_emitted_at_exactly_eighty(
 
 
 def test_one_character_more_refuses_with_the_arithmetic(
-    capfd: pytest.CaptureFixture[str], derive: Callable[..., list[str]]
+    capfd: pytest.CaptureFixture[str], derive: Derive
 ) -> None:
     """A name a database would accept but the guard cannot carry.
 
@@ -264,7 +277,7 @@ def test_one_character_more_refuses_with_the_arithmetic(
 # COMMENT/GRANT/REVOKE are always replayable, and everything else is
 # opaque — fine while identical, underivable otherwise.
 def test_identical_schemas_derive_a_library_only_release(
-    capfd: pytest.CaptureFixture[str], derive: Callable[..., list[str]]
+    capfd: pytest.CaptureFixture[str], derive: Derive
 ) -> None:
     """No DDL at all is a valid answer, and says which release it was."""
     args = derive(REAL_PREV, REAL_PREV)
@@ -277,7 +290,7 @@ def test_identical_schemas_derive_a_library_only_release(
 
 
 def test_a_new_function_is_created_replaceably(
-    capfd: pytest.CaptureFixture[str], derive: Callable[..., list[str]]
+    capfd: pytest.CaptureFixture[str], derive: Derive
 ) -> None:
     """CREATE OR REPLACE, so a re-run over a partial upgrade is safe."""
     args = derive(REAL_PREV, REAL_PREV + a_function("lab_extra"))
@@ -289,7 +302,7 @@ def test_a_new_function_is_created_replaceably(
 
 
 def test_an_unchanged_function_emits_nothing(
-    capfd: pytest.CaptureFixture[str], derive: Callable[..., list[str]]
+    capfd: pytest.CaptureFixture[str], derive: Derive
 ) -> None:
     """The previous install already ran it; re-emitting it is noise."""
     args = derive(REAL_PREV, REAL_PREV + a_function("lab_extra"))
@@ -301,7 +314,7 @@ def test_an_unchanged_function_emits_nothing(
 
 
 def test_a_removed_function_is_dropped_by_signature(
-    capfd: pytest.CaptureFixture[str], derive: Callable[..., list[str]]
+    capfd: pytest.CaptureFixture[str], derive: Derive
 ) -> None:
     """DROP FUNCTION names the identity arguments, never the defaults."""
     args = derive(
@@ -317,7 +330,7 @@ def test_a_removed_function_is_dropped_by_signature(
 
 
 def test_a_changed_return_type_is_dropped_before_it_is_recreated(
-    capfd: pytest.CaptureFixture[str], derive: Callable[..., list[str]]
+    capfd: pytest.CaptureFixture[str], derive: Derive
 ) -> None:
     """CREATE OR REPLACE cannot change a return type; Postgres refuses it."""
     args = derive(
@@ -334,7 +347,7 @@ def test_a_changed_return_type_is_dropped_before_it_is_recreated(
 
 
 def test_drops_come_out_in_reverse_creation_order(
-    capfd: pytest.CaptureFixture[str], derive: Callable[..., list[str]]
+    capfd: pytest.CaptureFixture[str], derive: Derive
 ) -> None:
     """The closest thing to a correct destroy order two schemas offer."""
     removed = a_function("lab_first") + a_function("lab_second")
@@ -348,7 +361,7 @@ def test_drops_come_out_in_reverse_creation_order(
 
 
 def test_a_new_named_object_is_created_and_a_removed_one_dropped(
-    capfd: pytest.CaptureFixture[str], derive: Callable[..., list[str]]
+    capfd: pytest.CaptureFixture[str], derive: Derive
 ) -> None:
     """Named kinds are creatable when new and droppable when gone."""
     typ = PAIR_OF_INTS
@@ -367,7 +380,7 @@ def test_a_new_named_object_is_created_and_a_removed_one_dropped(
 
 
 def test_a_changed_named_object_refuses_and_names_the_remedy(
-    capfd: pytest.CaptureFixture[str], derive: Callable[..., list[str]]
+    capfd: pytest.CaptureFixture[str], derive: Derive
 ) -> None:
     """An in-place change to a TYPE is not derivable from two schemas."""
     args = derive(REAL_PREV + PAIR_OF_INTS, REAL_PREV + PAIR_WIDENED)
@@ -381,7 +394,7 @@ def test_a_changed_named_object_refuses_and_names_the_remedy(
 
 
 def test_a_new_opaque_statement_refuses(
-    capfd: pytest.CaptureFixture[str], derive: Callable[..., list[str]]
+    capfd: pytest.CaptureFixture[str], derive: Derive
 ) -> None:
     """Anything the generator cannot classify must not be guessed at."""
     args = derive(REAL_PREV, REAL_PREV + SEED_ROW)
@@ -392,7 +405,7 @@ def test_a_new_opaque_statement_refuses(
 
 
 def test_a_removed_opaque_statement_refuses(
-    capfd: pytest.CaptureFixture[str], derive: Callable[..., list[str]]
+    capfd: pytest.CaptureFixture[str], derive: Derive
 ) -> None:
     """Both directions: a disappearing opaque statement is not a drop."""
     args = derive(REAL_PREV + SEED_ROW, REAL_PREV)
@@ -403,7 +416,7 @@ def test_a_removed_opaque_statement_refuses(
 
 
 def test_an_unchanged_opaque_statement_is_fine_and_silent(
-    capfd: pytest.CaptureFixture[str], derive: Callable[..., list[str]]
+    capfd: pytest.CaptureFixture[str], derive: Derive
 ) -> None:
     """It is already in the installed extension; replaying it is not owed."""
     opaque = SEED_ROW
@@ -416,7 +429,7 @@ def test_an_unchanged_opaque_statement_is_fine_and_silent(
 
 
 def test_a_new_comment_is_replayed(
-    capfd: pytest.CaptureFixture[str], derive: Callable[..., list[str]]
+    capfd: pytest.CaptureFixture[str], derive: Derive
 ) -> None:
     """COMMENT/GRANT/REVOKE are always safe to re-apply."""
     args = derive(
@@ -431,7 +444,7 @@ def test_a_new_comment_is_replayed(
 
 
 def test_an_unchanged_comment_is_not_replayed(
-    capfd: pytest.CaptureFixture[str], derive: Callable[..., list[str]]
+    capfd: pytest.CaptureFixture[str], derive: Derive
 ) -> None:
     """Replayable is not the same as replayed: identical means nothing to do."""
     comment = ANSWER_COMMENT
@@ -443,7 +456,7 @@ def test_an_unchanged_comment_is_not_replayed(
 
 
 def test_a_data_fragment_downgrades_refusals_and_is_folded_in(
-    capfd: pytest.CaptureFixture[str], derive: Callable[..., list[str]]
+    capfd: pytest.CaptureFixture[str], derive: Derive
 ) -> None:
     """`sql/next-data.sql` is the author declaring they handled it.
 
@@ -466,7 +479,7 @@ def test_a_data_fragment_downgrades_refusals_and_is_folded_in(
 
 
 def test_an_unterminated_statement_fails_rather_than_truncating(
-    capfd: pytest.CaptureFixture[str], derive: Callable[..., list[str]]
+    capfd: pytest.CaptureFixture[str], derive: Derive
 ) -> None:
     """A schema the splitter cannot finish reading is not a smaller schema."""
     args = derive(REAL_PREV, REAL_PREV + PAIR_OF_INTS.replace(";\n", "\n"))
@@ -536,7 +549,7 @@ A_CANDIDATE_CARRYING_THE_BLOCK_IS_REFUSED_NOT_DIFFED_ROWS = [
 # a package build, never does. Dropped from the previous schema as its
 # one leading statement, refused anywhere else, in either schema.
 def test_a_leading_block_derives_what_the_bare_pair_derives(
-    capfd: pytest.CaptureFixture[str], derive: Callable[..., list[str]]
+    capfd: pytest.CaptureFixture[str], derive: Derive
 ) -> None:
     """The block changes nothing: the real oracle pair, and a delta."""
     news = (REAL_NEW, REAL_NEW + a_function("lab_extra"))
@@ -563,7 +576,7 @@ def test_a_leading_block_derives_what_the_bare_pair_derives(
 
 
 def test_without_the_block_nothing_changes(
-    capfd: pytest.CaptureFixture[str], derive: Callable[..., list[str]]
+    capfd: pytest.CaptureFixture[str], derive: Derive
 ) -> None:
     """A previous release from before #1274 derives as it always did."""
     args = derive(REAL_PREV, REAL_NEW)
@@ -582,10 +595,10 @@ def test_without_the_block_nothing_changes(
     ],
 )
 def test_the_tag_anywhere_else_is_refused_by_name(
-    prev: object,
-    new: object,
+    prev: str,
+    new: str,
     capfd: pytest.CaptureFixture[str],
-    derive: Callable[..., list[str]],
+    derive: Derive,
 ) -> None:
     """A block that is not the one leading statement is never stripped."""
     args = derive(prev, new)
@@ -603,10 +616,10 @@ def test_the_tag_anywhere_else_is_refused_by_name(
     ],
 )
 def test_a_candidate_carrying_the_block_is_refused_not_diffed(
-    prev: object,
-    new: object,
+    prev: str,
+    new: str,
     capfd: pytest.CaptureFixture[str],
-    derive: Callable[..., list[str]],
+    derive: Derive,
 ) -> None:
     """The candidate is a package build; the block there is a defect."""
     args = derive(prev, new)

@@ -78,9 +78,9 @@ class Scheduled:
         (self.tree / "mise" / "config.toml").write_text(CONFIG, encoding="utf-8")
         (self.tree / ".github" / "workflows").mkdir(parents=True)
         stubs = {"own-audits.sh": OWN_AUDITS_STUB}
-        belt = self.plant_belt(self.tmp / "belt", stubs=stubs)
+        belt_dir = self.plant_belt(self.tmp / "belt", stubs=stubs)
         self.env = self.make_env() | {
-            "ORG_BELT_DIR": str(belt),
+            "ORG_BELT_DIR": str(belt_dir),
             "ORG_PYTHON": sys.executable,
         }
 
@@ -197,13 +197,13 @@ class OwnTasks:
         self.tmp = tmp_path
         self.tree = self.tmp / "tree"
         (self.tree / ".github" / "workflows").mkdir(parents=True)
-        belt = self.plant_belt(
+        belt_dir = self.plant_belt(
             self.tmp / "belt", stubs={"own-audits.sh": OWN_AUDIT_STUB}
         )
-        canon = self.plant_canon(self.tmp / "canon", "security/identity.toml")
+        canon_dir = self.plant_canon(self.tmp / "canon", "security/identity.toml")
         self.env = self.make_env() | {
-            "ORG_BELT_DIR": str(belt),
-            "ORG_CANON_DIR": str(canon),
+            "ORG_BELT_DIR": str(belt_dir),
+            "ORG_CANON_DIR": str(canon_dir),
             "ORG_PYTHON": sys.executable,
         }
         subprocess.run([GIT, "init", "-q"], cwd=self.tree, env=self.env, check=True)

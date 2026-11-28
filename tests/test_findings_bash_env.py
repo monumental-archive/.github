@@ -198,7 +198,7 @@ def test_socket_stdin_or_ssh_skips_bash_env_unless_norc(env: support.Env) -> Non
     "bash", [pytest.param(bash, id=label) for label, bash in bashes()]
 )
 def test_a_body_and_its_child_bash_have_the_writer(
-    bash_env_rows: BashEnvRows, bash: object
+    bash_env_rows: BashEnvRows, bash: str
 ) -> None:
     """BASH_ENV gives the body and a bash it starts org_finding."""
     bash_env_rows.file.unlink(missing_ok=True)
@@ -216,7 +216,7 @@ def test_a_body_and_its_child_bash_have_the_writer(
     "bash", [pytest.param(bash, id=label) for label, bash in bashes()]
 )
 def test_without_bash_env_a_body_has_no_writer(
-    bash_env_rows: BashEnvRows, bash: object
+    bash_env_rows: BashEnvRows, bash: str
 ) -> None:
     """The same body with no BASH_ENV dies on the missing name."""
     done = bash_env_rows.run_body(bash, writer=False)

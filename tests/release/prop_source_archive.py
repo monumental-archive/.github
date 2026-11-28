@@ -29,7 +29,7 @@ from belt.release import source_archive as source
 from belt.typed_hypothesis import given
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from tests import support
 
 # The git calls one build makes.
 BUILD_CALLS = 2
@@ -74,7 +74,7 @@ def tarball() -> bytes:
 ARCHIVE = tarball()
 
 
-def fake_git() -> tuple[Callable[..., str], list[list[str]]]:
+def fake_git() -> tuple[support.Tool, list[list[str]]]:
     """Stand a `git` in: `ls-files` lists two files, `archive` writes one.
 
     Returns:

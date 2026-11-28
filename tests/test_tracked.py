@@ -223,7 +223,7 @@ def test_org_tracked_prints_the_three_names_unquoted(
 
 @pytest.mark.parametrize("shell", SHELLS)
 def test_org_tracked_read_fills_the_array_with_the_three_names(
-    producers: Producers, shell: object, env: support.Env
+    producers: Producers, shell: str, env: support.Env
 ) -> None:
     """One element per name, unquoted; no empty last element; no file left."""
     tree = producers.planted()
@@ -238,7 +238,7 @@ def test_org_tracked_read_fills_the_array_with_the_three_names(
 
 @pytest.mark.parametrize("shell", SHELLS)
 def test_org_tracked_read_of_nothing_is_an_empty_array(
-    producers: Producers, shell: object, env: support.Env
+    producers: Producers, shell: str, env: support.Env
 ) -> None:
     """A pathspec matching nothing: exit 0 and no element at all."""
     tree = producers.planted()
@@ -250,7 +250,7 @@ def test_org_tracked_read_of_nothing_is_an_empty_array(
 @pytest.mark.usefixtures("producers")
 @pytest.mark.parametrize("shell", SHELLS)
 def test_org_tracked_read_fails_when_git_fails_and_leaves_no_file(
-    shell: object, env: support.Env
+    shell: str, env: support.Env
 ) -> None:
     """Outside a repository: git's error, exit 1 under errexit, no file."""
     with tempfile.TemporaryDirectory() as tmp:
@@ -356,7 +356,7 @@ def test_a_misspelt_file_name_is_red(env: support.Env) -> None:
 
 # lint:markdown hands rumdl one argument per tracked name.
 @pytest.mark.parametrize("shell", SHELLS)
-def test_spaced_and_accented_names_pass_clean(shell: object, env: support.Env) -> None:
+def test_spaced_and_accented_names_pass_clean(shell: str, env: support.Env) -> None:
     """Red at 1c4fbe22 with `File not found: a`; green now, both shells."""
     done = run_task(
         "lint:markdown", dict.fromkeys(NAMES, CLEAN_MARKDOWN), shell=shell, env=env
@@ -380,7 +380,7 @@ def test_a_violation_in_the_accented_name_is_red_by_name(env: support.Env) -> No
 
 # A listing that fails is red, never "no files, skipped".
 @pytest.mark.parametrize("shell", SHELLS)
-def test_a_listing_task_fails_when_git_fails(shell: object, env: support.Env) -> None:
+def test_a_listing_task_fails_when_git_fails(shell: str, env: support.Env) -> None:
     """lint:markdown, with git exiting 128: nonzero, git's words, no skip."""
     done = run_task(
         "lint:markdown",
@@ -507,7 +507,7 @@ def has_state(tmp_path: Path, env: support.Env) -> Has:
 
 @pytest.mark.parametrize(("path", "want"), [("kept", 0), ("loose", 1), ("gone", 0)])
 def test_the_shell_answers_from_the_index(
-    has_state: Has, path: object, want: object, env: support.Env
+    has_state: Has, path: str, want: int, env: support.Env
 ) -> None:
     """Tracked 0, untracked on disk 1, tracked and deleted 0."""
     tree = has_state.planted()

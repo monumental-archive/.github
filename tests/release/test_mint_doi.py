@@ -106,7 +106,15 @@ import urllib.request
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import TYPE_CHECKING, NamedTuple, Self, TypedDict, Unpack, override
+from typing import (
+    TYPE_CHECKING,
+    NamedTuple,
+    Protocol,
+    Self,
+    TypedDict,
+    Unpack,
+    override,
+)
 
 import pytest
 
@@ -806,10 +814,18 @@ LAYOUT_DEFAULTS: Layout = {
 }
 
 
+class Mint(Protocol):
+    """What the `mint` fixture hands a row."""
+
+    def __call__(self, licence: str, **options: Unpack[Layout]) -> Minting:
+        """Lay out one mint with CITATION.cff stating `licence`."""
+        ...
+
+
 @fixture
 def mint(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, env: support.Env
-) -> Iterator[Callable[..., Minting]]:
+) -> Iterator[Mint]:
     """Lay out the step's world: the fake Zenodo, a stub `gh`, its env.
 
     Yields:
@@ -908,13 +924,13 @@ class OneId:
 
     minting: Minting
 
-    def __init__(self, mint: Callable[..., Minting]) -> None:
+    def __init__(self, mint: Mint) -> None:
         """Lay out the row's mint."""
         self.minting = mint("0BSD")
 
 
 @fixture
-def one_id(mint: Callable[..., Minting]) -> OneId:
+def one_id(mint: Mint) -> OneId:
     """Give each row its own OneId.
 
     Returns:
@@ -968,13 +984,13 @@ class TwoIds:
 
     minting: Minting
 
-    def __init__(self, mint: Callable[..., Minting]) -> None:
+    def __init__(self, mint: Mint) -> None:
         """Lay out the row's mint."""
         self.minting = mint("MIT OR Apache-2.0")
 
 
 @fixture
-def two_ids(mint: Callable[..., Minting]) -> TwoIds:
+def two_ids(mint: Mint) -> TwoIds:
     """Give each row its own TwoIds.
 
     Returns:
@@ -1067,9 +1083,7 @@ def test_the_published_record_is_read_back_after_the_publish(
 
 
 @pytest.mark.usefixtures("two_ids")
-def test_and_takes_the_same_path(
-    capfd: pytest.CaptureFixture[str], mint: Callable[..., Minting]
-) -> None:
+def test_and_takes_the_same_path(capfd: pytest.CaptureFixture[str], mint: Mint) -> None:
     """AND is accepted and quoted the same way as OR."""
     minting = mint("MIT AND Apache-2.0")
     status = mint_doi.main(["--pipeline", PIPELINE], minting.environ)
@@ -1090,7 +1104,7 @@ SHORT = (
 
 # The published record is verified; it cannot be unpublished.
 def test_a_published_record_with_one_id_is_red_by_name(
-    capfd: pytest.CaptureFixture[str], mint: Callable[..., Minting]
+    capfd: pytest.CaptureFixture[str], mint: Mint
 ) -> None:
     """Publish kept one of two ids: red, naming the DOI."""
     minting = mint("MIT OR Apache-2.0", published="one")
@@ -1102,7 +1116,7 @@ def test_a_published_record_with_one_id_is_red_by_name(
 
 
 def test_a_read_that_fails_is_unverified_never_a_pass(
-    capfd: pytest.CaptureFixture[str], mint: Callable[..., Minting]
+    capfd: pytest.CaptureFixture[str], mint: Mint
 ) -> None:
     """A published record that cannot be read is red as unverified."""
     minting = mint("MIT OR Apache-2.0", published="fail")
@@ -1118,7 +1132,7 @@ def test_a_read_that_fails_is_unverified_never_a_pass(
 
 
 def test_a_rerun_over_a_published_record_with_one_id_is_red(
-    capfd: pytest.CaptureFixture[str], mint: Callable[..., Minting]
+    capfd: pytest.CaptureFixture[str], mint: Mint
 ) -> None:
     """The #484 convergence path reaches the same check."""
     minting = mint("MIT OR Apache-2.0", published="one", concept="10.5281/zenodo.100")
@@ -1131,7 +1145,7 @@ def test_a_rerun_over_a_published_record_with_one_id_is_red(
 
 
 def test_a_rerun_over_a_published_record_with_both_is_green(
-    capfd: pytest.CaptureFixture[str], mint: Callable[..., Minting]
+    capfd: pytest.CaptureFixture[str], mint: Mint
 ) -> None:
     """A rerun over a complete record converges green."""
     minting = mint("MIT OR Apache-2.0", concept="10.5281/zenodo.100")
@@ -1144,7 +1158,7 @@ def test_a_rerun_over_a_published_record_with_both_is_green(
 
 
 def test_one_id_never_reads_the_published_record(
-    capfd: pytest.CaptureFixture[str], mint: Callable[..., Minting]
+    capfd: pytest.CaptureFixture[str], mint: Mint
 ) -> None:
     """0BSD, fresh or rerun: no published read, whatever it would say."""
     for concept in (None, "10.5281/zenodo.100"):
@@ -1163,9 +1177,7 @@ def assert_refused(run: Run, message: str) -> None:
     assert run.made("POST", "/api/deposit/depositions") == NOTHING
 
 
-def test_with_is_refused_by_name(
-    capfd: pytest.CaptureFixture[str], mint: Callable[..., Minting]
-) -> None:
+def test_with_is_refused_by_name(capfd: pytest.CaptureFixture[str], mint: Mint) -> None:
     """WITH refuses, naming the operator."""
     minting = mint("GPL-2.0-only WITH Classpath-exception-2.0")
     status = mint_doi.main(["--pipeline", PIPELINE], minting.environ)
@@ -1179,7 +1191,7 @@ def test_with_is_refused_by_name(
 
 
 def test_parentheses_are_refused_by_name(
-    capfd: pytest.CaptureFixture[str], mint: Callable[..., Minting]
+    capfd: pytest.CaptureFixture[str], mint: Mint
 ) -> None:
     """Parentheses refuse by name."""
     minting = mint("(MIT OR Apache-2.0)")
@@ -1192,7 +1204,7 @@ def test_parentheses_are_refused_by_name(
 
 
 def test_a_dangling_operator_is_refused(
-    capfd: pytest.CaptureFixture[str], mint: Callable[..., Minting]
+    capfd: pytest.CaptureFixture[str], mint: Mint
 ) -> None:
     """An expression ending in an operator refuses."""
     minting = mint("MIT OR")
@@ -1205,7 +1217,7 @@ def test_a_dangling_operator_is_refused(
 
 
 def test_an_id_absent_from_the_vocabulary_is_refused_naming_it(
-    capfd: pytest.CaptureFixture[str], mint: Callable[..., Minting]
+    capfd: pytest.CaptureFixture[str], mint: Mint
 ) -> None:
     """An id the vocabulary 404s refuses, naming it."""
     minting = mint("MIT OR Not-A-Licence")
@@ -1220,7 +1232,7 @@ def test_an_id_absent_from_the_vocabulary_is_refused_naming_it(
 
 
 def test_a_read_back_missing_an_id_never_publishes(
-    capfd: pytest.CaptureFixture[str], mint: Callable[..., Minting]
+    capfd: pytest.CaptureFixture[str], mint: Mint
 ) -> None:
     """A read-back short of an id refuses before the publish."""
     minting = mint("MIT OR Apache-2.0", collapse=True)
@@ -1315,7 +1327,7 @@ def canon_zenodo(**kw: object) -> Zenodo:
 
 
 def canon_mint(
-    mint: Callable[..., Minting],
+    mint: Mint,
     z: Zenodo,
     licence: str = "0BSD",
     version: str = "1.68.5",
@@ -1466,9 +1478,7 @@ def test_the_deleted_draft_is_gone() -> None:
         ("full-edtf", EDTF_PREV, "monumental-archive/edtf"),
     ],
 )
-def test_only_the_full_title_finds_the_record(
-    name: object, rid: object, title: object
-) -> None:
+def test_only_the_full_title_finds_the_record(name: str, rid: str, title: str) -> None:
     """M1-M4 (#1389): the repo name finds nothing, the full title finds it.
 
     C1, the same repo-name query in the capture run, answered `[]` too.
@@ -1483,7 +1493,7 @@ def test_only_the_full_title_finds_the_record(
 
 # #484: a rerun over a published version converges, writing nothing.
 def test_the_canon_converges_on_its_recorded_record(
-    capfd: pytest.CaptureFixture[str], mint: Callable[..., Minting]
+    capfd: pytest.CaptureFixture[str], mint: Mint
 ) -> None:
     """The canon's own concept at v1.68.4: green, no write, no read-back."""
     minting = canon_mint(mint, canon_zenodo(), version="1.68.4")
@@ -1502,7 +1512,7 @@ def test_the_canon_converges_on_its_recorded_record(
 
 
 def test_edtf_converges_after_verifying_both_licences(
-    capfd: pytest.CaptureFixture[str], mint: Callable[..., Minting]
+    capfd: pytest.CaptureFixture[str], mint: Mint
 ) -> None:
     """Edtf at v1.3.5: green, its record's licences read, no write."""
     minting = mint(
@@ -1525,13 +1535,13 @@ class ALaterMint:
 
     minting: Minting
 
-    def __init__(self, mint: Callable[..., Minting]) -> None:
+    def __init__(self, mint: Mint) -> None:
         """Lay out the row's mint."""
         self.minting = canon_mint(mint, canon_zenodo())
 
 
 @fixture
-def a_later_mint(mint: Callable[..., Minting]) -> ALaterMint:
+def a_later_mint(mint: Mint) -> ALaterMint:
     """Give each row its own ALaterMint.
 
     Returns:
@@ -1641,7 +1651,7 @@ def test_the_creator_is_family_comma_given(
 
 @pytest.mark.usefixtures("a_later_mint")
 def test_two_licences_go_on_the_new_draft(
-    capfd: pytest.CaptureFixture[str], mint: Callable[..., Minting]
+    capfd: pytest.CaptureFixture[str], mint: Mint
 ) -> None:
     """A later mint with two ids sets the rights on the captured draft."""
     z = canon_zenodo(
@@ -1665,7 +1675,7 @@ def test_two_licences_go_on_the_new_draft(
 
 # Only an unsubmitted draft under the concept is deleted (C2, C5).
 def test_the_published_record_in_the_draft_listing_is_kept(
-    capfd: pytest.CaptureFixture[str], mint: Callable[..., Minting]
+    capfd: pytest.CaptureFixture[str], mint: Mint
 ) -> None:
     """C2 as captured lists v1.68.4 itself: nothing but the old file goes."""
     minting = canon_mint(mint, canon_zenodo())
@@ -1678,7 +1688,7 @@ def test_the_published_record_in_the_draft_listing_is_kept(
 
 
 def test_a_stale_draft_is_deleted_before_newversion(
-    capfd: pytest.CaptureFixture[str], mint: Callable[..., Minting]
+    capfd: pytest.CaptureFixture[str], mint: Mint
 ) -> None:
     """C5 as captured holds an interrupted run's draft: it goes first.
 
@@ -1701,7 +1711,7 @@ def test_a_stale_draft_is_deleted_before_newversion(
 
 
 def test_both_together_delete_only_the_draft(
-    capfd: pytest.CaptureFixture[str], mint: Callable[..., Minting]
+    capfd: pytest.CaptureFixture[str], mint: Mint
 ) -> None:
     """C2 and C5 in one listing: the published record is never touched."""
     z = canon_zenodo(
@@ -1722,7 +1732,7 @@ def test_both_together_delete_only_the_draft(
 
 # #484: the truth after a failed publish is the archive's state.
 def test_a_lost_response_over_a_landed_publish_is_recovered(
-    capfd: pytest.CaptureFixture[str], mint: Callable[..., Minting]
+    capfd: pytest.CaptureFixture[str], mint: Mint
 ) -> None:
     """The connection drops, the record landed: green, 20 s spacing."""
     minting = canon_mint(mint, canon_zenodo(publish="drop", appear_after=1))
@@ -1739,7 +1749,7 @@ def test_a_lost_response_over_a_landed_publish_is_recovered(
 
 
 def test_a_failed_publish_that_never_lands_is_red(
-    capfd: pytest.CaptureFixture[str], mint: Callable[..., Minting]
+    capfd: pytest.CaptureFixture[str], mint: Mint
 ) -> None:
     """Nothing published: three reads, 20 s apart, then red by name."""
     minting = canon_mint(mint, canon_zenodo(publish="fail"))
@@ -1809,7 +1819,7 @@ def first_mint_zenodo(titles: object) -> Zenodo:
 
 # The refusals before any deposit exists.
 def test_the_canons_first_mint_is_refused_on_the_measured_answers(
-    capfd: pytest.CaptureFixture[str], mint: Callable[..., Minting]
+    capfd: pytest.CaptureFixture[str], mint: Mint
 ) -> None:
     """#1389's fail-before test: the canon's title, as production answers.
 
@@ -1838,7 +1848,7 @@ def test_the_canons_first_mint_is_refused_on_the_measured_answers(
 
 
 def test_a_title_with_no_dot_is_refused_on_the_measured_answers(
-    capfd: pytest.CaptureFixture[str], mint: Callable[..., Minting]
+    capfd: pytest.CaptureFixture[str], mint: Mint
 ) -> None:
     """Edtf's title: M4 holds its submitted record, so a first mint refuses."""
     z = first_mint_zenodo([])
@@ -1855,7 +1865,7 @@ def test_a_title_with_no_dot_is_refused_on_the_measured_answers(
 
 
 def test_the_old_query_answer_could_never_refuse(
-    capfd: pytest.CaptureFixture[str], mint: Callable[..., Minting]
+    capfd: pytest.CaptureFixture[str], mint: Mint
 ) -> None:
     """M1, what `title:".github"` answered: nothing, so a mint went on."""
     minting = mint(
@@ -1872,7 +1882,7 @@ def test_the_old_query_answer_could_never_refuse(
 
 
 def test_an_unsubmitted_title_alone_does_not_refuse(
-    capfd: pytest.CaptureFixture[str], mint: Callable[..., Minting]
+    capfd: pytest.CaptureFixture[str], mint: Mint
 ) -> None:
     """C5, the captured unsubmitted draft of the title: the mint goes on."""
     minting = mint(
@@ -1888,7 +1898,7 @@ def test_an_unsubmitted_title_alone_does_not_refuse(
 
 
 def test_a_title_on_a_later_page_refuses(
-    capfd: pytest.CaptureFixture[str], mint: Callable[..., Minting]
+    capfd: pytest.CaptureFixture[str], mint: Mint
 ) -> None:
     """Page 1 full of unsubmitted drafts, the minted title on page 2."""
     (draft,) = captured_list("drafts-during")
@@ -1907,7 +1917,7 @@ def test_a_title_on_a_later_page_refuses(
 
 
 def test_a_listing_page_that_cannot_be_read_refuses(
-    capfd: pytest.CaptureFixture[str], mint: Callable[..., Minting]
+    capfd: pytest.CaptureFixture[str], mint: Mint
 ) -> None:
     """Page 2 answers 503 on every try: refused, nothing created."""
     (draft,) = captured_list("drafts-during")
@@ -1929,7 +1939,7 @@ def test_a_listing_page_that_cannot_be_read_refuses(
 def test_a_listing_still_full_at_the_page_bound_refuses(
     capfd: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
-    mint: Callable[..., Minting],
+    mint: Mint,
 ) -> None:
     """Full pages to the bound: the bound refuses, never passes."""
     (draft,) = captured_list("drafts-during")
@@ -1949,7 +1959,7 @@ def test_a_listing_still_full_at_the_page_bound_refuses(
 
 
 def test_a_vocabulary_answering_500_refuses_as_unchecked(
-    capfd: pytest.CaptureFixture[str], mint: Callable[..., Minting]
+    capfd: pytest.CaptureFixture[str], mint: Mint
 ) -> None:
     """A 500 is retried as transient, then refused; no deposit."""
     z = stub_zenodo("both", None)
@@ -1968,7 +1978,7 @@ def test_a_vocabulary_answering_500_refuses_as_unchecked(
 
 
 def test_no_authors_refuses_before_any_request(
-    capfd: pytest.CaptureFixture[str], mint: Callable[..., Minting]
+    capfd: pytest.CaptureFixture[str], mint: Mint
 ) -> None:
     """A citation with no authors is red by name; Zenodo is never asked."""
     cff = "\n".join(
@@ -1989,7 +1999,7 @@ def test_no_authors_refuses_before_any_request(
 
 
 def test_no_citation_refuses_by_name(
-    capfd: pytest.CaptureFixture[str], mint: Callable[..., Minting]
+    capfd: pytest.CaptureFixture[str], mint: Mint
 ) -> None:
     """Gh failing to fetch CITATION.cff is red, naming the tag."""
     minting = mint("0BSD", cff="")
@@ -2005,7 +2015,7 @@ def test_no_citation_refuses_by_name(
 
 
 def test_a_failed_read_refuses_though_its_body_decodes(
-    capfd: pytest.CaptureFixture[str], mint: Callable[..., Minting]
+    capfd: pytest.CaptureFixture[str], mint: Mint
 ) -> None:
     """Gh's exit status decides, never the decoder (#103).
 
@@ -2026,7 +2036,7 @@ def test_a_failed_read_refuses_though_its_body_decodes(
 
 
 def test_a_concept_doi_without_a_record_id_refuses(
-    capfd: pytest.CaptureFixture[str], mint: Callable[..., Minting]
+    capfd: pytest.CaptureFixture[str], mint: Mint
 ) -> None:
     """A recorded concept DOI must end in a Zenodo record id."""
     minting = mint("0BSD", concept="10.5281/zenodo.abc")
@@ -2042,7 +2052,7 @@ def test_a_concept_doi_without_a_record_id_refuses(
 
 
 def test_an_unresolvable_concept_refuses(
-    capfd: pytest.CaptureFixture[str], mint: Callable[..., Minting]
+    capfd: pytest.CaptureFixture[str], mint: Mint
 ) -> None:
     """A concept with no published version is red by name, nothing created."""
     minting = mint("0BSD", concept="10.5281/zenodo.555")
@@ -2167,9 +2177,7 @@ def test_an_answer_that_is_not_a_response_is_refused(
     """What the opener answered is not an HTTP response: refused by name."""
     url = "https://zenodo.invalid/api/records/1"
     z = mint_doi.Zenodo("https://zenodo.invalid", "t", "a")
-    monkeypatch.setattr(
-        urllib.request.OpenerDirector, "open", lambda *_args, **_kwargs: None
-    )
+    monkeypatch.setattr(urllib.request.OpenerDirector, "open", support.answers_none)
     with pytest.raises(mint_doi.RefusedError) as caught:
         z.public(url)
     assert f"{url} answered NoneType, not an HTTP response" == str(caught.value)
@@ -2243,7 +2251,7 @@ def test_rights_that_are_not_a_list_of_ids_are_unreadable() -> None:
 
 
 def test_a_newversion_answer_with_no_draft_link_is_refused(
-    capfd: pytest.CaptureFixture[str], mint: Callable[..., Minting]
+    capfd: pytest.CaptureFixture[str], mint: Mint
 ) -> None:
     """No deposit is grown from an answer that names no draft."""
     minting = canon_mint(mint, canon_zenodo(newversion_body={"links": {}}))
@@ -2256,7 +2264,7 @@ def test_a_newversion_answer_with_no_draft_link_is_refused(
 
 
 def test_a_draft_listing_entry_that_is_not_an_object_is_refused(
-    capfd: pytest.CaptureFixture[str], mint: Callable[..., Minting]
+    capfd: pytest.CaptureFixture[str], mint: Mint
 ) -> None:
     """The stale-draft sweep reads depositions, nothing else."""
     minting = canon_mint(mint, canon_zenodo(drafts=[1]))
@@ -2270,7 +2278,7 @@ def test_a_draft_listing_entry_that_is_not_an_object_is_refused(
 
 
 def test_a_title_listing_entry_that_is_not_an_object_is_refused(
-    capfd: pytest.CaptureFixture[str], mint: Callable[..., Minting]
+    capfd: pytest.CaptureFixture[str], mint: Mint
 ) -> None:
     """The first-mint guard reads depositions, nothing else."""
     minting = mint(

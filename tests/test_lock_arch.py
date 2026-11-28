@@ -170,7 +170,7 @@ def test_unjudgeable_asset_is_not_reported() -> None:
     ],
 )
 def test_an_unreadable_lock_is_named_and_skipped(
-    body: object, said: object, capfd: pytest.CaptureFixture[str]
+    body: str, said: str, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """Not TOML, or `tools` not a table: said by name, no candidate."""
     path = _lock(body)

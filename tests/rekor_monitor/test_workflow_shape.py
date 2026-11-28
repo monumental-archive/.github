@@ -350,7 +350,7 @@ def test_the_workflow_holds(shape: Shape) -> None:
 
 
 @pytest.mark.parametrize(("old", "new", "message"), ROWS)
-def test_rows(shape: Shape, old: object, new: object, message: object) -> None:
+def test_rows(shape: Shape, old: str, new: str, message: str) -> None:
     """Each planted change is named by its own message, and only it."""
     assert shape.text.count(old) == 1
     named: list[str] = [message]

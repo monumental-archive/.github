@@ -19,7 +19,7 @@ import os
 import sys
 import tarfile
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 import pytest
 
@@ -29,7 +29,6 @@ from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
     from pathlib import Path
 
 # The builds of the tagged tree a release makes and compares.
@@ -134,13 +133,28 @@ class Archiving:
         )
 
 
+class Archive(Protocol):
+    """What the `archive` fixture hands a row."""
+
+    def __call__(
+        self,
+        archives: tuple[bytes, bytes],
+        tracked: int,
+        repo: str = ...,
+        *,
+        fail: bool = ...,
+    ) -> Archiving:
+        """Run archive."""
+        ...
+
+
 @fixture
 def archive(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     canon: support.Canon,
     env: support.Env,
-) -> Callable[..., Archiving]:
+) -> Archive:
     """Lay out two planted builds and a tracked count for the command.
 
     Returns:
@@ -213,7 +227,7 @@ def test_the_shipped_step_calls_the_helper() -> None:
 
 # Two equal builds of the tagged tree pass.
 def test_two_equal_builds_ship_one_archive(
-    capfd: pytest.CaptureFixture[str], archive: Callable[..., Archiving]
+    capfd: pytest.CaptureFixture[str], archive: Archive
 ) -> None:
     """Both builds archive the tag under the release's prefix."""
     data = tarball(5)
@@ -234,7 +248,7 @@ def test_two_equal_builds_ship_one_archive(
 
 
 def test_a_dot_repository_gets_a_visible_name(
-    capfd: pytest.CaptureFixture[str], archive: Callable[..., Archiving]
+    capfd: pytest.CaptureFixture[str], archive: Archive
 ) -> None:
     """The .github repository's asset is github-<version>.tar.gz."""
     data = tarball(2)
@@ -247,7 +261,7 @@ def test_a_dot_repository_gets_a_visible_name(
 
 
 def test_more_than_half_the_tracked_files_is_enough(
-    capfd: pytest.CaptureFixture[str], archive: Callable[..., Archiving]
+    capfd: pytest.CaptureFixture[str], archive: Archive
 ) -> None:
     """Four entries for seven tracked files: 4 > 7 // 2."""
     data = tarball(4)
@@ -259,7 +273,7 @@ def test_more_than_half_the_tracked_files_is_enough(
 
 # One row per refusal, each message asserted.
 def test_two_builds_that_differ_are_refused(
-    capfd: pytest.CaptureFixture[str], archive: Callable[..., Archiving]
+    capfd: pytest.CaptureFixture[str], archive: Archive
 ) -> None:
     """The archive is not reproducible, so nothing can check it."""
     a, b = tarball(5), tarball(5, salt="x")
@@ -275,7 +289,7 @@ def test_two_builds_that_differ_are_refused(
 
 
 def test_half_the_tracked_files_is_refused(
-    capfd: pytest.CaptureFixture[str], archive: Callable[..., Archiving]
+    capfd: pytest.CaptureFixture[str], archive: Archive
 ) -> None:
     """Three entries for seven tracked files: 3 <= 7 // 2."""
     data = tarball(3)
@@ -290,7 +304,7 @@ def test_half_the_tracked_files_is_refused(
 
 
 def test_an_empty_archive_is_refused(
-    capfd: pytest.CaptureFixture[str], archive: Callable[..., Archiving]
+    capfd: pytest.CaptureFixture[str], archive: Archive
 ) -> None:
     """No entries at all is a truncated stream."""
     data = tarball(0)
@@ -305,7 +319,7 @@ def test_an_empty_archive_is_refused(
 
 
 def test_a_failing_git_fails_the_step_with_its_status(
-    capfd: pytest.CaptureFixture[str], archive: Callable[..., Archiving]
+    capfd: pytest.CaptureFixture[str], archive: Archive
 ) -> None:
     """A tag git cannot archive: git's run.returncode and message.
 

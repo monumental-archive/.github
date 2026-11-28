@@ -243,7 +243,7 @@ def headers(tmp_path: Path) -> Headers:
 
 @pytest.mark.parametrize(("header", "want"), HEADERS.items())
 def test_each_header_form_opens_a_block(
-    headers: Headers, header: object, want: object
+    headers: Headers, header: str, want: str
 ) -> None:
     """Each chomping and indentation form, commented or not."""
     found = headers.read(

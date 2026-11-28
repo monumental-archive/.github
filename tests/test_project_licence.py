@@ -129,8 +129,8 @@ def test_an_unparsable_file_is_red_by_name(
     ],
 )
 def test_a_wrong_shape_is_red_by_where(
-    reuse: object,
-    where: object,
+    reuse: str,
+    where: str,
     capfd: pytest.CaptureFixture[str],
     repo: Callable[[dict[str, str]], None],
 ) -> None:

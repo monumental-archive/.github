@@ -744,7 +744,7 @@ def test_a_rust_only_tree_shaped_like_edtf(
     ],
 )
 def test_a_go_tree(
-    job: object, want: object, env: support.Env, capfd: pytest.CaptureFixture[str]
+    *, job: str, want: bool, env: support.Env, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """go.mod brings the Go jobs and fuzz, and nothing Rust."""
     root = git_tree(GO, env=env)
@@ -771,7 +771,7 @@ def test_a_go_tree(
     ],
 )
 def test_the_canon_tree(
-    job: object, want: object, capfd: pytest.CaptureFixture[str]
+    *, job: str, want: bool, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """The canon has Python properties, workflows and a lock; no Rust or Go."""
     root = CANON
@@ -809,7 +809,7 @@ RAND_LOCK = 'version = 4\n\n[[package]]\nname = "rand"\nversion = "0.9.0"\n'
 # The rust-properties job runs where a lock holds proptest (#1930).
 @pytest.mark.parametrize("name", ["Cargo.lock", "crates/a/Cargo.lock"])
 def test_a_lock_holding_proptest_runs_the_job(
-    name: object, env: support.Env, capfd: pytest.CaptureFixture[str]
+    name: str, env: support.Env, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """At the root, or a workspace member's own lock."""
     status = audit_legs.main([
@@ -831,7 +831,7 @@ def test_a_lock_holding_proptest_runs_the_job(
     ],
 )
 def test_a_lock_without_proptest_skips_the_job(
-    files: object, env: support.Env, capfd: pytest.CaptureFixture[str]
+    files: dict[str, str], env: support.Env, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """A Cargo.lock alone is not a property, nor a vendored proptest."""
     status = audit_legs.main([

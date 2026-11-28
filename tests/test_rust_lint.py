@@ -1306,8 +1306,8 @@ def test_fix_branches_cargo_missing_is_red(
 )
 def test_each_missing_component_is_red(
     fix_branches: FixBranches,
-    listed: object,
-    missing: object,
+    listed: str,
+    missing: str,
     capfd: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -17,7 +17,7 @@ import json
 import os
 import sys
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 import pytest
 
@@ -27,7 +27,6 @@ from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
     from pathlib import Path
 
 # The status the stub npm's `fail` mode exits with.
@@ -122,13 +121,21 @@ class Packing:
         )
 
 
+class Pack(Protocol):
+    """What the `pack` fixture hands a row."""
+
+    def __call__(self, manifest: object, mode: str = ...) -> Packing:
+        """Run pack."""
+        ...
+
+
 @fixture
 def pack(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     canon: support.Canon,
     env: support.Env,
-) -> Callable[..., Packing]:
+) -> Pack:
     """Lay out the step's world: a stub `npm`, the canon, one package.
 
     Returns:
@@ -216,7 +223,7 @@ def test_the_shipped_step_calls_the_helper() -> None:
 
 # The exact bytes are packed, hashed and named.
 def test_the_tarball_is_hashed_into_every_output(
-    capfd: pytest.CaptureFixture[str], pack: Callable[..., Packing]
+    capfd: pytest.CaptureFixture[str], pack: Pack
 ) -> None:
     """Subjects, package and registry-subjects carry one digest."""
     packing = pack(package())
@@ -235,7 +242,7 @@ def test_the_tarball_is_hashed_into_every_output(
 
 @pytest.mark.parametrize("url", [f"git+{WANT}.git", f"git+{WANT}", f"{WANT}.git"])
 def test_the_git_url_forms_are_the_repository(
-    url: object, capfd: pytest.CaptureFixture[str], pack: Callable[..., Packing]
+    url: str, capfd: pytest.CaptureFixture[str], pack: Pack
 ) -> None:
     """`git+` and `.git` are the same repository."""
     packing = pack(package(repository={"type": "git", "url": url}))
@@ -245,7 +252,7 @@ def test_the_git_url_forms_are_the_repository(
 
 
 def test_a_string_repository_is_read(
-    capfd: pytest.CaptureFixture[str], pack: Callable[..., Packing]
+    capfd: pytest.CaptureFixture[str], pack: Pack
 ) -> None:
     """The shorthand form names the repository too."""
     packing = pack(package(repository=WANT))
@@ -267,7 +274,7 @@ def assert_refused(run: Run, message: str) -> None:
 
 
 def test_another_repository_is_refused_with_the_remedy(
-    capfd: pytest.CaptureFixture[str], pack: Callable[..., Packing]
+    capfd: pytest.CaptureFixture[str], pack: Pack
 ) -> None:
     """The registry would refuse its provenance (the v0.14.1 run)."""
     other = "https://github.com/someone/fork"
@@ -278,7 +285,7 @@ def test_another_repository_is_refused_with_the_remedy(
 
 
 def test_no_repository_is_refused_with_the_remedy(
-    capfd: pytest.CaptureFixture[str], pack: Callable[..., Packing]
+    capfd: pytest.CaptureFixture[str], pack: Pack
 ) -> None:
     """Cargo.toml without `repository` leaves none in package.json (#96)."""
     packing = pack(package(repository=None))
@@ -291,7 +298,7 @@ def test_no_repository_is_refused_with_the_remedy(
 
 
 def test_a_repository_without_a_url_is_refused(
-    capfd: pytest.CaptureFixture[str], pack: Callable[..., Packing]
+    capfd: pytest.CaptureFixture[str], pack: Pack
 ) -> None:
     """An object with no url is not this repository."""
     packing = pack(package(repository={"type": "git"}))
@@ -301,7 +308,7 @@ def test_a_repository_without_a_url_is_refused(
 
 
 def test_a_version_that_is_not_the_tags_is_refused(
-    capfd: pytest.CaptureFixture[str], pack: Callable[..., Packing]
+    capfd: pytest.CaptureFixture[str], pack: Pack
 ) -> None:
     """The package would publish under a version the tag does not name."""
     packing = pack(package(version="1.3.3"))
@@ -312,9 +319,7 @@ def test_a_version_that_is_not_the_tags_is_refused(
     )
 
 
-def test_no_version_is_refused(
-    capfd: pytest.CaptureFixture[str], pack: Callable[..., Packing]
-) -> None:
+def test_no_version_is_refused(capfd: pytest.CaptureFixture[str], pack: Pack) -> None:
     """A missing version reads as null, as jq read it."""
     packing = pack(package(version=None))
     status = pack_wasm.main([])
@@ -325,7 +330,7 @@ def test_no_version_is_refused(
 
 
 def test_a_repository_spanning_lines_stays_one_error(
-    capfd: pytest.CaptureFixture[str], pack: Callable[..., Packing]
+    capfd: pytest.CaptureFixture[str], pack: Pack
 ) -> None:
     """A newline in the caller's text is escaped (#1556's audit seed).
 
@@ -341,7 +346,7 @@ def test_a_repository_spanning_lines_stays_one_error(
 
 
 def test_a_package_json_that_is_not_an_object_is_refused(
-    capfd: pytest.CaptureFixture[str], pack: Callable[..., Packing]
+    capfd: pytest.CaptureFixture[str], pack: Pack
 ) -> None:
     """`0` and `[]` refuse by name (#1556's shrunk examples).
 
@@ -361,7 +366,7 @@ def test_a_package_json_that_is_not_an_object_is_refused(
 
 # npm pack must leave bytes behind.
 def test_an_empty_tarball_is_refused(
-    capfd: pytest.CaptureFixture[str], pack: Callable[..., Packing]
+    capfd: pytest.CaptureFixture[str], pack: Pack
 ) -> None:
     """A zero-byte file is nothing to publish."""
     packing = pack(package(), mode="empty")
@@ -373,7 +378,7 @@ def test_an_empty_tarball_is_refused(
 
 
 def test_no_tarball_named_is_refused(
-    capfd: pytest.CaptureFixture[str], pack: Callable[..., Packing]
+    capfd: pytest.CaptureFixture[str], pack: Pack
 ) -> None:
     """A pack that names no tarball is nothing to publish."""
     packing = pack(package(), mode="silent")
@@ -385,7 +390,7 @@ def test_no_tarball_named_is_refused(
 
 
 def test_a_failing_npm_fails_the_step_with_its_status(
-    capfd: pytest.CaptureFixture[str], pack: Callable[..., Packing]
+    capfd: pytest.CaptureFixture[str], pack: Pack
 ) -> None:
     """The failing npm's status and message, no outputs."""
     packing = pack(package(), mode="fail")

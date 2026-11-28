@@ -131,9 +131,9 @@ class Forge:
         (stubs / "gh").write_text(GH, encoding="utf-8")
         (stubs / "gh").chmod(0o755)
         (self.state / "refs").write_text(f"main {MAIN}\n", encoding="utf-8")
-        env = self.make_env(self.tmp / "home")
-        self.env = env | {
-            "PATH": f"{stubs}{os.pathsep}{env.get('PATH', '')}",
+        environ = self.make_env(self.tmp / "home")
+        self.env = environ | {
+            "PATH": f"{stubs}{os.pathsep}{environ.get('PATH', '')}",
             "STATE": str(self.state),
             "OID": OID,
             # Not a credential: the stub reads none.

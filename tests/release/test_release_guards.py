@@ -1342,7 +1342,7 @@ def test_any_other_refusal_to_move_the_branch_still_fails(
     ],
 )
 def test_a_head_read_that_fails_is_never_read_as_unchanged(
-    open_release_pr_head: OpenReleasePrHead, head: object
+    open_release_pr_head: OpenReleasePrHead, head: str | None
 ) -> None:
     """No answer, or an answer that is not a commit, fails by name."""
     (open_release_pr_head.state / "calls").unlink(missing_ok=True)
@@ -1533,7 +1533,7 @@ def test_a_list_that_fails_is_never_read_as_none_open(
     ],
 )
 def test_close_release_pr_each_required_input_is_named_when_it_is_missing(
-    close_release_pr: CloseReleasePr, missing: object, env: support.Env
+    close_release_pr: CloseReleasePr, missing: str, env: support.Env
 ) -> None:
     """No default branch name, repository or commit: each is named."""
     close_release_pr.forge(PLANNED)

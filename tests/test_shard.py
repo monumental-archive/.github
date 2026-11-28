@@ -63,7 +63,7 @@ def test_good() -> None:
 
 
 @pytest.mark.parametrize("raw", ["0/2", "3/2", "1/0", "x/2", "1", "1/2/3", "-1/2"])
-def test_bad(raw: object) -> None:
+def test_bad(raw: str) -> None:
     """Zero, k above n, and anything not two numbers: refused by name."""
     with pytest.raises(shard.ShardError) as caught:
         shard.parse(raw)

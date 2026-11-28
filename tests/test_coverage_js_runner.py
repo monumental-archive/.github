@@ -84,7 +84,7 @@ CRATE: set[str] = {"1.0.154"}
     ],
 )
 def test_every_format_reads_the_installed_version(
-    lockfile: object, lock: object, name: object, want: object
+    lockfile: str, lock: str, name: str, want: set[str]
 ) -> None:
     """The version installed, never the range the entry was asked for."""
     assert want == cj.locked(lockfile, lock, name)
@@ -111,7 +111,7 @@ def test_a_name_is_matched_whole_and_literally() -> None:
         ("yarn.lock", 'vitest@^4:\n  resolved "x"\n'),
     ],
 )
-def test_an_entry_without_a_version_reads_none(lockfile: object, lock: object) -> None:
+def test_an_entry_without_a_version_reads_none(lockfile: str, lock: str) -> None:
     """An entry whose version is not where its format writes one."""
     assert cj.locked(lockfile, lock, "vitest") == NONE
 
@@ -119,7 +119,7 @@ def test_an_entry_without_a_version_reads_none(lockfile: object, lock: object) -
 @pytest.mark.parametrize(
     "lock", ["[[package]\n", "package = 1\n", '[[package]]\nname = "a"\n']
 )
-def test_a_cargo_lock_of_the_wrong_shape_is_refused(lock: object) -> None:
+def test_a_cargo_lock_of_the_wrong_shape_is_refused(lock: str) -> None:
     """Not TOML, or a package table of another shape, raises by where."""
     with pytest.raises(decoded.UndecodableError):
         cj.locked("Cargo.lock", lock, "a")
@@ -307,7 +307,7 @@ def test_no_subcommand_is_run() -> None:
 )
 def test_what_is_not_a_run_is_unchanged(
     measured_run_state: MeasuredRun,
-    command: object,
+    command: list[str],
     capfd: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

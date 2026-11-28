@@ -816,7 +816,7 @@ def test_the_producers_stdout_holds_against_the_declaration(
 
 @pytest.mark.parametrize("value", ["[15]", '"15"', "15,16"])
 def test_a_value_that_is_not_the_plans_shape_is_refused(
-    fanned_plan: FannedPlan, value: object
+    fanned_plan: FannedPlan, value: str
 ) -> None:
     """A number, a bare string and a comma list are each refused by name."""
     done, log = fanned_plan.run_pgrx(ORG_PGRX_FANNED=value)

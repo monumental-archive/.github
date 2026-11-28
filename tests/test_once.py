@@ -120,7 +120,8 @@ def test_two_concurrent_callers_run_it_once(once_state: Once) -> None:
     line = 'echo start >> "${LOG}"; sleep 1; echo end >> "${LOG}"'
     with ThreadPoolExecutor(max_workers=2) as pool:
         argv = once_state.argv(line)
-        statuses = list(pool.map(once.main, [argv, argv]))
+        running = [pool.submit(once.main, argv) for _ in range(2)]
+        statuses = [run.result() for run in running]
     assert statuses == [0, 0]
     assert lines("start", "end") == once_state.ran()
 

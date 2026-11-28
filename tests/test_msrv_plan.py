@@ -20,7 +20,7 @@ import json
 import re
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 import pytest
 
@@ -407,8 +407,23 @@ def test_the_stable_pin_can_be_the_msrv_pin() -> None:
 
 
 # The whole check. Mutation: emit the plan even when nothing matched.
+class Plan(Protocol):
+    """What the `plan` fixture hands a row."""
+
+    def __call__(
+        self,
+        doc: object,
+        listing: object,
+        exclude: str = ...,
+        pgrx: str = ...,
+        floor: str = ...,
+    ) -> list[str]:
+        """Run plan."""
+        ...
+
+
 @fixture
-def plan(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Callable[..., list[str]]:
+def plan(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Plan:
     """Feed the planner one workspace on stdin and one toolchain listing.
 
     Returns:
@@ -441,7 +456,7 @@ def plan(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Callable[..., list[
 
 
 def test_a_pinned_minimum_plans_one_check(
-    capfd: pytest.CaptureFixture[str], plan: Callable[..., list[str]]
+    capfd: pytest.CaptureFixture[str], plan: Plan
 ) -> None:
     """The org's own shape: 1.82 declared, 1.82.0 pinned beside the stable."""
     status = msrv_plan.main(
@@ -456,7 +471,7 @@ def test_a_pinned_minimum_plans_one_check(
 
 
 def test_a_promise_no_pin_covers_is_red(
-    capfd: pytest.CaptureFixture[str], plan: Callable[..., list[str]]
+    capfd: pytest.CaptureFixture[str], plan: Plan
 ) -> None:
     """Direction one: the state edtf is in today, before the pin lands."""
     status = msrv_plan.main(
@@ -474,7 +489,7 @@ def test_a_promise_no_pin_covers_is_red(
 
 
 def test_a_pin_moved_off_the_promise_is_red(
-    capfd: pytest.CaptureFixture[str], plan: Callable[..., list[str]]
+    capfd: pytest.CaptureFixture[str], plan: Plan
 ) -> None:
     """Direction two: the pin bumped alone, which a green check would hide."""
     status = msrv_plan.main(
@@ -488,7 +503,7 @@ def test_a_pin_moved_off_the_promise_is_red(
 
 
 def test_a_patch_apart_is_not_the_same_promise(
-    capfd: pytest.CaptureFixture[str], plan: Callable[..., list[str]]
+    capfd: pytest.CaptureFixture[str], plan: Plan
 ) -> None:
     """1.82 promises 1.82.0; a green run at 1.82.1 answers nothing."""
     status = msrv_plan.main(
@@ -500,7 +515,7 @@ def test_a_patch_apart_is_not_the_same_promise(
 
 
 def test_a_pin_that_is_not_installed_is_red_and_says_so(
-    capfd: pytest.CaptureFixture[str], plan: Callable[..., list[str]]
+    capfd: pytest.CaptureFixture[str], plan: Plan
 ) -> None:
     """Otherwise the remedy printed would be an edit that changes nothing."""
     status = msrv_plan.main(
@@ -512,7 +527,7 @@ def test_a_pin_that_is_not_installed_is_red_and_says_so(
 
 
 def test_every_promise_excluded_plans_notes_and_no_check(
-    capfd: pytest.CaptureFixture[str], plan: Callable[..., list[str]]
+    capfd: pytest.CaptureFixture[str], plan: Plan
 ) -> None:
     """A repo whose only crate the gate cannot compile."""
     status = msrv_plan.main(
@@ -525,7 +540,7 @@ def test_every_promise_excluded_plans_notes_and_no_check(
 
 
 def test_an_excluded_promise_rides_beside_a_checked_one(
-    capfd: pytest.CaptureFixture[str], plan: Callable[..., list[str]]
+    capfd: pytest.CaptureFixture[str], plan: Plan
 ) -> None:
     """Both records in one plan, which is edtf after this lands."""
     status = msrv_plan.main(
@@ -543,7 +558,7 @@ def test_an_excluded_promise_rides_beside_a_checked_one(
 
 
 def test_two_minimums_plan_two_checks(
-    capfd: pytest.CaptureFixture[str], plan: Callable[..., list[str]]
+    capfd: pytest.CaptureFixture[str], plan: Plan
 ) -> None:
     """Each at its own pin; neither verified by the other's toolchain."""
     status = msrv_plan.main(plan(two_minimums(), [pin("1.82.0"), pin("1.90.0")]))
@@ -554,7 +569,7 @@ def test_two_minimums_plan_two_checks(
 
 
 def test_one_uncovered_minimum_reds_the_whole_plan(
-    capfd: pytest.CaptureFixture[str], plan: Callable[..., list[str]]
+    capfd: pytest.CaptureFixture[str], plan: Plan
 ) -> None:
     """A partial plan would compile half a promise and report success."""
     status = msrv_plan.main(plan(two_minimums(), [pin("1.82.0")]))
@@ -564,7 +579,7 @@ def test_one_uncovered_minimum_reds_the_whole_plan(
 
 
 def test_a_pgrx_member_is_checked_with_its_own_features(
-    capfd: pytest.CaptureFixture[str], plan: Callable[..., list[str]]
+    capfd: pytest.CaptureFixture[str], plan: Plan
 ) -> None:
     """#813: --all-features cannot compile a crate whose features fight."""
     status = msrv_plan.main(
@@ -584,7 +599,7 @@ def test_a_pgrx_member_is_checked_with_its_own_features(
 
 
 def test_a_workspace_of_nothing_but_an_extension_still_plans(
-    capfd: pytest.CaptureFixture[str], plan: Callable[..., list[str]]
+    capfd: pytest.CaptureFixture[str], plan: Plan
 ) -> None:
     """The plain record must not be emitted empty."""
     status = msrv_plan.main(
@@ -607,7 +622,7 @@ def test_a_pgrx_name_with_no_major_is_ignored() -> None:
 
 
 def test_a_declaration_this_cannot_compare_is_red(
-    capfd: pytest.CaptureFixture[str], plan: Callable[..., list[str]]
+    capfd: pytest.CaptureFixture[str], plan: Plan
 ) -> None:
     """Refuse rather than verify a promise the check never read."""
     status = msrv_plan.main(plan(metadata(member("a", "stable")), [pin("1.97.1")]))
@@ -653,7 +668,7 @@ def test_a_root_is_the_subject_of_each_finding_about_its_members(
 
 
 def test_a_document_of_the_wrong_shape_is_red_by_where(
-    capfd: pytest.CaptureFixture[str], plan: Callable[..., list[str]]
+    capfd: pytest.CaptureFixture[str], plan: Plan
 ) -> None:
     """A wrong-shaped account or listing is named, never a crash."""
     good = metadata(member("a", "1.82"))
@@ -684,7 +699,7 @@ def test_a_document_of_the_wrong_shape_is_red_by_where(
 
 
 def test_metadata_that_is_not_json_is_red(
-    capfd: pytest.CaptureFixture[str], plan: Callable[..., list[str]]
+    capfd: pytest.CaptureFixture[str], plan: Plan
 ) -> None:
     """A broken cargo must not read as a workspace with no promises."""
     status = msrv_plan.main(plan(None, [pin("1.97.1")]))
@@ -694,7 +709,7 @@ def test_metadata_that_is_not_json_is_red(
 
 
 def test_a_toolchain_listing_that_is_not_json_is_red(
-    capfd: pytest.CaptureFixture[str], plan: Callable[..., list[str]]
+    capfd: pytest.CaptureFixture[str], plan: Plan
 ) -> None:
     """Same for mise: no listing is not the same as no pins."""
     status = msrv_plan.main(plan(metadata(member("a", "1.82")), None))
@@ -913,7 +928,9 @@ def test_debian_stables_rustc_is_its_major_minor() -> None:
         ("1.85.1", (1, 85, 0)),
     ],
 )
-def test_the_forms_debian_writes_are_read(debian: object, want: object) -> None:
+def test_the_forms_debian_writes_are_read(
+    debian: str, want: tuple[int, int, int]
+) -> None:
     """An epoch, a tilde, a bare upstream: all name one compiler."""
     text = f'debian_stable_rustc = "{debian}"'
     assert msrv_plan.read_floor(text).version == want
@@ -929,9 +946,7 @@ def test_the_forms_debian_writes_are_read(debian: object, want: object) -> None:
         ("debian_stable_rustc = ", "Invalid value"),
     ],
 )
-def test_what_is_not_a_rustc_package_version_is_refused(
-    text: object, said: object
-) -> None:
+def test_what_is_not_a_rustc_package_version_is_refused(text: str, said: str) -> None:
     """A floor this cannot read must not become a floor of zero."""
     with pytest.raises(decoded.UndecodableError, match=said):
         msrv_plan.read_floor(text)
@@ -970,7 +985,7 @@ PGRX = dependency("pgrx", "1.96", "0.19.3")
 
 
 def test_promise_below_the_floor_is_a_finding(
-    capfd: pytest.CaptureFixture[str], plan: Callable[..., list[str]]
+    capfd: pytest.CaptureFixture[str], plan: Plan
 ) -> None:
     """Before #1883 edtf promised 1.82, which no distribution ships."""
     status = msrv_plan.main(
@@ -987,7 +1002,7 @@ def test_promise_below_the_floor_is_a_finding(
 
 
 def test_promise_above_the_floor_with_no_dependency_reason_is_a_finding(
-    capfd: pytest.CaptureFixture[str], plan: Callable[..., list[str]]
+    capfd: pytest.CaptureFixture[str], plan: Plan
 ) -> None:
     """release-lab before #1883: 1.97 for a crate needing 1.81."""
     status = msrv_plan.main(
@@ -999,7 +1014,7 @@ def test_promise_above_the_floor_with_no_dependency_reason_is_a_finding(
 
 
 def test_promise_raised_by_a_dependency_passes_and_names_it(
-    capfd: pytest.CaptureFixture[str], plan: Callable[..., list[str]]
+    capfd: pytest.CaptureFixture[str], plan: Plan
 ) -> None:
     """lab-pg: 1.96 because pgrx 0.19.3 declares it, and says so."""
     status = msrv_plan.main(
@@ -1022,7 +1037,7 @@ def test_promise_raised_by_a_dependency_passes_and_names_it(
 
 
 def test_promise_at_the_floor_passes(
-    capfd: pytest.CaptureFixture[str], plan: Callable[..., list[str]]
+    capfd: pytest.CaptureFixture[str], plan: Plan
 ) -> None:
     """The edtf crates after #1883: 1.85, every dependency declaring less."""
     status = msrv_plan.main(
@@ -1048,7 +1063,7 @@ def test_compile_failure_at_the_derived_number_names_the_rule(
 
 
 def test_an_excluded_member_declaring_another_number_is_red(
-    capfd: pytest.CaptureFixture[str], plan: Callable[..., list[str]]
+    capfd: pytest.CaptureFixture[str], plan: Plan
 ) -> None:
     """#1909: CLIPPY_EXCLUDE keeps a crate out of the compile, not the rule."""
     status = msrv_plan.main(
@@ -1063,7 +1078,7 @@ def test_an_excluded_member_declaring_another_number_is_red(
 
 
 def test_an_excluded_member_at_its_number_is_noted_not_checked(
-    capfd: pytest.CaptureFixture[str], plan: Callable[..., list[str]]
+    capfd: pytest.CaptureFixture[str], plan: Plan
 ) -> None:
     """Held to the rule, it is still unverified at the number, and says so."""
     status = msrv_plan.main(
@@ -1077,7 +1092,7 @@ def test_an_excluded_member_at_its_number_is_noted_not_checked(
 
 
 def test_a_member_declaring_nothing_is_red_at_the_floor(
-    capfd: pytest.CaptureFixture[str], plan: Callable[..., list[str]]
+    capfd: pytest.CaptureFixture[str], plan: Plan
 ) -> None:
     """#1909: leaving the field out is not a way to make no promise."""
     core, app = member("edtf-core", "1.85", "1.3.5"), member("app")
@@ -1099,7 +1114,7 @@ def test_a_member_declaring_nothing_is_red_at_the_floor(
 
 
 def test_a_member_declaring_nothing_is_red_at_its_dependency(
-    capfd: pytest.CaptureFixture[str], plan: Callable[..., list[str]]
+    capfd: pytest.CaptureFixture[str], plan: Plan
 ) -> None:
     """#1909: the number named is the derived one, dependency and all."""
     status = msrv_plan.main(
@@ -1114,7 +1129,7 @@ def test_a_member_declaring_nothing_is_red_at_its_dependency(
 
 
 def test_a_workspace_declaring_nothing_is_red_per_member(
-    capfd: pytest.CaptureFixture[str], plan: Callable[..., list[str]]
+    capfd: pytest.CaptureFixture[str], plan: Plan
 ) -> None:
     """#1909: once the skip "no crate declares rust-version"."""
     status = msrv_plan.main(
@@ -1136,7 +1151,7 @@ def test_a_workspace_declaring_nothing_is_red_per_member(
 
 
 def test_a_member_reached_through_another_lends_no_number(
-    capfd: pytest.CaptureFixture[str], plan: Callable[..., list[str]]
+    capfd: pytest.CaptureFixture[str], plan: Plan
 ) -> None:
     """lab-cli reaches lab-core; only lab-core's dependencies count.
 
@@ -1154,7 +1169,7 @@ def test_a_member_reached_through_another_lends_no_number(
 
 
 def test_metadata_without_a_resolve_graph_is_red(
-    capfd: pytest.CaptureFixture[str], plan: Callable[..., list[str]]
+    capfd: pytest.CaptureFixture[str], plan: Plan
 ) -> None:
     """`--no-deps` metadata would derive every number as the floor."""
     doc = converted("1.85")
@@ -1166,7 +1181,7 @@ def test_metadata_without_a_resolve_graph_is_red(
 
 
 def test_an_unreadable_floor_file_is_red_and_named(
-    capfd: pytest.CaptureFixture[str], plan: Callable[..., list[str]]
+    capfd: pytest.CaptureFixture[str], plan: Plan
 ) -> None:
     """No floor is not a floor of zero."""
     status = msrv_plan.main(plan(converted("1.85"), [pin("1.85.0")], floor="1.85"))

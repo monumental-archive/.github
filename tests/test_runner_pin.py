@@ -235,7 +235,7 @@ def test_a_template_alone_is_checked(planted: Planted) -> None:
 )
 def test_pinned_values_are_clean(
     planted: Planted,
-    value: object,
+    value: str,
     capfd: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -262,8 +262,8 @@ def test_pinned_values_are_clean(
 )
 def test_unpinned_values_are_red(
     planted: Planted,
-    value: object,
-    shown: object,
+    value: str,
+    shown: str,
     capfd: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

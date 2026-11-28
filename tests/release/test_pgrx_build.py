@@ -386,8 +386,8 @@ def previous_release_state(tmp_path: Path, env: support.Env) -> PreviousRelease:
 )
 def test_no_previous_release(
     previous_release_state: PreviousRelease,
-    releases: object,
-    latest: object,
+    releases: list[dict[str, object]],
+    latest: str,
     capfd: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -849,8 +849,8 @@ def older_line(tmp_path: Path, env: support.Env) -> OlderLine:
 )
 def test_each_line_yields_its_own_predecessor(
     older_line: OlderLine,
-    version: object,
-    want: object,
+    version: str,
+    want: str,
     capfd: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1305,7 +1305,7 @@ def test_no_dep_section_is_refused(debug_split: DebugSplit) -> None:
 
 @pytest.mark.parametrize(("name", "shim"), SHIMS.items())
 def test_each_wrong_step_is_refused_by_name(
-    debug_split: DebugSplit, name: object, shim: object
+    debug_split: DebugSplit, name: str, shim: tuple[str, str]
 ) -> None:
     """No debuglink; debug info left; symbol table left; functions lost."""
     result = debug_split.split(shim)

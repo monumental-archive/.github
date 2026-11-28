@@ -337,8 +337,10 @@ class AScratchRepositoryPinningItsOwnPython:
             bindir.mkdir(parents=True)
             (bindir / "python3").write_text(STUB.format(who=who), encoding="utf-8")
             (bindir / "python3").chmod(0o755)
-        env = self.make_env(self.tmp)
-        subprocess.run([git(), "init", "-q", "."], cwd=self.repo, env=env, check=True)
+        environ = self.make_env(self.tmp)
+        subprocess.run(
+            [git(), "init", "-q", "."], cwd=self.repo, env=environ, check=True
+        )
 
     def run_task(self, task: str) -> subprocess.CompletedProcess[str]:
         """Run one task in the repository, the belt delivered as in CI.

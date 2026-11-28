@@ -40,7 +40,7 @@ pytestmark = pytest.mark.usefixtures("_task")
         ("lab-core", "la/b-/lab-core"),
     ],
 )
-def test_each_bucket(name: object, want: object) -> None:
+def test_each_bucket(name: str, want: str) -> None:
     """One, two, three, and four or more characters."""
     assert want == crates_index.index_path(name)
 

@@ -203,7 +203,7 @@ def test_the_canon_lays_every_family_out_by_name() -> None:
 
 
 @pytest.mark.parametrize("family", NAMED)
-def test_a_download_without_merge_multiple_is_red(family: object) -> None:
+def test_a_download_without_merge_multiple_is_red(family: str) -> None:
     """A planted pattern download with no merge-multiple is named."""
     docs = copy.deepcopy(canon())
     step = first(docs, family, DOWNLOAD)
@@ -219,7 +219,7 @@ def test_a_download_without_merge_multiple_is_red(family: object) -> None:
 
 
 @pytest.mark.parametrize("family", NAMED)
-def test_an_upload_of_the_bare_path_is_red(family: object) -> None:
+def test_an_upload_of_the_bare_path_is_red(family: str) -> None:
     """A planted upload of the row's own path, not its stage, is named."""
     docs = copy.deepcopy(canon())
     step = first(docs, family, UPLOAD)

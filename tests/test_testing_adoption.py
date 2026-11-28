@@ -215,7 +215,9 @@ def test_typescript_declarations_and_tests_ship_nothing(env: support.Env) -> Non
 
 
 @pytest.mark.parametrize("files", [["fuzz/Cargo.toml"], ["vendor/dep/Cargo.toml"]])
-def test_fuzz_and_vendored_crates_ship_nothing(files: object, env: support.Env) -> None:
+def test_fuzz_and_vendored_crates_ship_nothing(
+    files: list[str], env: support.Env
+) -> None:
     """A `Cargo.toml` only under `fuzz/` or `vendor/` is green."""
     done = lint(files, env=env)
     assert done.returncode == 0, done.stderr
@@ -239,7 +241,7 @@ def test_vendored_python_and_typescript_ship_nothing(env: support.Env) -> None:
     ],
 )
 def test_an_adopted_tree_is_green_in_each_language(
-    name: object, files: object, env: support.Env
+    name: str, files: list[str], env: support.Env
 ) -> None:
     """Each language with its mutation file and a floor is green."""
     done = lint([*files, FLOOR], env=env)

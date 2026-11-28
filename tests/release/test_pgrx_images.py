@@ -636,7 +636,7 @@ def test_a_record_without_a_digest_builds_nothing(proof: Proof) -> None:
 
 @pytest.mark.usefixtures("proof")
 @pytest.mark.parametrize("name", ["pgrx-copy-proof.sh", "pgrx-path-proof.sh"])
-def test_the_in_image_scripts_are_tracked(name: object) -> None:
+def test_the_in_image_scripts_are_tracked(name: str) -> None:
     """What runs inside the images is files a person can read and run."""
     assert os.access(CANON / "docker" / name, os.X_OK)
 

@@ -476,7 +476,7 @@ def test_no_curl_is_red(
     with tempfile.TemporaryDirectory() as tmp:
         readme = Path(tmp) / "README.md"
         readme.write_text(README, encoding="utf-8")
-        monkeypatch.setattr(shutil, "which", lambda *_args, **_kwargs: None)
+        monkeypatch.setattr(shutil, "which", support.answers_none)
         status = drift.main([".bestpractices.json", REPO, str(readme)])
         err = capfd.readouterr().err
     assert status == 1

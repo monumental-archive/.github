@@ -22,7 +22,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 import pytest
 
@@ -186,10 +186,20 @@ def plant(
 CHECK = ["--defaults", str(DEFAULTS), "--config", "mise.toml", "--lock", "mise.lock"]
 
 
+class Checked(Protocol):
+    """What the `checked` fixture hands a row."""
+
+    def __call__(
+        self, files: dict[str, str], untracked: dict[str, str] | None = ...
+    ) -> None:
+        """Run checked."""
+        ...
+
+
 @fixture
 def checked(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, env: support.Env
-) -> Callable[..., None]:
+) -> Checked:
     """Plant a tree and pipe its listing, as the task body does (#1697).
 
     The body finds the tree's config and lock and pipes its tracked
@@ -246,7 +256,7 @@ def assert_red(
     message: str = RED,
     *,
     capfd: pytest.CaptureFixture[str],
-    checked: Callable[..., None],
+    checked: Checked,
 ) -> None:
     """Assert exit 1 with exactly `message` on stderr."""
     checked(files)
@@ -262,7 +272,7 @@ def assert_out(
     line: str,
     *,
     capfd: pytest.CaptureFixture[str],
-    checked: Callable[..., None],
+    checked: Checked,
     **kw: dict[str, str],
 ) -> None:
     """Assert exit 0 with exactly one stdout line and no stderr."""
@@ -288,7 +298,7 @@ def assert_ok(
     platforms: str,
     *,
     capfd: pytest.CaptureFixture[str],
-    checked: Callable[..., None],
+    checked: Checked,
 ) -> None:
     """Assert the green summary line."""
     assert_out(
@@ -305,7 +315,7 @@ ALL = "linux-arm64,linux-x64,macos-arm64,macos-x64"
 
 # Each guard planted both directions against the baseline.
 def test_the_baseline_is_red(
-    capfd: pytest.CaptureFixture[str], checked: Callable[..., None]
+    capfd: pytest.CaptureFixture[str], checked: Checked
 ) -> None:
     """Every guard's input present: the v1.3.0 shape reds."""
     assert_red(tree(), capfd=capfd, checked=checked)
@@ -337,7 +347,7 @@ def test_an_untracked_lock_is_no_lock(env: support.Env) -> None:
 
 
 def test_no_tracked_workflow_skips(
-    capfd: pytest.CaptureFixture[str], checked: Callable[..., None]
+    capfd: pytest.CaptureFixture[str], checked: Checked
 ) -> None:
     """No workflows at all: no publish stub."""
     assert_out(
@@ -346,7 +356,7 @@ def test_no_tracked_workflow_skips(
 
 
 def test_an_untracked_stub_is_not_read(
-    capfd: pytest.CaptureFixture[str], checked: Callable[..., None]
+    capfd: pytest.CaptureFixture[str], checked: Checked
 ) -> None:
     """Tracked files only: a stub on disk but not in git is not the stub."""
     assert_out(
@@ -359,7 +369,7 @@ def test_an_untracked_stub_is_not_read(
 
 
 def test_a_workflow_calling_something_else_skips(
-    capfd: pytest.CaptureFixture[str], checked: Callable[..., None]
+    capfd: pytest.CaptureFixture[str], checked: Checked
 ) -> None:
     """Only a caller of publish.yml is the publish stub."""
     other = RUST_BINARY.replace("workflows/publish.yml", "workflows/release.yml")
@@ -369,7 +379,7 @@ def test_a_workflow_calling_something_else_skips(
 
 
 def test_no_binary_class_skips(
-    capfd: pytest.CaptureFixture[str], checked: Callable[..., None]
+    capfd: pytest.CaptureFixture[str], checked: Checked
 ) -> None:
     """The canon's own shape: source-archive builds on no target runner."""
     assert_out(
@@ -382,7 +392,7 @@ def test_no_binary_class_skips(
 
 # Shapes the lint must pass.
 def test_all_four_platforms_pass(
-    capfd: pytest.CaptureFixture[str], checked: Callable[..., None]
+    capfd: pytest.CaptureFixture[str], checked: Checked
 ) -> None:
     """The fixed lock: edtf after #185."""
     assert_ok(
@@ -391,7 +401,7 @@ def test_all_four_platforms_pass(
 
 
 def test_a_tool_without_platform_tables_is_outside(
-    capfd: pytest.CaptureFixture[str], checked: Callable[..., None]
+    capfd: pytest.CaptureFixture[str], checked: Checked
 ) -> None:
     """cargo: and rust entries carry no tables; nothing to judge."""
     lock = entry("node", "26.5.1", FOUR) + entry("cargo:cargo-fuzz", "0.13.2", ())
@@ -399,7 +409,7 @@ def test_a_tool_without_platform_tables_is_outside(
 
 
 def test_a_stale_lock_entry_is_not_installed(
-    capfd: pytest.CaptureFixture[str], checked: Callable[..., None]
+    capfd: pytest.CaptureFixture[str], checked: Checked
 ) -> None:
     """v1.3.0's lock carried nine unconfigured entries; the leg named none."""
     lock = entry("node", "26.5.1", FOUR) + entry("gitleaks", "8.30.1", THREE)
@@ -407,7 +417,7 @@ def test_a_stale_lock_entry_is_not_installed(
 
 
 def test_an_os_restricted_tool_is_held_only_where_it_installs(
-    capfd: pytest.CaptureFixture[str], checked: Callable[..., None]
+    capfd: pytest.CaptureFixture[str], checked: Checked
 ) -> None:
     """Edtf's icu is macos-only; its linux tables are not owed."""
     config = CONFIG + ICU
@@ -418,7 +428,7 @@ def test_an_os_restricted_tool_is_held_only_where_it_installs(
 
 
 def test_a_declared_subset_is_all_that_is_owed(
-    capfd: pytest.CaptureFixture[str], checked: Callable[..., None]
+    capfd: pytest.CaptureFixture[str], checked: Checked
 ) -> None:
     """binary-targets read from the stub override the canon default."""
     subset = stub(
@@ -431,7 +441,7 @@ def test_a_declared_subset_is_all_that_is_owed(
 
 
 def test_the_canons_local_caller_is_read(
-    capfd: pytest.CaptureFixture[str], checked: Callable[..., None]
+    capfd: pytest.CaptureFixture[str], checked: Checked
 ) -> None:
     """self-publish.yml's `uses: ./.github/workflows/publish.yml` counts."""
     local = stub("      classes: rust-binary\n", uses="./.github/workflows/publish.yml")
@@ -440,7 +450,7 @@ def test_the_canons_local_caller_is_read(
 
 # Planted defects red with the stated message.
 def test_an_os_restricted_tool_missing_its_own_platform_is_red(
-    capfd: pytest.CaptureFixture[str], checked: Callable[..., None]
+    capfd: pytest.CaptureFixture[str], checked: Checked
 ) -> None:
     """Os = ["macos"] still owes macos-x64."""
     config = "[tools]\n" + ICU
@@ -456,7 +466,7 @@ def test_an_os_restricted_tool_missing_its_own_platform_is_red(
 
 
 def test_go_binary_reads_its_own_input(
-    capfd: pytest.CaptureFixture[str], checked: Callable[..., None]
+    capfd: pytest.CaptureFixture[str], checked: Checked
 ) -> None:
     """go-binary's default is go-targets', named as such."""
     assert_red(
@@ -468,7 +478,7 @@ def test_go_binary_reads_its_own_input(
 
 
 def test_every_missing_platform_gets_its_command(
-    capfd: pytest.CaptureFixture[str], checked: Callable[..., None]
+    capfd: pytest.CaptureFixture[str], checked: Checked
 ) -> None:
     """Two platforms missing: two resolve lines, sorted."""
     lock = entry("node", "26.5.1", ("linux-x64", "macos-arm64"))
@@ -499,7 +509,7 @@ def assert_refused(
     detail: str,
     *,
     capfd: pytest.CaptureFixture[str],
-    checked: Callable[..., None],
+    checked: Checked,
 ) -> None:
     """Assert exit 2 and the refusal naming `detail`."""
     checked(files)
@@ -531,7 +541,7 @@ def assert_refused(
     ],
 )
 def test_a_config_or_lock_it_cannot_read_is_refused_by_name(
-    files: object, said: object, env: support.Env
+    files: dict[str, str], said: str, env: support.Env
 ) -> None:
     """Not TOML, or `tools` / an entry not a table: named, exit 2."""
     done = lint(files, env=env)
@@ -542,7 +552,7 @@ def test_a_config_or_lock_it_cannot_read_is_refused_by_name(
 
 
 def test_a_block_scalar_is_refused(
-    capfd: pytest.CaptureFixture[str], checked: Callable[..., None]
+    capfd: pytest.CaptureFixture[str], checked: Checked
 ) -> None:
     """A folded list would otherwise read as no targets."""
     folded = stub(
@@ -559,7 +569,7 @@ def test_a_block_scalar_is_refused(
 
 
 def test_an_expression_is_refused(
-    capfd: pytest.CaptureFixture[str], checked: Callable[..., None]
+    capfd: pytest.CaptureFixture[str], checked: Checked
 ) -> None:
     """A value known only at run time cannot be checked here."""
     expr = stub("      classes: ${{ vars.CLASSES }}\n")
@@ -572,7 +582,7 @@ def test_an_expression_is_refused(
 
 
 def test_an_unknown_target_is_refused(
-    capfd: pytest.CaptureFixture[str], checked: Callable[..., None]
+    capfd: pytest.CaptureFixture[str], checked: Checked
 ) -> None:
     """No runner platform known: the build would refuse it too."""
     win = stub(
@@ -588,7 +598,7 @@ def test_an_unknown_target_is_refused(
 
 # The canon's declared defaults, read from the real publish.yml.
 def test_every_default_target_maps(
-    capfd: pytest.CaptureFixture[str], checked: Callable[..., None]
+    capfd: pytest.CaptureFixture[str], checked: Checked
 ) -> None:
     """Each canon default target has a platform key — all four, both classes."""
     lock = entry("node", "26.5.1", ("windows-x64",))

@@ -209,8 +209,8 @@ def test_packs_or_refuses(package_json: str) -> None:
         patched.setattr(pack, "npm", npm)
         patched.chdir(tmp)
         code = pack.main([], env=env)
-    out = out.getvalue()
+    said = out.getvalue()
     if code != 0:
         assert code == 1
-        assert out.startswith("::error::pack_wasm.py: "), out
-        assert out.count("\n") == 1, out
+        assert said.startswith("::error::pack_wasm.py: "), said
+        assert said.count("\n") == 1, said

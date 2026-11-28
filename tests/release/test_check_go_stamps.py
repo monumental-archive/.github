@@ -17,7 +17,7 @@ import os
 import subprocess
 import sys
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 import pytest
 
@@ -27,7 +27,6 @@ from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
     from pathlib import Path
 
 CANON = support.CANON
@@ -140,10 +139,18 @@ class Stamping:
         return Run(status, out, err, self.head)
 
 
+class Stamp(Protocol):
+    """What the `stamp` fixture hands a row."""
+
+    def __call__(
+        self, binaries: dict[str, str] | None, *, fail: bool = ..., repo: bool = ...
+    ) -> Stamping:
+        """Run stamp."""
+        ...
+
+
 @fixture
-def stamp(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, env: support.Env
-) -> Callable[..., Stamping]:
+def stamp(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, env: support.Env) -> Stamp:
     """Lay out staged/ holding a row's binaries (name -> build info).
 
     `{head}` in a build info is replaced by the repository's HEAD.
@@ -214,7 +221,7 @@ def test_the_shipped_step_calls_the_helper() -> None:
 
 # A clean build of the released commit passes, every binary.
 def test_every_binary_stamped_with_the_released_commit(
-    capfd: pytest.CaptureFixture[str], stamp: Callable[..., Stamping]
+    capfd: pytest.CaptureFixture[str], stamp: Stamp
 ) -> None:
     """Two binaries, both clean, both carrying their modules."""
     stamping = stamp({"tool": info("{head}"), "probe": info("{head}")})
@@ -232,7 +239,7 @@ def assert_refused(run: Run, want: str) -> None:
 
 
 def test_another_revision_is_refused(
-    capfd: pytest.CaptureFixture[str], stamp: Callable[..., Stamping]
+    capfd: pytest.CaptureFixture[str], stamp: Stamp
 ) -> None:
     """Bytes built from some other commit."""
     rev = "f" * 40
@@ -246,7 +253,7 @@ def test_another_revision_is_refused(
 
 
 def test_no_revision_is_refused(
-    capfd: pytest.CaptureFixture[str], stamp: Callable[..., Stamping]
+    capfd: pytest.CaptureFixture[str], stamp: Stamp
 ) -> None:
     """Bytes built outside a checkout or with -buildvcs=false."""
     stamping = stamp({"tool": info(None)})
@@ -259,7 +266,7 @@ def test_no_revision_is_refused(
 
 
 def test_a_modified_tree_is_refused(
-    capfd: pytest.CaptureFixture[str], stamp: Callable[..., Stamping]
+    capfd: pytest.CaptureFixture[str], stamp: Stamp
 ) -> None:
     """Bytes that match no commit."""
     stamping = stamp({"tool": info("{head}", "true")})
@@ -272,7 +279,7 @@ def test_a_modified_tree_is_refused(
 
 
 def test_no_modified_stamp_is_refused(
-    capfd: pytest.CaptureFixture[str], stamp: Callable[..., Stamping]
+    capfd: pytest.CaptureFixture[str], stamp: Stamp
 ) -> None:
     """A tree whose cleanliness the stamp does not state."""
     stamping = stamp({"tool": info("{head}", None)})
@@ -285,7 +292,7 @@ def test_no_modified_stamp_is_refused(
 
 
 def test_no_module_stamp_is_refused(
-    capfd: pytest.CaptureFixture[str], stamp: Callable[..., Stamping]
+    capfd: pytest.CaptureFixture[str], stamp: Stamp
 ) -> None:
     """Bytes that carry no inventory at all."""
     stamping = stamp({"tool": info("{head}", module=False)})
@@ -298,7 +305,7 @@ def test_no_module_stamp_is_refused(
 
 
 def test_a_setting_value_that_spells_the_stamp_is_not_the_stamp(
-    capfd: pytest.CaptureFixture[str], stamp: Callable[..., Stamping]
+    capfd: pytest.CaptureFixture[str], stamp: Stamp
 ) -> None:
     """An -ldflags value naming HEAD is not a stamp (#1556's shrunk example).
 
@@ -322,7 +329,7 @@ def test_a_setting_value_that_spells_the_stamp_is_not_the_stamp(
 
 
 def test_the_first_bad_binary_in_name_order_is_named(
-    capfd: pytest.CaptureFixture[str], stamp: Callable[..., Stamping]
+    capfd: pytest.CaptureFixture[str], stamp: Stamp
 ) -> None:
     """staged/ is read in name order, as the shell's glob read it."""
     stamping = stamp({"b": info("{head}", "true"), "a": info("f" * 40)})
@@ -332,7 +339,7 @@ def test_the_first_bad_binary_in_name_order_is_named(
 
 
 def test_an_empty_staged_directory_is_refused(
-    capfd: pytest.CaptureFixture[str], stamp: Callable[..., Stamping]
+    capfd: pytest.CaptureFixture[str], stamp: Stamp
 ) -> None:
     """Nothing built is nothing checked, and never a pass."""
     stamping = stamp({})
@@ -346,7 +353,7 @@ def test_an_empty_staged_directory_is_refused(
 
 # go's or git's own failure fails the step with its status.
 def test_a_file_go_cannot_read_fails_the_step(
-    capfd: pytest.CaptureFixture[str], stamp: Callable[..., Stamping]
+    capfd: pytest.CaptureFixture[str], stamp: Stamp
 ) -> None:
     """Not a Go binary: go's run.returncode and message."""
     stamping = stamp({"tool": info("{head}")}, fail=True)
@@ -358,7 +365,7 @@ def test_a_file_go_cannot_read_fails_the_step(
 
 
 def test_outside_a_repository_git_fails_the_step(
-    capfd: pytest.CaptureFixture[str], stamp: Callable[..., Stamping]
+    capfd: pytest.CaptureFixture[str], stamp: Stamp
 ) -> None:
     """No released commit to hold the stamp to."""
     stamping = stamp({"tool": info("f" * 40)}, repo=False)

@@ -281,7 +281,7 @@ def args_after_config(argv: list[str]) -> list[str]:
     ],
 )
 def test_no_fast_check_skips_clean_by_name(
-    body: object, label: object, env: support.Env
+    body: str, label: str, env: support.Env
 ) -> None:
     """A vitest lockfile without fast-check: every leg skips."""
     files = {"pnpm-lock.yaml": LOCK_VITEST, "a.prop.test.ts": PROPERTY}
@@ -433,7 +433,7 @@ def test_the_wrapper_imports_the_repository_config(env: support.Env) -> None:
 
 @pytest.mark.parametrize(("body", "files"), [(GATE, GATE_FILES), (AUDIT, AUDIT_FILES)])
 def test_every_project_has_no_per_test_limit(
-    body: object, files: object, env: support.Env
+    body: str, files: dict[str, str], env: support.Env
 ) -> None:
     """No per-test limit per project, in both profiles; hooks untouched (#2144)."""
     done = run(body, files, make_env=env)
@@ -633,7 +633,7 @@ def test_an_unset_seed_is_random_and_printed(env: support.Env) -> None:
         done.stdout,
     )
     assert printed is not None, done.stdout
-    assert done.seed == (typed_std.group(printed, 1) if printed else None)
+    assert done.seed == typed_std.group(printed, 1)
 
 
 def test_a_failure_says_where_the_example_lands(env: support.Env) -> None:
@@ -702,7 +702,7 @@ def test_an_import_outside_a_property_file_is_red_by_name(env: support.Env) -> N
     ],
 )
 def test_a_property_restating_the_seed_is_red_by_name(
-    site: object, what: object, env: support.Env
+    site: str, what: str, env: support.Env
 ) -> None:
     """seed, shorthand seed, numRuns, configureGlobal: each named."""
     done = lint(
@@ -781,9 +781,7 @@ def test_a_quote_in_a_regex_hides_no_bound(env: support.Env) -> None:
         ("a.prop.test.ts:5", "vi.setConfig()"),
     ],
 )
-def test_a_bound_named_in_text_is_red(
-    site: object, what: object, env: support.Env
-) -> None:
+def test_a_bound_named_in_text_is_red(site: str, what: str, env: support.Env) -> None:
     """A comment or string naming a bound reds: loud, never silent."""
     done = lint(
         {

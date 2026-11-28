@@ -362,7 +362,7 @@ def seeded(calls: list[str]) -> list[tuple[str, str]]:
         "[workspace.metadata]\nx = 1\n",
     ],
 )
-def test_a_current_lock_builds(fuzz_build: FuzzBuild, table: object) -> None:
+def test_a_current_lock_builds(fuzz_build: FuzzBuild, table: str) -> None:
     """The probe passes, the build runs, the corpus replays, all reported."""
     fuzz_build.seed("parse", "a", "x")
     fuzz_build.seed("round_trip", "b", "y")
@@ -441,7 +441,7 @@ def test_the_replay_reads_a_directory_outside_the_tree(fuzz_build: FuzzBuild) ->
 
 
 @pytest.mark.parametrize("dialect", [STALE_OLD, STALE_NEW])
-def test_a_stale_lock_is_called_stale(fuzz_build: FuzzBuild, dialect: object) -> None:
+def test_a_stale_lock_is_called_stale(fuzz_build: FuzzBuild, dialect: str) -> None:
     """Only cargo's lockfile refusal earns the stale message."""
     lock = f"{fuzz_build.root}/fuzz/Cargo.lock"
     fuzz_build.manifest(MANIFEST + WORKSPACE)

@@ -166,7 +166,7 @@ def test_an_unterminated_string_ends_at_its_line() -> None:
         ("const a = /abc", []),
     ],
 )
-def test_unterminated_input_ends_the_scan(text: object, want: object) -> None:
+def test_unterminated_input_ends_the_scan(text: str, want: object) -> None:
     """An open comment, template or regex at the end is no crash."""
     assert want == wide("a.js", text)
 

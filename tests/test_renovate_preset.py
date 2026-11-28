@@ -202,7 +202,7 @@ def test_icu_one_table_yields_none() -> None:
 
 
 @pytest.mark.parametrize("dep", [POSTGRES, ICU])
-def test_shape(dep: object) -> None:
+def test_shape(dep: str) -> None:
     """Recursive, github-releases, and the file pattern hits mise.toml."""
     m = manager(dep)
     assert m["customType"] == "regex"
@@ -221,7 +221,7 @@ def test_icu_tag_to_version() -> None:
     )
     found = template.search("release-79.1")
     assert found is not None
-    assert (found.group("version") if found else None) == "79.1"
+    assert typed_std.group(found, "version") == "79.1"
     assert template.search("icu4x/2026-08-31/79.x") is None
 
 
@@ -249,7 +249,7 @@ def rules(name: str) -> list[dict[str, object]]:
 
 
 @pytest.mark.parametrize("name", [POSTGRES, f"aqua:{POSTGRES}"])
-def test_postgres_grouped(name: object) -> None:
+def test_postgres_grouped(name: str) -> None:
     """Every entry's update lands in one pull request."""
     groups = [r["groupName"] for r in rules(name) if "groupName" in r]
     group: list[str] = ["postgresql-binaries"]
@@ -257,7 +257,7 @@ def test_postgres_grouped(name: object) -> None:
 
 
 @pytest.mark.parametrize("name", [POSTGRES, f"aqua:{POSTGRES}"])
-def test_postgres_major_disabled(name: object) -> None:
+def test_postgres_major_disabled(name: str) -> None:
     """A new major is a new entry, added by hand with its crate feature."""
     off = [
         r

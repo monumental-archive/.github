@@ -172,9 +172,9 @@ class TwoExtensions:
         surface.write_text(SURFACE, encoding="utf-8")
         plan = self.tmp / "plan"
         plan.write_text(PLAN, encoding="utf-8")
-        env = self.make_env()
-        self.env = env | {
-            "PATH": f"{bins}:{env['PATH']}",
+        environ = self.make_env()
+        self.env = environ | {
+            "PATH": f"{bins}:{environ['PATH']}",
             "ORG_BELT_DIR": str(self.belt),
             "ORG_FINDINGS": "",
             "BASH_ENV": str(BELT / "findings.sh"),

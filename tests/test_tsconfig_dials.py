@@ -58,7 +58,7 @@ def test_the_level_is_not_empty() -> None:
 @pytest.mark.parametrize(
     "want", [pytest.param(want, id=key) for key, want in REQUIRED.items()]
 )
-def test_every_dial_is_a_boolean(want: object) -> None:
+def test_every_dial_is_a_boolean(*, want: bool) -> None:
     """The comparison is boolean; a non-boolean would need new law."""
     assert isinstance(want, bool)
 

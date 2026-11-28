@@ -404,7 +404,7 @@ def test_200_is_read_for_its_verdict(best_practices_read: BestPracticesRead) -> 
 
 @pytest.mark.parametrize("shield", ["badge", "baseline"])
 def test_the_entry_is_asked_past_the_shared_cache(
-    best_practices_read: BestPracticesRead, shield: object
+    best_practices_read: BestPracticesRead, shield: str
 ) -> None:
     """Each entry is asked at a key the cache never held (#2084).
 
@@ -702,7 +702,7 @@ def test_a_stale_404_is_a_question_unanswered(stale_answer: StaleAnswer) -> None
     ],
 )
 def test_a_stale_200_is_judged_on_its_score(
-    stale_answer: StaleAnswer, alpha: object, code: object, said: object
+    stale_answer: StaleAnswer, alpha: str, code: int, said: str
 ) -> None:
     """A dated result past `max-age` passes or fails on its score."""
     (stale_answer.stubs / "curl.log").unlink(missing_ok=True)
@@ -717,7 +717,7 @@ def test_a_stale_200_is_judged_on_its_score(
     "lines", [OLD, ("age: 700000", "cache-control: max-age=31536000")]
 )
 def test_an_answer_older_than_the_week_is_unanswered(
-    stale_answer: StaleAnswer, lines: object
+    stale_answer: StaleAnswer, lines: tuple[str, str]
 ) -> None:
     """Past the audit's own period, whatever `max-age` says."""
     (stale_answer.stubs / "curl.log").unlink(missing_ok=True)
@@ -756,7 +756,7 @@ def test_the_scorecard_note_names_its_result_date(stale_answer: StaleAnswer) -> 
     ],
 )
 def test_fresh_or_headerless_answers_read_as_today(
-    stale_answer: StaleAnswer, lines: object
+    stale_answer: StaleAnswer, lines: tuple[str, str] | tuple[str] | tuple[()]
 ) -> None:
     """Within its lifetime, or with no claim either way: read as today."""
     absent = (
@@ -779,10 +779,10 @@ def test_fresh_or_headerless_answers_read_as_today(
 )
 def test_every_leg_judges_a_stale_presence(
     stale_answer: StaleAnswer,
-    shield: object,
-    suffix: object,
-    body: object,
-    note: object,
+    shield: str,
+    suffix: str,
+    body: Callable[[str], str],
+    note: Callable[[str], str],
 ) -> None:
     """Each leg reads a 200 past `max-age` on its content."""
     (stale_answer.stubs / "curl.log").unlink(missing_ok=True)
@@ -794,7 +794,7 @@ def test_every_leg_judges_a_stale_presence(
 
 @pytest.mark.parametrize("row", [pytest.param(row, id=str(row[0])) for row in LEGS])
 def test_every_leg_reads_the_week_bound(
-    row: tuple[object, object, object, object, object, object],
+    row: Leg,
     stale_answer: StaleAnswer,
 ) -> None:
     """Each leg sends an answer older than the week to `unanswered`."""

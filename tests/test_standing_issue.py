@@ -761,8 +761,9 @@ def test_a_job_not_in_the_run_is_closed_saying_so(
 
 @pytest.mark.parametrize("red", [True, False])
 def test_the_old_issue_is_closed_red_or_green(
+    *,
     per_job: PerJob,
-    red: object,
+    red: bool,
     capfd: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1227,7 +1228,7 @@ def test_a_leg_with_a_record_points_and_shows_its_output(
     "found", [SPELL, standing.Finding("lint:shell", "a.sh", "unformatted")]
 )
 def test_a_step_of_two_tasks_is_matched_by_either(
-    findings_body: FindingsBody, found: object
+    findings_body: FindingsBody, found: standing.Finding
 ) -> None:
     """A step that ran two tasks, seen by their `[task] ` prefixes."""
     log = logged(

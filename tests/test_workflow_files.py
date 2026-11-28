@@ -265,7 +265,7 @@ def test_fix_gate_stub_leaves_an_untracked_stub_alone(untracked: Untracked) -> N
 
 
 @pytest.mark.parametrize(("task", "line"), SKIPPED.items())
-def test_each_task_skips(planted: Planted, task: object, line: object) -> None:
+def test_each_task_skips(planted: Planted, task: str, line: str) -> None:
     """Seven tasks print their skip line and pass."""
     planted.plant(STRAY, CLEAN, track=False)
     done = planted.task(task)

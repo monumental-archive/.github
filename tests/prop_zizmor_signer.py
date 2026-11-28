@@ -28,6 +28,7 @@ from hypothesis import strategies as st
 
 from belt import zizmor_signer as zs
 from belt.typed_hypothesis import given
+from tests.test_zizmor_signer import answers
 
 SIGNER = "Org/Signer"
 WORKFLOW = f"{SIGNER}/.github/workflows/sign.yml"
@@ -89,7 +90,7 @@ def test_order_does_not_matter(data: st.DataObject, drawn: list[Drawn]) -> None:
     """The same findings in any order: same status, same counts."""
     findings = [f for f, _ in drawn]
     shuffled = data.draw(st.permutations(findings))
-    answers = []
+    results: list[tuple[int, str]] = []
     for each in (findings, shuffled):
         out = io.StringIO()
         ran = zs.Ran(14, json.dumps(each).encode(), b"")
@@ -98,13 +99,13 @@ def test_order_does_not_matter(data: st.DataObject, drawn: list[Drawn]) -> None:
             contextlib.redirect_stdout(out),
             contextlib.redirect_stderr(io.StringIO()),
         ):
-            patched.setattr(zs, "run_zizmor", lambda *_args, ran=ran, **_kwargs: ran)
+            patched.setattr(zs, "run_zizmor", answers(ran))
             for name, value in ENV.items():
                 patched.setenv(name, value)
             status = zs.main(["--signer-workflow", WORKFLOW])
-        answers.append((status, out.getvalue()))
-    assert answers[0] == answers[1]
-    assert answers[0][0] == (0 if all(on for _, on in drawn) else 1)
+        results.append((status, out.getvalue()))
+    assert results[0] == results[1]
+    assert results[0][0] == (0 if all(on for _, on in drawn) else 1)
 
 
 # The leg's environment, a token present and no findings file.
@@ -172,7 +173,7 @@ def test_main_answers_any_output(stdout: str) -> None:
         contextlib.redirect_stdout(io.StringIO()),
         contextlib.redirect_stderr(io.StringIO()),
     ):
-        patched.setattr(zs, "run_zizmor", lambda *_args, **_kwargs: ran)
+        patched.setattr(zs, "run_zizmor", answers(ran))
         for name, value in ENV.items():
             patched.setenv(name, value)
         status = zs.main(["--signer-workflow", WORKFLOW])

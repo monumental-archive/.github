@@ -210,13 +210,13 @@ class FuzzCase:
             where.mkdir(parents=True, exist_ok=True)
             (where / name).write_text(text, encoding="utf-8")
             (where / name).chmod(0o755)
-        env = self.make_env()
-        self.env = env | {
+        environ = self.make_env()
+        self.env = environ | {
             "ORG_BELT_DIR": str(BELT),
             "ORG_PYTHON": sys.executable,
             "ORG_COVERAGE_REPORTS": str(self.tmp / "reports"),
             "RUSTUP_TOOLCHAIN": "stable",
-            "PATH": f"{stubs}{os.pathsep}{env.get('PATH', '')}",
+            "PATH": f"{stubs}{os.pathsep}{environ.get('PATH', '')}",
             "STUB_DIR": str(self.tmp),
             "STUB_SYSROOT": str(sysroot),
             "STUB_LINES": "parse_marker:11:11 round_trip:20:15",

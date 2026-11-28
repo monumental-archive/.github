@@ -30,7 +30,7 @@ import textwrap
 from decimal import Decimal
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import TYPE_CHECKING, ClassVar, Self
+from typing import TYPE_CHECKING, Self
 
 import pytest
 
@@ -313,7 +313,7 @@ def test_a_leg_measured_at_100_is_written_at_90(
     ],
 )
 def test_the_old_shape_is_refused_by_name(
-    text: object, line: object, capfd: pytest.CaptureFixture[str]
+    text: str, line: str, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """A bare floor line, recorded or not, is refused, naming adopt."""
     with Tree(text) as tree:
@@ -565,7 +565,7 @@ def test_reads_decimals() -> None:
 
 
 @pytest.mark.parametrize("text", ["", "ninety", "NaN", "Infinity", "-Infinity", "9 5"])
-def test_refuses_words_and_infinities(text: object) -> None:
+def test_refuses_words_and_infinities(text: str) -> None:
     """Words, NaN and Infinity are not measurements."""
     assert cf.number(text) is None
 
@@ -599,7 +599,7 @@ def test_blank_lines_are_not_legs() -> None:
 
 
 @pytest.mark.parametrize("line", ["go", "go 85.4 extra", "go high", "go 140"])
-def test_malformed_lines_are_reported_not_skipped(line: object) -> None:
+def test_malformed_lines_are_reported_not_skipped(line: str) -> None:
     """A line that is not a measurement refuses the whole derivation.
 
     Dropping it quietly would write a floor over a language nothing
@@ -640,7 +640,7 @@ ORDER: list[str] = ["rust", "rust-branches", "go-branches"]
 
 
 # What the machinery writes, read back through the parser.
-FLOORS: ClassVar[dict[str, cf.Held]] = {
+FLOORS: dict[str, cf.Held] = {
     "python": cf.fresh(Decimal("85.44")),
     "rust-branches": cf.fresh(Decimal("72.49")),
     "go": cf.Held(Decimal(88), None, "workspace split"),
@@ -758,7 +758,7 @@ def test_every_leg_below_is_named(capfd: pytest.CaptureFixture[str]) -> None:
 
 @pytest.mark.parametrize("figure", ["85.3", "84.9", "83.4"])
 def test_within_the_band_passes_and_keeps_the_record(
-    figure: object, capfd: pytest.CaptureFixture[str]
+    figure: str, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """The gate's line is the release's line (#1786).
 
@@ -882,7 +882,7 @@ def test_a_derivation_stops_at_the_cap() -> None:
 
 
 @pytest.mark.parametrize("floor", ["92.3", "99"])
-def test_a_floor_above_the_cap_is_drift(floor: object) -> None:
+def test_a_floor_above_the_cap_is_drift(floor: str) -> None:
     """The cap is the derivation: 92.3 over 94.3 is refused, and 99."""
     parsed, problems = cf.parse(record(planted("python", floor, "94.3")))
     assert parsed is None
@@ -1016,9 +1016,7 @@ def test_adopt_adds_a_new_leg(capfd: pytest.CaptureFixture[str]) -> None:
 
 # The stdin half: what a derivation will read.
 @pytest.mark.parametrize("source", ["\n", "rust-branches 80.0\n"])
-def test_no_measurement_refuses(
-    source: object, capfd: pytest.CaptureFixture[str]
-) -> None:
+def test_no_measurement_refuses(source: str, capfd: pytest.CaptureFixture[str]) -> None:
     """A derivation that reads nothing must not write a floor."""
     with Tree(record(PY)) as tree:
         status = cf.derive(tree.path, source, "v0.21.0", adopt=False)
@@ -1173,7 +1171,7 @@ PG_NEEDS = (
     ("name", "needs"), [("plpgsql", PG_NEEDS), ("typescript", TS_NEEDS)]
 )
 def test_a_recorded_leg_that_reports_none_is_red_by_name(
-    name: object, needs: object, capfd: pytest.CaptureFixture[str]
+    name: str, needs: str, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """Each of plpgsql and typescript is named, with what it needs."""
     with Tree(record(PY, planted(name, "80.0", "82.0"))) as tree:
@@ -1457,10 +1455,10 @@ PLANNED_REFUSAL = (
     ],
 )
 def test_hold_judges_only_the_calling_jobs_legs(
-    legs: object,
-    source: object,
-    jobs: object,
-    want: object,
+    legs: str,
+    source: str,
+    jobs: frozenset[str],
+    want: tuple[int, str, str],
     capfd: pytest.CaptureFixture[str],
 ) -> None:
     """One row per branch of the scoped hold, each red row's message."""
@@ -1508,9 +1506,9 @@ def test_hold_judges_only_the_calling_jobs_legs(
     ],
 )
 def test_the_plan_holds_the_record_to_its_planned_jobs(
-    legs: object,
-    majors: object,
-    want: object,
+    legs: str,
+    majors: str,
+    want: tuple[int, str, str],
     capfd: pytest.CaptureFixture[str],
 ) -> None:
     """Every recorded leg needs its owner planned; red by name if not."""
@@ -1527,7 +1525,7 @@ def test_the_plan_holds_the_record_to_its_planned_jobs(
     ],
 )
 def test_the_plan_accepts_a_dropped_leg_and_no_floor(
-    text: object, capfd: pytest.CaptureFixture[str]
+    text: str | None, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """A dropped leg needs no owner; no floor needs none."""
     with Tree(text) as tree:
@@ -1604,9 +1602,9 @@ def test_the_plan_refuses_a_floor_off_its_record(
     ],
 )
 def test_the_plan_decodes_its_majors_as_json(
-    legs: object,
-    majors: object,
-    want: object,
+    legs: str,
+    majors: str,
+    want: tuple[int, str, str],
     capfd: pytest.CaptureFixture[str],
 ) -> None:
     """`--majors-json` is the plan's array of major strings, or red (#1880).
@@ -1641,13 +1639,13 @@ def test_the_plan_decodes_its_majors_as_json(
         ("xpgrx-pg15", "gate"),
     ],
 )
-def test_one_owner_per_leg_family(name: object, job: object) -> None:
+def test_one_owner_per_leg_family(name: str, job: str) -> None:
     """`pgrx-pgNN` strictly is the pgrx job; every other leg the gate's."""
     assert job == cf.owner(name)
 
 
 @pytest.mark.parametrize("text", ["pgrx", "pgrx:", "pgrx:015", "pgrx-pg15", "Gate"])
-def test_a_job_is_named_strictly(text: object) -> None:
+def test_a_job_is_named_strictly(text: str) -> None:
     """`hold --job` takes `gate` or `pgrx:<major>` and nothing else."""
     assert cf.job_of("gate") == "gate"
     assert cf.job_of("pgrx:15") == "pgrx:15"
@@ -1873,9 +1871,9 @@ def test_the_producers_stdout_is_the_helpers_input(
 )
 def test_the_plan_step_hands_the_producer_to_the_helper(
     the_plan_feeds_the_helper: ThePlanFeedsTheHelper,
-    legs: object,
-    status: object,
-    err: object,
+    legs: str,
+    status: int,
+    err: str,
 ) -> None:
     """ci.yml's own `plan` step, producer to helper, in the planted tree."""
     the_plan_feeds_the_helper.floor(legs)

@@ -194,7 +194,9 @@ class Planted:
             stub = bins / name
             stub.write_text(body, encoding="utf-8")
             stub.chmod(0o755)
-        belt = self.plant_belt(self.tmp / "belt", stubs={"pgrx-env.sh": PGRX_ENV_STUB})
+        belt_dir = self.plant_belt(
+            self.tmp / "belt", stubs={"pgrx-env.sh": PGRX_ENV_STUB}
+        )
         self.index = self.tmp / "index"
         self.index.mkdir()
         self.log = self.tmp / "log"
@@ -202,7 +204,7 @@ class Planted:
         self.metadata = self.tmp / "metadata.json"
         self.env = clean_env(env=self.make_env) | {
             "PATH": f"{bins}{os.pathsep}{os.environ['PATH']}",
-            "ORG_BELT_DIR": str(belt),
+            "ORG_BELT_DIR": str(belt_dir),
             "PLANT_LOG": str(self.log),
             "PLANT_METADATA": str(self.metadata),
             "PLANT_INDEX": str(self.index),

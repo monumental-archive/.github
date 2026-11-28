@@ -244,7 +244,9 @@ class Planted:
             stub = bins / name
             stub.write_text(body, encoding="utf-8")
             stub.chmod(0o755)
-        belt = self.plant_belt(self.tmp / "belt", stubs={"pgrx-env.sh": PGRX_ENV_STUB})
+        belt_dir = self.plant_belt(
+            self.tmp / "belt", stubs={"pgrx-env.sh": PGRX_ENV_STUB}
+        )
         self.log = self.tmp / "log"
         self.log.touch()
         self.files = {
@@ -260,7 +262,7 @@ class Planted:
         }
         self.env = clean_env(env=self.make_env) | {
             "PATH": f"{bins}{os.pathsep}{os.environ['PATH']}",
-            "ORG_BELT_DIR": str(belt),
+            "ORG_BELT_DIR": str(belt_dir),
             "PLANT_LOG": str(self.log),
             "PLANT_METADATA": str(self.files["metadata.json"]),
             "PLANT_ALL": str(self.files["all"]),
@@ -956,7 +958,7 @@ def test_red_run_writes_no_counts(shards: Shards) -> None:
 
 
 @pytest.mark.parametrize("bad", ["4/4", "1", "a/4", "1/0"])
-def test_malformed_shard_is_red(shards: Shards, bad: object) -> None:
+def test_malformed_shard_is_red(shards: Shards, bad: str) -> None:
     """Shard k must be below n: a typo never quietly runs everything n times."""
     shards.plant(package("alpha", str(shards.tree)))
     done, log = shards.run_leg(MUTANTS_SHARD=bad)

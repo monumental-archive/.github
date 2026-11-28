@@ -16,7 +16,7 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import Protocol
 
 import pytest
 
@@ -24,9 +24,6 @@ from belt import decoded, plan_producers, workflow_yaml
 from belt.release.pgrx import inventory_plan
 from belt.typed_pytest import fixture
 from tests import support
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
 
 CANON = support.CANON
 WORKFLOW = CANON / ".github" / "workflows" / "build-pgrx-extension.yml"
@@ -97,8 +94,16 @@ class Planted:
         return Run(status, out, err, plan.read_text("utf-8") if plan.exists() else None)
 
 
+class Plant(Protocol):
+    """What the `plant` fixture hands a row."""
+
+    def __call__(self, manifest: str | None = ..., prefix: str | None = ...) -> Planted:
+        """Run plant."""
+        ...
+
+
 @fixture
-def plant(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Callable[..., Planted]:
+def plant(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Plant:
     """Plant a crate for the helper and step into its tree.
 
     Returns:
@@ -160,7 +165,7 @@ def test_the_step_states_its_prefix_and_its_marker() -> None:
 
 # The plan the step's jq wrote, byte for byte.
 def test_the_cell_plan_is_the_shells_bytes(
-    plant: Callable[..., Planted], capfd: pytest.CaptureFixture[str]
+    plant: Plant, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """Crate pg_edtf, major 16: the recorded golden."""
     planted = plant()
@@ -175,7 +180,7 @@ def test_the_cell_plan_is_the_shells_bytes(
 
 
 def test_the_major_names_the_artifact_and_the_feature(
-    plant: Callable[..., Planted], capfd: pytest.CaptureFixture[str]
+    plant: Plant, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """Another major is another artifact, built with its own feature."""
     planted = plant()
@@ -193,9 +198,7 @@ def assert_refused(run: Run, want: str) -> None:
     assert run.plan is None
 
 
-def test_no_prefix_is_refused(
-    plant: Callable[..., Planted], capfd: pytest.CaptureFixture[str]
-) -> None:
+def test_no_prefix_is_refused(plant: Plant, capfd: pytest.CaptureFixture[str]) -> None:
     """The class's prefix names the document; the leg never invents one."""
     planted = plant(prefix=None)
     status = inventory_plan.main(["crate", "16"])
@@ -207,7 +210,7 @@ def test_no_prefix_is_refused(
 
 
 def test_a_major_that_is_not_a_number_is_refused(
-    plant: Callable[..., Planted], capfd: pytest.CaptureFixture[str]
+    plant: Plant, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """A matrix value that is not a Postgres major."""
     planted = plant()
@@ -217,7 +220,7 @@ def test_a_major_that_is_not_a_number_is_refused(
 
 
 def test_no_manifest_is_refused(
-    plant: Callable[..., Planted], capfd: pytest.CaptureFixture[str]
+    plant: Plant, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """The crate directory holds no Cargo.toml."""
     planted = plant(manifest=None)
@@ -229,7 +232,7 @@ def test_no_manifest_is_refused(
 
 
 def test_a_manifest_that_is_not_toml_is_refused(
-    plant: Callable[..., Planted], capfd: pytest.CaptureFixture[str]
+    plant: Plant, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """A manifest the reader cannot parse."""
     planted = plant(manifest="[package\n")
@@ -241,7 +244,7 @@ def test_a_manifest_that_is_not_toml_is_refused(
 
 
 def test_a_workspace_manifest_is_refused(
-    plant: Callable[..., Planted], capfd: pytest.CaptureFixture[str]
+    plant: Plant, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """A manifest with no [package] names no crate this cell built."""
     planted = plant(manifest="[workspace]\n")
@@ -254,7 +257,7 @@ def test_a_workspace_manifest_is_refused(
 
 
 def test_a_nameless_package_is_refused(
-    plant: Callable[..., Planted], capfd: pytest.CaptureFixture[str]
+    plant: Plant, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """A [package] table with no name."""
     planted = plant(manifest='[package]\nversion = "1.0.0"\n')
@@ -267,7 +270,7 @@ def test_a_nameless_package_is_refused(
 
 
 def test_a_package_that_is_not_a_table_is_refused(
-    plant: Callable[..., Planted], capfd: pytest.CaptureFixture[str]
+    plant: Plant, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """`package = false` (#1556's shrunk example): an AttributeError before."""
     planted = plant(manifest="package = false\n")

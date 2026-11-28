@@ -343,7 +343,7 @@ def test_every_script_refuses_an_unset_or_empty_org_python(env: support.Env) -> 
 
 @pytest.mark.parametrize("value", [None, ""])
 def test_the_sourced_provisioner_refuses_an_unset_org_python(
-    value: object, env: support.Env
+    value: str | None, env: support.Env
 ) -> None:
     """pgrx-env.sh is sourced: its helper call refuses at the call."""
     env_sh = CANON / "mise" / "pgrx-env.sh"
@@ -356,7 +356,7 @@ def test_the_sourced_provisioner_refuses_an_unset_org_python(
 
 @pytest.mark.parametrize("value", [None, ""])
 def test_the_sourced_coverage_env_refuses_an_unset_org_python(
-    value: object, env: support.Env
+    value: str | None, env: support.Env
 ) -> None:
     """rust-coverage-env.sh is sourced: its function refuses (#1877)."""
     env_sh = CANON / "mise" / "rust-coverage-env.sh"

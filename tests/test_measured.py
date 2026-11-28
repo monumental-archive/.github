@@ -434,7 +434,7 @@ def test_no_go_mod_leaves_goflags_alone(env: support.Env) -> None:
     ],
 )
 def test_a_measuring_flag_of_the_tasks_own_is_refused(
-    argv: object, given: object, named: object, env: support.Env
+    argv: list[str], given: dict[str, str], named: str, env: support.Env
 ) -> None:
     """On its `go test`, in either spelling, or already in GOFLAGS."""
     with tempfile.TemporaryDirectory() as tmp:
@@ -450,9 +450,7 @@ def test_a_measuring_flag_of_the_tasks_own_is_refused(
         "printf ok; exit 0; go test ./... -args -cover",
     ],
 )
-def test_words_outside_a_go_test_are_not_go_flags(
-    line: object, env: support.Env
-) -> None:
+def test_words_outside_a_go_test_are_not_go_flags(line: str, env: support.Env) -> None:
     """`find -exec` and an `-args` tail are the command's, not go's."""
     with tempfile.TemporaryDirectory() as tmp:
         _, out, status = go_run(tmp, [SH, "-c", line], env=env)
@@ -717,7 +715,7 @@ def test_a_call_beside_the_first_waits_for_its_clean(
         ]
         for call in calls:
             _, err = call.communicate(timeout=60)
-            assert call.returncode == 0, err
+            assert call.wait() == 0, err
         lines = [ln.split(" | ")[0] for ln in log.read_text().splitlines()]
         cleans = [ln for ln in lines if ln.startswith("llvm-cov clean")]
         assert len(cleans) == 1, lines
@@ -813,7 +811,11 @@ def test_a_metadata_with_no_target_directory_is_refused(
     ],
 )
 def test_a_task_that_measures_itself_is_refused(
-    argv: object, given: object, named: object, env: support.Env, rustc: support.Rustc
+    argv: list[str],
+    given: dict[str, str],
+    named: str,
+    env: support.Env,
+    rustc: support.Rustc,
 ) -> None:
     """Item 10's four, by message, before cargo is asked anything."""
     with tempfile.TemporaryDirectory() as tmp:
@@ -942,7 +944,7 @@ def test_no_floor_leaves_the_command_unchanged(vitest_measured: VitestMeasured) 
     "argv", [["pnpm", "exec", "vitest", "list"], ["pnpm", "run", "lint"]]
 )
 def test_what_is_not_a_run_is_unchanged(
-    vitest_measured: VitestMeasured, argv: object
+    vitest_measured: VitestMeasured, argv: list[str]
 ) -> None:
     """`vitest list`, or a command with no vitest argument."""
     run_dir, out = vitest_measured.vitest_run(argv)

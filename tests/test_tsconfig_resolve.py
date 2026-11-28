@@ -152,7 +152,7 @@ def options(tree: Path) -> dict[str, object]:
     [pytest.param(config, said, id=name) for name, config, said in REFUSED],
 )
 def test_each_malformed_config_is_refused_by_its_diagnostic(
-    config: object, said: object, env: support.Env
+    config: str, said: str, env: support.Env
 ) -> None:
     """One row per way `--showConfig` reads a bad config as a good one."""
     with tempfile.TemporaryDirectory() as tmp:
@@ -198,7 +198,7 @@ def test_a_tsconfig_that_is_not_there_carries_the_reason(env: support.Env) -> No
     [pytest.param(config, source, id=name) for name, config, source in ACCEPTED],
 )
 def test_each_parsed_config_resolves_whatever_its_tree(
-    config: object, source: object, env: support.Env
+    config: str, source: str, env: support.Env
 ) -> None:
     """The document is written and nothing is said."""
     with tempfile.TemporaryDirectory() as tmp:

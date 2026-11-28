@@ -36,6 +36,7 @@ from belt import (
     pgrx_postgres,
     rust_task,
     rust_workspaces,
+    typed_std,
 )
 from belt.typed_pytest import fixture
 from tests import support
@@ -92,7 +93,7 @@ def stand_in(command: str) -> Callable[[list[str]], int]:
 
     def main(argv: list[str]) -> int:
         failed = argv[:1] == ["--failed"]
-        given = "" if failed else sys.stdin.read().rstrip("\n")
+        given = "" if failed else typed_std.stdin_text().rstrip("\n")
         line = f"belt {command} {' '.join(argv)} <{given}>\n"
         with Path(os.environ["PLANT_LOG"]).open("a", encoding="utf-8") as log:
             log.write(line)
@@ -201,9 +202,9 @@ class Planted:
         self.surface = self.tmp / "surface"
         self.plan = self.tmp / "plan"
         self.plant(PLAIN, CHECK)
-        env = self.make_env()
-        self.env = env | {
-            "PATH": f"{self.bins}:{env['PATH']}",
+        environ = self.make_env()
+        self.env = environ | {
+            "PATH": f"{self.bins}:{environ['PATH']}",
             "ORG_BELT_DIR": str(self.belt),
             "ORG_FINDINGS": "",
             "MISE_TASK_NAME": TASK,
@@ -243,11 +244,11 @@ class Planted:
         monkeypatch.setattr(gate_surface, "main", stand_in("gate-surface"))
         monkeypatch.setattr(msrv_plan, "main", stand_in("msrv-plan"))
         monkeypatch.setattr(pgrx_postgres, "main", stand_in("pgrx-postgres"))
-        monkeypatch.setattr(
-            rust_workspaces,
-            "resolved",
-            lambda *_args, **_kwargs: None if roots is None else list(roots),
-        )
+
+        def resolved() -> list[str] | None:
+            return None if roots is None else list(roots)
+
+        monkeypatch.setattr(rust_workspaces, "resolved", resolved)
 
     def logged(self) -> list[str]:
         """Read the stubs' log, the scratch directory masked.

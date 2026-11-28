@@ -235,7 +235,7 @@ def test_hits_through_the_task(planted: Planted) -> None:
 )
 def test_each_form_is_named(
     planted: Planted,
-    line: object,
+    line: str,
     capfd: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -329,8 +329,8 @@ def test_a_path_that_is_not_a_file_is_counted_unread(
 )
 def test_escapes_are_expanded(
     planted: Planted,
-    line: object,
-    shown: object,
+    line: str,
+    shown: list[str],
     capfd: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -345,7 +345,7 @@ def test_escapes_are_expanded(
 @pytest.mark.parametrize("stop", ["\\c", "\\0"])
 def test_backslash_c_and_nul_end_the_text(
     planted: Planted,
-    stop: object,
+    stop: str,
     capfd: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

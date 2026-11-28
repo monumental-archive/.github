@@ -11,7 +11,7 @@ import pathlib
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -160,7 +160,7 @@ def repo_case(
     return RepoCase(tmp_path, monkeypatch, env=env)
 
 
-LANGUAGES: ClassVar[dict[str, tuple[str, str, str, str, dict[str, str]]]] = {
+LANGUAGES: dict[str, tuple[str, str, str, str, dict[str, str]]] = {
     # language: (code file, code body, test file, test body,
     #            not-a-code-fix change)
     "python": (
@@ -220,7 +220,7 @@ def test_each_class_in_each_language(repo_case: RepoCase) -> None:
 
 
 @pytest.mark.parametrize("directory", ["tests", "testdata", "tests/fixtures"])
-def test_test_directories(repo_case: RepoCase, directory: object) -> None:
+def test_test_directories(repo_case: RepoCase, directory: str) -> None:
     """Any path under tests/ or testdata/ is a test, fixtures included."""
     repo_case.repo.commit("feat: tool", {"tool/run.sh": "echo 1\n"})
     subject = f"fix: tool, with {directory}"
@@ -246,7 +246,7 @@ def test_fixtures_alone_is_not_a_test(repo_case: RepoCase) -> None:
 
 
 @pytest.mark.parametrize("attr", ["#[test]", "#[pg_test]", "#[tokio::test]"])
-def test_rust_test_attribute_in_source(repo_case: RepoCase, attr: object) -> None:
+def test_rust_test_attribute_in_source(repo_case: RepoCase, attr: str) -> None:
     """An added `#[test]`-family line makes a `.rs` file a test."""
     repo_case.repo.commit("feat: lib", {"src/lib.rs": "pub fn f() -> u8 { 1 }\n"})
     subject = f"fix: f, held by {attr}"

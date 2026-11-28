@@ -360,17 +360,18 @@ def assert_rewritten(
     assert lint(after, env=env, track=track).returncode == 0
 
 
+@pytest.mark.usefixtures("caller")
 def test_the_task_body_hands_the_helper_the_canon(
-    env: support.Env, track: support.Track, caller: Callable[[str], Path]
+    env: support.Env, track: support.Track
 ) -> None:
     """fix:gate-stub's body names the canon from identity.sh and fixes."""
     with tempfile.TemporaryDirectory() as tmp:
         flows = Path(tmp) / ".github" / "workflows"
         flows.mkdir(parents=True)
-        caller = flows / "gate.yml"
-        caller.write_text(planted(GROUP, PRE_1617_GROUP), encoding="utf-8")
+        gate = flows / "gate.yml"
+        gate.write_text(planted(GROUP, PRE_1617_GROUP), encoding="utf-8")
         done = run(FIX_BODY, Path(tmp), "fix:gate-stub", env=env, track=track)
-        after = caller.read_text(encoding="utf-8")
+        after = gate.read_text(encoding="utf-8")
     assert done.returncode == 0, done.stderr
     assert after == STUB
 

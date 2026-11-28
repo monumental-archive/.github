@@ -301,7 +301,7 @@ def test_anything_but_roots_is_a_usage_error(
 # org_rust_workspace_roots fills the array, or fails.
 @pytest.mark.parametrize("shell", SHELLS)
 def test_the_reader_fills_one_element_per_root(
-    shell: object, tmp_path: Path, env: support.Env
+    shell: str, tmp_path: Path, env: support.Env
 ) -> None:
     """Both roots in order, no empty last element, no file left."""
     planted = Planted(tmp_path, env=env)
@@ -317,7 +317,7 @@ def test_the_reader_fills_one_element_per_root(
 
 @pytest.mark.parametrize("shell", SHELLS)
 def test_the_reader_fails_when_the_helper_fails(
-    shell: object, tmp_path: Path, env: support.Env
+    shell: str, tmp_path: Path, env: support.Env
 ) -> None:
     """A finding: exit 1 under errexit, the message, nothing filled."""
     planted = Planted(tmp_path, "fail", env=env)
@@ -380,7 +380,7 @@ def fuzzing_state(tmp_path: Path) -> Fuzzing:
     ],
 )
 def test_only_a_true_cargo_fuzz_in_package_metadata_is_the_marker(
-    fuzzing_state: Fuzzing, text: object, want: object
+    *, fuzzing_state: Fuzzing, text: str, want: bool
 ) -> None:
     """Every other shape of the manifest is not a cargo-fuzz crate."""
     assert want == rust_workspaces.fuzzing(fuzzing_state.manifest(text))

@@ -449,7 +449,7 @@ def test_non_string_values_render_as_compact_json() -> None:
 
 @pytest.mark.usefixtures("harness")
 @pytest.mark.parametrize("facts", ["[]", "not json", '"x"', "[" * 100_000])
-def test_facts_that_are_not_an_object_refuse(facts: object) -> None:
+def test_facts_that_are_not_an_object_refuse(facts: str) -> None:
     """Jq died on these; the helper names what it was given."""
     with pytest.raises(registry.RefusedError) as cm:
         registry.facts_pairs(facts)
@@ -783,7 +783,7 @@ def test_a_trailing_newline_on_the_digest_file_is_read_as_cat_read_it(
 
 @pytest.mark.parametrize("data", [DRY_RUN.read_bytes()[:-1], b""])
 def test_a_dry_run_not_ending_in_a_newline(
-    assemble_state: Assemble, data: object, capfd: pytest.CaptureFixture[str]
+    assemble_state: Assemble, data: bytes, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """No guessing at the manifest bytes; nothing PUT."""
     assemble_state.dry_run(data)
@@ -893,7 +893,7 @@ def test_a_failed_put_names_the_request(
 
 @pytest.mark.parametrize("body", [b"{}", b'{"token": ""}', b"[]", b"html"])
 def test_no_token_from_the_endpoint(
-    assemble_state: Assemble, body: object, capfd: pytest.CaptureFixture[str]
+    assemble_state: Assemble, body: bytes, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """A token endpoint answering no token refuses before the PUT."""
     Fake.log = []
@@ -1132,9 +1132,7 @@ def test_an_answer_that_is_not_a_response_is_refused(
 ) -> None:
     """What answered is not an HTTP response: refused by name (#1682)."""
     url = "https://ghcr.io/v2/a/b/manifests/1"
-    monkeypatch.setattr(
-        urllib.request.OpenerDirector, "open", lambda *_args, **_kwargs: None
-    )
+    monkeypatch.setattr(urllib.request.OpenerDirector, "open", support.answers_none)
     with pytest.raises(registry.RefusedError) as caught:
         registry.Registry.request("GET", url, {})
     assert f"{url} answered NoneType, not an HTTP response" == str(caught.value)

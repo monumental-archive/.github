@@ -640,7 +640,7 @@ def test_a_name_ending_in_a_range_is_red(
 
 @pytest.mark.parametrize("shard", ["x", "1/2/3", "2/2", "3/2", "-1/2"])
 def test_each_malformed_shard_is_red(
-    share_out: ShareOut, shard: object, capfd: pytest.CaptureFixture[str]
+    share_out: ShareOut, shard: str, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """Not two whole numbers, or k not below n: red, by name."""
     status = mutants_typescript.main(share_out.sharing(["src/*.ts"], shard))
@@ -701,7 +701,7 @@ ROWS: tuple[tuple[str, list[str]], ...] = (
 
 
 @pytest.mark.parametrize(("pattern", "want"), ROWS)
-def test_each_form(pattern: object, want: object) -> None:
+def test_each_form(pattern: str, want: list[str]) -> None:
     """Lists, nested lists, ranges, literal braces and escaped ones."""
     assert mutants_typescript.braces(pattern) == want
 
@@ -718,7 +718,7 @@ SPELLING_ROWS: tuple[tuple[str, str], ...] = (
 
 
 @pytest.mark.parametrize(("pattern", "want"), SPELLING_ROWS)
-def test_spelling_each_form(pattern: object, want: object) -> None:
+def test_spelling_each_form(pattern: str, want: str) -> None:
     """An escape names its character; a `[^` class negates."""
     assert mutants_typescript.full_match_spelling(pattern) == want
 
@@ -758,7 +758,7 @@ REFUSALS_ROWS: tuple[tuple[dict[str, object], str], ...] = (
 
 @pytest.mark.parametrize(("setting", "message"), REFUSALS_ROWS)
 def test_each_refused_setting_is_red_by_name(
-    planted_state: Planted, setting: object, message: object
+    planted_state: Planted, setting: dict[str, object], message: str
 ) -> None:
     """Each row's setting is named, and StrykerJS never runs."""
     planted_state.plant(*KILLED, config=CONFIG | setting)
@@ -1112,8 +1112,8 @@ def test_a_sound_config_passes_silently(
 
 @pytest.mark.parametrize(("setting", "message"), REFUSALS_ROWS)
 def test_main_each_refused_setting_is_red_by_name(
-    setting: object,
-    message: object,
+    setting: dict[str, object],
+    message: str,
     capfd: pytest.CaptureFixture[str],
     tmp_path: Path,
 ) -> None:

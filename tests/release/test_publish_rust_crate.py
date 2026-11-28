@@ -58,7 +58,7 @@ import sys
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 import pytest
 
@@ -218,10 +218,24 @@ class Publishing:
         )
 
 
+class Publish(Protocol):
+    """What the `publish` fixture hands a row."""
+
+    def __call__(
+        self,
+        index: dict[str, str],
+        crate: bytes | None = ...,
+        unpublished: tuple[str, ...] = ...,
+        **answers: int,
+    ) -> Publishing:
+        """Lay out the job with the index serving `index`."""
+        ...
+
+
 @fixture
 def publish(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, env: support.Env
-) -> Callable[..., Publishing]:
+) -> Publish:
     """Lay out the publish job: a stub cargo, a fake index host, its env.
 
     Returns:
@@ -337,7 +351,7 @@ def test_wasm_has_a_file_but_no_1_3_3() -> None:
 
 # The step does what its comment says (#1218).
 def test_nothing_published_adds_no_exclusion(
-    capfd: pytest.CaptureFixture[str], publish: Callable[..., Publishing]
+    capfd: pytest.CaptureFixture[str], publish: Publish
 ) -> None:
     """404s and a file without the version leave cargo's flags alone."""
     publishing = publish(WASM)
@@ -352,7 +366,7 @@ def test_nothing_published_adds_no_exclusion(
 
 
 def test_some_published_excludes_exactly_those_and_names_them(
-    capfd: pytest.CaptureFixture[str], publish: Callable[..., Publishing]
+    capfd: pytest.CaptureFixture[str], publish: Publish
 ) -> None:
     """The v1.3.3 re-run: edtf-core is there, the rest are not."""
     publishing = publish(CORE | WASM)
@@ -368,7 +382,7 @@ def test_some_published_excludes_exactly_those_and_names_them(
 
 
 def test_all_published_runs_no_cargo_publish_and_exits_0(
-    capfd: pytest.CaptureFixture[str], publish: Callable[..., Publishing]
+    capfd: pytest.CaptureFixture[str], publish: Publish
 ) -> None:
     """A finished leg is success, and it mints no token."""
     others = ("calendars", "normalize", "wasm", "cli", "postgres")
@@ -388,7 +402,7 @@ def test_all_published_runs_no_cargo_publish_and_exits_0(
 
 
 def test_a_checksum_mismatch_fails_naming_both(
-    capfd: pytest.CaptureFixture[str], publish: Callable[..., Publishing]
+    capfd: pytest.CaptureFixture[str], publish: Publish
 ) -> None:
     """A resume must be resuming the same bytes."""
     planted = b"not the bytes v1.3.3 uploaded\n"
@@ -405,7 +419,7 @@ def test_a_checksum_mismatch_fails_naming_both(
 
 
 def test_an_index_503_fails_naming_the_status(
-    capfd: pytest.CaptureFixture[str], publish: Callable[..., Publishing]
+    capfd: pytest.CaptureFixture[str], publish: Publish
 ) -> None:
     """An unread index is never read as "not published"."""
     publishing = publish({"ed/tf/edtf-core": "503"} | WASM)
@@ -421,7 +435,7 @@ def test_an_index_503_fails_naming_the_status(
 
 
 def test_every_index_read_names_the_org_and_the_layout(
-    capfd: pytest.CaptureFixture[str], publish: Callable[..., Publishing]
+    capfd: pytest.CaptureFixture[str], publish: Publish
 ) -> None:
     """One read per member that publishes, each with the UA."""
     publishing = publish(WASM)
@@ -440,7 +454,7 @@ def test_every_index_read_names_the_org_and_the_layout(
 # Each died with a traceback before (AttributeError, UnicodeDecodeError,
 # KeyError), never naming the crate or the index.
 @pytest.mark.parametrize("body", [b"0", b"\x80", b'{"vers": "1.3.3"}\n'])
-def test_each_shape_refuses_by_name(body: object) -> None:
+def test_each_shape_refuses_by_name(body: bytes) -> None:
     """Not an object, not UTF-8, our record with no cksum."""
 
     def fetch(
@@ -465,7 +479,7 @@ def test_each_shape_refuses_by_name(body: object) -> None:
 
 # Cargo's `publish` key decides, never the build's exclusion (#1273).
 def test_a_member_the_build_excluded_still_publishes(
-    capfd: pytest.CaptureFixture[str], publish: Callable[..., Publishing]
+    capfd: pytest.CaptureFixture[str], publish: Publish
 ) -> None:
     """edtf-postgres: in the old exclusion, `publish` unset - it ships."""
     publishing = publish(WASM)
@@ -479,7 +493,7 @@ def test_a_member_the_build_excluded_still_publishes(
 
 
 def test_a_publish_false_member_is_not_in_the_set(
-    capfd: pytest.CaptureFixture[str], publish: Callable[..., Publishing]
+    capfd: pytest.CaptureFixture[str], publish: Publish
 ) -> None:
     """`publish = false` is the one way out, and it is the manifest's."""
     publishing = publish(CORE, unpublished=("edtf-postgres",))
@@ -498,7 +512,7 @@ def test_a_publish_false_member_is_not_in_the_set(
 
 # Trusted publishing by hand: what the step's curl calls did (#907).
 def test_the_token_is_masked_and_handed_to_cargo(
-    capfd: pytest.CaptureFixture[str], publish: Callable[..., Publishing]
+    capfd: pytest.CaptureFixture[str], publish: Publish
 ) -> None:
     """OIDC, then the exchange with the org's UA, masked, into cargo's env."""
     publishing = publish(WASM)
@@ -517,7 +531,7 @@ def test_the_token_is_masked_and_handed_to_cargo(
 
 
 def test_a_refused_exchange_names_the_status_and_the_header(
-    capfd: pytest.CaptureFixture[str], publish: Callable[..., Publishing]
+    capfd: pytest.CaptureFixture[str], publish: Publish
 ) -> None:
     """The 403 a missing UA draws is named, with where to look first."""
     publishing = publish(WASM, exchange=403)
@@ -533,7 +547,7 @@ def test_a_refused_exchange_names_the_status_and_the_header(
 
 
 def test_a_refused_oidc_request_names_the_status(
-    capfd: pytest.CaptureFixture[str], publish: Callable[..., Publishing]
+    capfd: pytest.CaptureFixture[str], publish: Publish
 ) -> None:
     """No OIDC token, no exchange, no publish."""
     publishing = publish(WASM, oidc=500)
@@ -601,16 +615,14 @@ def test_an_answer_that_is_not_a_response_is_refused(
 ) -> None:
     """What answered is not an HTTP response: refused by name (#1682)."""
     url = "https://index.crates.io/ed/tf/edtf-core"
-    monkeypatch.setattr(
-        urllib.request.OpenerDirector, "open", lambda *_args, **_kwargs: None
-    )
+    monkeypatch.setattr(urllib.request.OpenerDirector, "open", support.answers_none)
     with pytest.raises(publish_crates.RefusalError) as caught:
         publish_crates.http("GET", url, {})
     assert f"{url} answered NoneType, not an HTTP response" == str(caught.value)
 
 
 def test_an_index_that_never_answered_is_named(
-    capfd: pytest.CaptureFixture[str], publish: Callable[..., Publishing]
+    capfd: pytest.CaptureFixture[str], publish: Publish
 ) -> None:
     """No answer at all is "nothing", never "not published"."""
     publishing = publish({"ed/tf/edtf-core": "000"} | WASM)
@@ -623,7 +635,7 @@ def test_an_index_that_never_answered_is_named(
 
 
 def test_cargo_publish_s_own_exit_is_the_run_s(
-    capfd: pytest.CaptureFixture[str], publish: Callable[..., Publishing]
+    capfd: pytest.CaptureFixture[str], publish: Publish
 ) -> None:
     """A failed upload fails the run with cargo's own status."""
     publishing = publish(WASM, publish_rc=101)
@@ -675,5 +687,9 @@ def test_a_failed_command_names_itself_and_its_status(
 
 def test_success_is_run_s_exit(monkeypatch: pytest.MonkeyPatch) -> None:
     """Without a failure, main returns what run returned."""
-    monkeypatch.setattr(publish_crates, "run", lambda *_args, **_kwargs: 0)
+
+    def published(*_args: object, **_kwargs: object) -> int:
+        return 0
+
+    monkeypatch.setattr(publish_crates, "run", published)
     assert publish_crates.main([]) == 0

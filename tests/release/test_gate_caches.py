@@ -31,6 +31,7 @@ message that names it.
 """
 
 import re
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -38,6 +39,9 @@ from belt import workflow_yaml
 from tests import support
 from tests.release import test_job_installs as job_installs
 from tests.release.test_job_installs import Job, Step, field, inputs, parsed, table
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 CANON = support.CANON
 CI = CANON / ".github" / "workflows" / "ci.yml"
@@ -645,7 +649,7 @@ def test_compiler_the_real_gate_conforms() -> None:
 
 
 @pytest.mark.parametrize("path", sorted(WORKFLOWS.glob("*.yml")))
-def test_every_workflow_conforms(path: object) -> None:
+def test_every_workflow_conforms(path: Path) -> None:
     """No workflow holds a cargo cache keyed otherwise."""
     text = path.read_text("utf-8")
     assert compiler_findings(text, path.name) == NONE

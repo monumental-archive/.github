@@ -391,7 +391,7 @@ def test_roster_member_missing_from_listing_reds(
 ROSTER = load(TREE / "slsa" / "assert-policy.json")
 NAMES = sc.roster_names
 REPOS = "population.repositories"
-RECORDS_AND_ROSTER_ROWS: list[tuple[Callable[[], object], str]] = [
+RECORDS_AND_ROSTER_ROWS: list[object] = [
     (
         lambda: sc.read_records([], {}, ROSTER),
         "org-default.json is not an object",
@@ -473,7 +473,16 @@ def test_status_readings() -> None:
 
 
 @pytest.mark.parametrize(("endpoint", "body", "message"), LIVE_ANSWERS_ROWS)
-def test_live_answers(endpoint: str, body: object, message: str) -> None:
+def test_live_answers(
+    endpoint: str,
+    body: list[int]
+    | list[dict[str, str]]
+    | list[dict[str, bool]]
+    | list[str]
+    | list[dict[str, dict[str, int]]]
+    | list[dict[str, dict[str, str] | int]],
+    message: str,
+) -> None:
     """Each live field the audit reads, wrongly shaped in turn."""
     live = Live()
     live.answers[endpoint] = (200, body)

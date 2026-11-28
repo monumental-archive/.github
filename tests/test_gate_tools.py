@@ -672,7 +672,7 @@ def test_a_continued_selection_is_read_whole() -> None:
     ],
 )
 def test_a_sourced_selector_guards_with_its_own_pathspec(
-    call: object, want: object
+    call: str, want: set[str]
 ) -> None:
     """Only the function a body calls joins its guard (#2007).
 
@@ -713,7 +713,7 @@ def test_an_uncalled_function_is_dropped_and_a_nested_one_kept() -> None:
         ("FOO=1 stele verify", "stele"),
     ],
 )
-def test_xargs_and_cargo_subcommands_are_calls(text: object, cmd: object) -> None:
+def test_xargs_and_cargo_subcommands_are_calls(text: str, cmd: str) -> None:
     """`xargs -0 tool` and `cargo deny` are calls."""
     assert first_call(expand(text, set()), [cmd]) == 0
 
@@ -1014,7 +1014,7 @@ def test_a_json_only_tree_needs_biome(env: support.Env) -> None:
         "Dockerfile.ci",
     ],
 )
-def test_a_dockerfile_tree(name: object, env: support.Env) -> None:
+def test_a_dockerfile_tree(name: str, env: support.Env) -> None:
     """Each Dockerfile form brings hadolint."""
     got = install(git_tree({**WORKFLOW, name: "FROM x\n"}, env=env))
     assert "aqua:hadolint/hadolint" in got

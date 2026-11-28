@@ -75,7 +75,7 @@ def test_the_convention_maps_the_three_the_default_omits() -> None:
 
 
 @pytest.mark.parametrize("kind", mapped_types())
-def test_every_mapped_type_passes_the_gate(kind: object, env: support.Env) -> None:
+def test_every_mapped_type_passes_the_gate(kind: str, env: support.Env) -> None:
     """Each mapped type, as a whole subject, is accepted by committed."""
     done = check(f"{kind}: carry the thing", env=env)
     assert f"Disallowed type `{kind}`" not in done.stdout + done.stderr

@@ -174,7 +174,7 @@ RUNNERS = (
 @pytest.mark.usefixtures("rows_state")
 @pytest.mark.parametrize(("cls", "target", "runner"), RUNNERS)
 def test_each_known_target_runs_on_its_runner(
-    cls: object, target: object, runner: object, capfd: pytest.CaptureFixture[str]
+    cls: str, target: str, runner: str, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """One row per table entry, outputs and notice whole."""
     cell = f'{{"target":"{target}","runner":"{runner}"}}'
@@ -244,7 +244,7 @@ def test_another_class_target_is_unknown(capfd: pytest.CaptureFixture[str]) -> N
 @pytest.mark.usefixtures("rows_state")
 @pytest.mark.parametrize("asked", [",linux-amd64", "linux-amd64,,darwin-arm64", ","])
 def test_an_empty_field_is_an_unknown_target(
-    asked: object, capfd: pytest.CaptureFixture[str]
+    asked: str, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """A leading or inner empty field is kept, and refused."""
     refused(
@@ -258,9 +258,7 @@ def test_an_empty_field_is_an_unknown_target(
 @pytest.mark.parametrize(
     "asked", ["linux-amd64,linux-amd64", "linux-amd64, linux-amd64,"]
 )
-def test_a_duplicate_is_refused(
-    asked: object, capfd: pytest.CaptureFixture[str]
-) -> None:
+def test_a_duplicate_is_refused(asked: str, capfd: pytest.CaptureFixture[str]) -> None:
     """The same target twice, spaced or not."""
     refused(
         ("targets", "go-binary", asked),
@@ -286,7 +284,7 @@ def test_an_unknown_target_is_named_before_a_duplicate(
     "asked", [" linux-amd64 ", "linux-amd64,", "linux-amd64\ndarwin-arm64"]
 )
 def test_the_request_splits_as_the_shell_split_it(
-    asked: object, capfd: pytest.CaptureFixture[str]
+    asked: str, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """Spaces removed, one trailing comma dropped, the first line only."""
     code = matrix.main(["targets", "go-binary", asked])
@@ -308,7 +306,7 @@ def test_the_order_requested_is_the_order_planned(
 @pytest.mark.usefixtures("rows_state")
 @pytest.mark.parametrize("asked", ["", " "])
 def test_pgrx_extension_an_empty_request_is_refused(
-    asked: object, capfd: pytest.CaptureFixture[str]
+    asked: str, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """Nothing requested."""
     refused(
@@ -321,7 +319,7 @@ def test_pgrx_extension_an_empty_request_is_refused(
 @pytest.mark.usefixtures("rows_state")
 @pytest.mark.parametrize("major", ["13", "19"])
 def test_a_major_with_no_pinned_base_image_is_refused(
-    major: object, capfd: pytest.CaptureFixture[str]
+    major: str, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """A major the mapping does not carry, numeric or not."""
     refused(
@@ -334,7 +332,7 @@ def test_a_major_with_no_pinned_base_image_is_refused(
 @pytest.mark.usefixtures("rows_state")
 @pytest.mark.parametrize("major", ["x", "pg14", ""])
 def test_a_non_numeric_major_is_refused(
-    major: object, capfd: pytest.CaptureFixture[str]
+    major: str, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """A field that is not a number is named as such, not as unpinned."""
     refused(
@@ -354,7 +352,7 @@ def test_a_non_numeric_major_is_refused(
     ],
 )
 def test_a_major_pinned_for_one_role_only_is_refused(
-    rows_state: Rows, text: object, capfd: pytest.CaptureFixture[str]
+    rows_state: Rows, text: str, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """Both a build and a smoke image, or no plan."""
     refused(
@@ -488,7 +486,7 @@ def test_each_wrong_shape_is_refused_by_name(
 @pytest.mark.usefixtures("rows_state")
 @pytest.mark.parametrize("asked", ["", "  "])
 def test_pgrx_images_an_empty_request_is_refused(
-    asked: object, capfd: pytest.CaptureFixture[str]
+    asked: str, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """Nothing requested."""
     refused(
@@ -501,7 +499,7 @@ def test_pgrx_images_an_empty_request_is_refused(
 @pytest.mark.usefixtures("rows_state")
 @pytest.mark.parametrize("major", ["x", "1a", "pg14", "-1", "1.5", "٣"])
 def test_pgrx_images_a_non_numeric_major_is_refused(
-    major: object, capfd: pytest.CaptureFixture[str]
+    major: str, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """ASCII digits only, as `^[0-9]+$` held it."""
     refused(
@@ -560,7 +558,7 @@ def test_a_clean_list_is_returned_in_order() -> None:
     "ref", ["postgres:14-bookworm", "postgres:14@sha512:ab", "postgres@"]
 )
 def test_a_reference_with_no_digest_is_refused_bare(
-    rows_state: Rows, ref: object, capfd: pytest.CaptureFixture[str]
+    rows_state: Rows, ref: str, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """The heredoc's SystemExit wording, unprefixed as it always was."""
     refused(
@@ -574,7 +572,7 @@ def test_a_reference_with_no_digest_is_refused_bare(
     "text", ["", '[floor]\nglibc = "2.36"\n', "[build]\n[smoke]\n"]
 )
 def test_an_empty_file_is_refused(
-    rows_state: Rows, text: object, capfd: pytest.CaptureFixture[str]
+    rows_state: Rows, text: str, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """A mapping that pins nothing approves nothing."""
     refused(

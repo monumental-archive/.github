@@ -12,7 +12,7 @@ import subprocess
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 import pytest
 
@@ -94,10 +94,16 @@ def plant(tree: Path, files: dict[str, str], *, env: support.Env) -> None:
         subprocess.run([GIT, "add", "--", *files], cwd=tree, env=environ, check=True)
 
 
+class Repo(Protocol):
+    """What the `repo` fixture hands a row."""
+
+    def __call__(self, files: dict[str, str], *, owner: str = ...) -> Path:
+        """Run repo."""
+        ...
+
+
 @fixture
-def repo(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, env: support.Env
-) -> Callable[..., Path]:
+def repo(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, env: support.Env) -> Repo:
     """Plant a repository tracking a row's files, under its owner.
 
     Returns:
@@ -140,7 +146,7 @@ def test_an_untracked_docs_is_missing(
 
 
 def test_docs_without_markdown_is_red(
-    capfd: pytest.CaptureFixture[str], repo: Callable[..., Path]
+    capfd: pytest.CaptureFixture[str], repo: Repo
 ) -> None:
     """A tracked docs/ holding no markdown resolves nothing: red."""
     tree = repo({"docs/a.txt": "x\n"})
@@ -157,19 +163,17 @@ def test_docs_without_markdown_is_red(
 def test_no_gh_is_red(
     monkeypatch: pytest.MonkeyPatch,
     capfd: pytest.CaptureFixture[str],
-    repo: Callable[..., Path],
+    repo: Repo,
 ) -> None:
     """With no network stand-in and no gh on PATH: `gh missing`."""
-    monkeypatch.setattr("shutil.which", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("shutil.which", support.answers_none)
     tree = repo(DOC)
     status = citations.main([], net=None, top=tree)
     err = capfd.readouterr().err
     assert (1, f"{TASK}: gh missing\n") == (status, err)
 
 
-def test_no_owner_is_red(
-    capfd: pytest.CaptureFixture[str], repo: Callable[..., Path]
-) -> None:
+def test_no_owner_is_red(capfd: pytest.CaptureFixture[str], repo: Repo) -> None:
     """The org is the environment's to name (#579)."""
     tree = repo(DOC, owner="")
     status = citations.main([], net=Org(), top=tree)
@@ -178,9 +182,7 @@ def test_no_owner_is_red(
 
 
 # The org listing is the population; a broken one resolves nothing.
-def test_a_failed_listing_is_red(
-    capfd: pytest.CaptureFixture[str], repo: Callable[..., Path]
-) -> None:
+def test_a_failed_listing_is_red(capfd: pytest.CaptureFixture[str], repo: Repo) -> None:
     """Gh could not list: nothing was resolved."""
     tree = repo(DOC)
     status = citations.main([], net=Org(repos=None), top=tree)
@@ -191,9 +193,7 @@ def test_a_failed_listing_is_red(
     ) == (status, err)
 
 
-def test_an_empty_listing_is_red(
-    capfd: pytest.CaptureFixture[str], repo: Callable[..., Path]
-) -> None:
+def test_an_empty_listing_is_red(capfd: pytest.CaptureFixture[str], repo: Repo) -> None:
     """Zero repositories is a broken walk, not clean docs."""
     tree = repo(DOC)
     status = citations.main([], net=Org(repos=[]), top=tree)
@@ -218,7 +218,7 @@ CITING = (
 
 
 def test_every_citation_resolving_passes_with_counts(
-    capfd: pytest.CaptureFixture[str], repo: Callable[..., Path]
+    capfd: pytest.CaptureFixture[str], repo: Repo
 ) -> None:
     """Four release citations and one run, all live: the pass line."""
     org = Org(
@@ -239,7 +239,7 @@ def test_every_citation_resolving_passes_with_counts(
 
 
 def test_a_missing_tag_and_a_dead_run_are_named(
-    capfd: pytest.CaptureFixture[str], repo: Callable[..., Path]
+    capfd: pytest.CaptureFixture[str], repo: Repo
 ) -> None:
     """Each citation that resolves to nothing is a line of its own."""
     org = Org(tags={".github": {"v1.24.1"}, "stele": {"v0.2.2", "v0.3.0"}})
@@ -256,7 +256,7 @@ def test_a_missing_tag_and_a_dead_run_are_named(
 
 
 def test_a_version_resolves_against_its_own_repository(
-    capfd: pytest.CaptureFixture[str], repo: Callable[..., Path]
+    capfd: pytest.CaptureFixture[str], repo: Repo
 ) -> None:
     """`.github@v0.2.2` is not satisfied by stele's v0.2.2."""
     org = Org(tags={".github": set(), "stele": {"v0.2.2"}})
@@ -268,7 +268,7 @@ def test_a_version_resolves_against_its_own_repository(
 
 
 def test_the_longer_name_wins_a_shared_prefix(
-    capfd: pytest.CaptureFixture[str], repo: Callable[..., Path]
+    capfd: pytest.CaptureFixture[str], repo: Repo
 ) -> None:
     """`stele-lab@v1.0.0` is stele-lab's, never stele's."""
     org = Org(repos=["stele", "stele-lab"], tags={"stele-lab": {"v1.0.0"}})
@@ -280,7 +280,7 @@ def test_the_longer_name_wins_a_shared_prefix(
 
 
 def test_a_dot_in_a_name_is_literal(
-    capfd: pytest.CaptureFixture[str], repo: Callable[..., Path]
+    capfd: pytest.CaptureFixture[str], repo: Repo
 ) -> None:
     """`.github` does not match `xgithub`."""
     tree = repo({"docs/a.md": "At xgithub@v1.0.0.\n"})

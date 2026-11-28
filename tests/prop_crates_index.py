@@ -77,6 +77,7 @@ def test_main_answers_any_argv(argv: list[str]) -> None:
     """A URL and 0, or a refusal on stderr and 2."""
     out, err = io.StringIO(), io.StringIO()
     with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        status: int | str | None
         try:
             status = ci.main(argv)
         except SystemExit as ended:

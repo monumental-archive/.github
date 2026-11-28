@@ -13,13 +13,12 @@ GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom.
 from __future__ import annotations
 
 import os
-import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 
-from belt import gate_surface, pgrx_postgres, rust_task
+from belt import gate_surface, pgrx_postgres, rust_task, typed_std
 from belt.typed_pytest import fixture
 from tests import support
 
@@ -95,7 +94,7 @@ def stand_in(command: str) -> Callable[[list[str]], int]:
     """
 
     def main(argv: list[str]) -> int:
-        line = f"belt {command} {' '.join(argv)} <{sys.stdin.read().rstrip()}>\n"
+        line = f"belt {command} {' '.join(argv)} <{typed_std.stdin_text().rstrip()}>\n"
         with Path(os.environ["PLANT_DIR"], "log").open("a", encoding="utf-8") as log:
             log.write(line)
         return int(os.environ.get("PLANT_PYTHON_STATUS", "0"))
@@ -134,13 +133,13 @@ class Planted:
             stub.write_text(text, encoding="utf-8")
             stub.chmod(0o755)
         (self.tmp / "log").touch()
-        env = self.make_env()
+        environ = self.make_env()
         for name in list(os.environ):
             monkeypatch.delenv(name)
         for name, value in (
-            env
+            environ
             | {
-                "PATH": f"{bins}:{env['PATH']}",
+                "PATH": f"{bins}:{environ['PATH']}",
                 "ORG_BELT_DIR": str(self.belt),
                 "PLANT_DIR": str(self.tmp),
                 "PLANT_KEPT": "same",

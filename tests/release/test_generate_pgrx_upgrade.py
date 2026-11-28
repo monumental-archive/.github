@@ -1072,14 +1072,14 @@ def test_the_two_sites_are_textually_identical() -> None:
 
 
 @pytest.mark.parametrize("site", [SCRIPT, BUILD_ROOT])
-def test_install_line_carries_the_clang_driver_and_llvm(site: object) -> None:
+def test_install_line_carries_the_clang_driver_and_llvm(site: Path) -> None:
     """A pgrx 0.20 build needs a clang driver and llvm-ar (#1847).
 
     Its bindgen step needs the `clang` and the `llvm-ar` of the
     `libclang` release it binds through. The packages are
     unversioned, so all three follow the image's default LLVM.
     """
-    block = header_install(site.read_text())
+    block = header_install(site.read_text(encoding="utf-8"))
     start = next(
         i for i, line in enumerate(block) if line.startswith("apt-get install")
     )
@@ -1545,7 +1545,7 @@ def test_an_sql_error_stops_the_step_with_psqls_message(env: support.Env) -> Non
     ],
 )
 def test_an_empty_snapshot_is_refused_by_name(
-    empty: object, upgraded: object, fresh: object, env: support.Env
+    empty: str, upgraded: str, fresh: str, env: support.Env
 ) -> None:
     """Either database's empty read fails with the exact message."""
     result, _ = run_proof(upgraded, fresh, env=env)

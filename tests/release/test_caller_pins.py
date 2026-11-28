@@ -10,16 +10,13 @@ import itertools
 import sys
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import Protocol
 
 import pytest
 
 from belt.release import caller_pins
 from belt.typed_pytest import fixture
 from tests import support
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
 
 INPUT_OF = "every class that ships a Rust binary"
 
@@ -40,8 +37,16 @@ def _outside_mise(monkeypatch: pytest.MonkeyPatch) -> None:
 pytestmark = pytest.mark.usefixtures("_outside_mise")
 
 
+class Repo(Protocol):
+    """What the `repo` fixture hands a row."""
+
+    def __call__(self, config: str | None, name: str = ...) -> Path:
+        """Run repo."""
+        ...
+
+
 @fixture
-def repo(tmp_path: Path) -> Callable[..., Path]:
+def repo(tmp_path: Path) -> Repo:
     """Lay out a repository holding a row's mise config.
 
     Returns:
@@ -74,9 +79,7 @@ def installing(*tools: str) -> list[str]:
 
 
 # Each form a `[tools]` value takes yields the version on PATH.
-def test_a_single_version(
-    capfd: pytest.CaptureFixture[str], repo: Callable[..., Path]
-) -> None:
+def test_a_single_version(capfd: pytest.CaptureFixture[str], repo: Repo) -> None:
     """A plain string is the version."""
     status = caller_pins.main(
         installing("rust"), root=repo('[tools]\nrust = "1.97.1"\n')
@@ -90,7 +93,7 @@ def test_a_single_version(
 
 
 def test_a_list_yields_its_first_entry(
-    capfd: pytest.CaptureFixture[str], repo: Callable[..., Path]
+    capfd: pytest.CaptureFixture[str], repo: Repo
 ) -> None:
     """A second toolchain beside the first: the first is on PATH."""
     config = (
@@ -105,7 +108,7 @@ def test_a_list_yields_its_first_entry(
 
 
 def test_a_list_of_strings_yields_its_first_entry(
-    capfd: pytest.CaptureFixture[str], repo: Callable[..., Path]
+    capfd: pytest.CaptureFixture[str], repo: Repo
 ) -> None:
     """The same rule for the plain-string list form."""
     config = '[tools]\nrust = ["1.96.0", "1.82.0"]\n'
@@ -114,9 +117,7 @@ def test_a_list_of_strings_yields_its_first_entry(
     assert (status, out, err) == (0, "install=rust@1.96.0\n", "")
 
 
-def test_an_inline_table(
-    capfd: pytest.CaptureFixture[str], repo: Callable[..., Path]
-) -> None:
+def test_an_inline_table(capfd: pytest.CaptureFixture[str], repo: Repo) -> None:
     """An inline table yields its `version`."""
     config = '[tools]\nrust = { version = "1.97.1", components = "llvm-tools" }\n'
     status = caller_pins.main(installing("rust"), root=repo(config))
@@ -125,7 +126,7 @@ def test_an_inline_table(
 
 
 def test_the_tools_come_out_in_the_order_named(
-    capfd: pytest.CaptureFixture[str], repo: Callable[..., Path]
+    capfd: pytest.CaptureFixture[str], repo: Repo
 ) -> None:
     """install_args reads in the job's order, not the config's."""
     config = (
@@ -143,7 +144,7 @@ def test_the_tools_come_out_in_the_order_named(
 
 # A tool is found by its name under whichever key pins it.
 def test_a_tool_under_the_cargo_key(
-    capfd: pytest.CaptureFixture[str], repo: Callable[..., Path]
+    capfd: pytest.CaptureFixture[str], repo: Repo
 ) -> None:
     """The compile-from-source form, emitted under its own key."""
     config = '[tools]\nrust = "1.97.1"\n"cargo:cargo-pgrx" = "0.19.3"\n'
@@ -157,7 +158,7 @@ def test_a_tool_under_the_cargo_key(
 
 
 def test_the_same_tool_under_a_github_key(
-    capfd: pytest.CaptureFixture[str], repo: Callable[..., Path]
+    capfd: pytest.CaptureFixture[str], repo: Repo
 ) -> None:
     """The prebuilt form (#1334), read without being told the key."""
     config = '[tools]\n"github:rust-secure-code/cargo-auditable" = "0.7.7"\n'
@@ -171,7 +172,7 @@ def test_the_same_tool_under_a_github_key(
 
 
 def test_a_key_with_options_keeps_them(
-    capfd: pytest.CaptureFixture[str], repo: Callable[..., Path]
+    capfd: pytest.CaptureFixture[str], repo: Repo
 ) -> None:
     """The key is the caller's, brackets and all."""
     config = '[tools]\n"ubi:owner/tool[exe=tool]" = "1.0.0"\n'
@@ -185,7 +186,7 @@ def test_a_key_with_options_keeps_them(
 
 
 def test_the_same_tool_under_two_keys_is_refused(
-    capfd: pytest.CaptureFixture[str], repo: Callable[..., Path]
+    capfd: pytest.CaptureFixture[str], repo: Repo
 ) -> None:
     """Both would install and one would win: refused, by name."""
     config = (
@@ -208,9 +209,7 @@ def test_the_same_tool_under_two_keys_is_refused(
 
 
 # A needed input the config does not pin is refused by name.
-def test_a_missing_pin(
-    capfd: pytest.CaptureFixture[str], repo: Callable[..., Path]
-) -> None:
+def test_a_missing_pin(capfd: pytest.CaptureFixture[str], repo: Repo) -> None:
     """The assertion wording the builds already used, no fallback."""
     status = caller_pins.main(
         installing("rust", "cargo-auditable"), root=repo('[tools]\nrust = "1.97.1"\n')
@@ -229,7 +228,7 @@ def test_a_missing_pin(
 
 
 def test_every_missing_pin_is_named(
-    capfd: pytest.CaptureFixture[str], repo: Callable[..., Path]
+    capfd: pytest.CaptureFixture[str], repo: Repo
 ) -> None:
     """Two missing inputs, two lines: one run names both remedies."""
     code = caller_pins.main(
@@ -255,7 +254,7 @@ def test_every_missing_pin_is_named(
 
 
 def test_an_empty_version_is_missing(
-    capfd: pytest.CaptureFixture[str], repo: Callable[..., Path]
+    capfd: pytest.CaptureFixture[str], repo: Repo
 ) -> None:
     """An empty list or table pins nothing."""
     code = caller_pins.main(installing("rust"), root=repo("[tools]\nrust = []\n"))
@@ -264,9 +263,7 @@ def test_an_empty_version_is_missing(
     assert "::error::caller-pins: rust missing — pin rust" in err
 
 
-def test_no_config(
-    capfd: pytest.CaptureFixture[str], repo: Callable[..., Path]
-) -> None:
+def test_no_config(capfd: pytest.CaptureFixture[str], repo: Repo) -> None:
     """No config at all: refused, naming what it could not read."""
     status = caller_pins.main(installing("rust", "cargo-auditable"), root=repo(None))
     out, err = capfd.readouterr()
@@ -287,7 +284,7 @@ def test_no_config(
     "config", ["tools = 0\n", "tools = [0]\n", 'tools = ["rust"]\n']
 )
 def test_tools_that_is_not_a_table(
-    config: object, capfd: pytest.CaptureFixture[str], repo: Callable[..., Path]
+    config: str, capfd: pytest.CaptureFixture[str], repo: Repo
 ) -> None:
     """`tools = 0` and `tools = [0]` refuse by name (#1556's shrunk examples).
 
@@ -315,7 +312,7 @@ def test_tools_that_is_not_a_table(
 
 @pytest.mark.parametrize("name", [".mise.toml", "mise/config.toml"])
 def test_the_other_config_names_are_read(
-    name: object, capfd: pytest.CaptureFixture[str], repo: Callable[..., Path]
+    name: str, capfd: pytest.CaptureFixture[str], repo: Repo
 ) -> None:
     """`.mise.toml` and `mise/config.toml` are configs too."""
     status = caller_pins.main(
@@ -333,9 +330,7 @@ def test_the_other_config_names_are_read(
 CONFIG = '[tools]\nrust = "1.97.1"\n"go:golang.org/x/vuln/cmd/govulncheck" = "v1.1.4"\n'
 
 
-def test_pinned_is_installed(
-    capfd: pytest.CaptureFixture[str], repo: Callable[..., Path]
-) -> None:
+def test_pinned_is_installed(capfd: pytest.CaptureFixture[str], repo: Repo) -> None:
     """Pinned: emitted under its own key, after the needed tools."""
     status = caller_pins.main(
         installing("--if-pinned", "govulncheck", "rust"), root=repo(CONFIG)
@@ -348,9 +343,7 @@ def test_pinned_is_installed(
     )
 
 
-def test_unpinned_is_skipped(
-    capfd: pytest.CaptureFixture[str], repo: Callable[..., Path]
-) -> None:
+def test_unpinned_is_skipped(capfd: pytest.CaptureFixture[str], repo: Repo) -> None:
     """Not pinned: nothing emitted and nothing refused."""
     status = caller_pins.main(
         installing("--if-pinned", "go", "rust"), root=repo(CONFIG)
@@ -364,7 +357,7 @@ def test_unpinned_is_skipped(
 
 
 def test_the_same_input_unmarked_is_refused(
-    capfd: pytest.CaptureFixture[str], repo: Callable[..., Path]
+    capfd: pytest.CaptureFixture[str], repo: Repo
 ) -> None:
     """Without --if-pinned, the same absent pin is refused by name."""
     status = caller_pins.main(installing("go", "rust"), root=repo(CONFIG))
@@ -382,7 +375,7 @@ def test_the_same_input_unmarked_is_refused(
 
 
 def test_nothing_pinned_emits_an_empty_list(
-    capfd: pytest.CaptureFixture[str], repo: Callable[..., Path]
+    capfd: pytest.CaptureFixture[str], repo: Repo
 ) -> None:
     """The job's own belt keys still stand beside an empty list."""
     status = caller_pins.main(
@@ -397,7 +390,7 @@ def test_nothing_pinned_emits_an_empty_list(
 
 
 def test_two_keys_are_refused_even_when_optional(
-    capfd: pytest.CaptureFixture[str], repo: Callable[..., Path]
+    capfd: pytest.CaptureFixture[str], repo: Repo
 ) -> None:
     """Optional is about presence, not about ambiguity."""
     config = (
@@ -432,7 +425,7 @@ ENV_CONFIG = (
 
 
 def test_each_variable_gets_its_tool_version(
-    capfd: pytest.CaptureFixture[str], repo: Callable[..., Path]
+    capfd: pytest.CaptureFixture[str], repo: Repo
 ) -> None:
     """The pgrx build's three inputs, from either backend key."""
     status = caller_pins.main(
@@ -455,7 +448,7 @@ def test_each_variable_gets_its_tool_version(
 
 
 def test_a_missing_pin_is_refused_with_the_class(
-    capfd: pytest.CaptureFixture[str], repo: Callable[..., Path]
+    capfd: pytest.CaptureFixture[str], repo: Repo
 ) -> None:
     """The same refusal, naming the class the input belongs to."""
     status = caller_pins.main(
@@ -524,7 +517,7 @@ def by_major(spec: str, *tools: str) -> list[str]:
 
 # A tool pinned at several majors yields the majors a job runs (#1408).
 def test_the_legs_major_among_a_list(
-    capfd: pytest.CaptureFixture[str], repo: Callable[..., Path]
+    capfd: pytest.CaptureFixture[str], repo: Repo
 ) -> None:
     """One leg, one Postgres: the entry that begins with its major."""
     status = caller_pins.main(by_major("16", "rust"), root=repo(PG_LIST))
@@ -537,7 +530,7 @@ def test_the_legs_major_among_a_list(
 
 
 def test_a_list_of_majors_yields_each_in_the_order_named(
-    capfd: pytest.CaptureFixture[str], repo: Callable[..., Path]
+    capfd: pytest.CaptureFixture[str], repo: Repo
 ) -> None:
     """The plan's whole list, as the coverage upload asks for it."""
     status = caller_pins.main(by_major("[14,18]"), root=repo(PG_LIST))
@@ -553,7 +546,7 @@ def test_a_list_of_majors_yields_each_in_the_order_named(
 
 
 def test_the_plans_own_list_is_strings(
-    capfd: pytest.CaptureFixture[str], repo: Callable[..., Path]
+    capfd: pytest.CaptureFixture[str], repo: Repo
 ) -> None:
     """The list as `mise/pgrx-plan.sh` prints it: strings, not numbers.
 
@@ -574,7 +567,7 @@ def test_the_plans_own_list_is_strings(
 
 
 def test_the_legs_major_absent_is_refused_by_name(
-    capfd: pytest.CaptureFixture[str], repo: Callable[..., Path]
+    capfd: pytest.CaptureFixture[str], repo: Repo
 ) -> None:
     """A planned major the pin has no entry for: refused, never newest."""
     status = caller_pins.main(by_major("13", "rust"), root=repo(PG_LIST))
@@ -593,7 +586,7 @@ def test_the_legs_major_absent_is_refused_by_name(
 
 
 def test_a_single_valued_pin_at_the_major(
-    capfd: pytest.CaptureFixture[str], repo: Callable[..., Path]
+    capfd: pytest.CaptureFixture[str], repo: Repo
 ) -> None:
     """One Postgres pinned as a plain string serves its own major."""
     config = f'[tools]\n{PG} = "17.11.1"\n'
@@ -607,7 +600,7 @@ def test_a_single_valued_pin_at_the_major(
 
 
 def test_a_single_valued_pin_at_another_major_is_refused(
-    capfd: pytest.CaptureFixture[str], repo: Callable[..., Path]
+    capfd: pytest.CaptureFixture[str], repo: Repo
 ) -> None:
     """...and only its own: the first-entry rule must not stand in."""
     config = f'[tools]\n{PG} = {{ version = "17.11.1" }}\n'
@@ -626,7 +619,7 @@ def test_a_single_valued_pin_at_another_major_is_refused(
 
 
 def test_a_major_pinned_twice_is_refused(
-    capfd: pytest.CaptureFixture[str], repo: Callable[..., Path]
+    capfd: pytest.CaptureFixture[str], repo: Repo
 ) -> None:
     """Two entries at one major: mise installs both, the job takes either."""
     config = f'[tools]\n{PG} = ["18.6.1", "18.5.0", "17.11.1"]\n'
@@ -645,7 +638,7 @@ def test_a_major_pinned_twice_is_refused(
 
 
 def test_a_major_of_an_unpinned_tool_is_missing(
-    capfd: pytest.CaptureFixture[str], repo: Callable[..., Path]
+    capfd: pytest.CaptureFixture[str], repo: Repo
 ) -> None:
     """A major asked of a tool the config does not pin at all."""
     status = caller_pins.main(
@@ -665,7 +658,7 @@ def test_a_major_of_an_unpinned_tool_is_missing(
 
 
 def test_no_major_planned_asks_for_nothing(
-    capfd: pytest.CaptureFixture[str], repo: Callable[..., Path]
+    capfd: pytest.CaptureFixture[str], repo: Repo
 ) -> None:
     """The plan's `[]`: no extension, so no Postgres pin is needed."""
     status = caller_pins.main(
@@ -682,9 +675,7 @@ def test_no_major_planned_asks_for_nothing(
 @pytest.mark.parametrize(
     "spec", ["pg18", '[18, "pg17"]', "[18.5]", '["-18"]', "true", ""]
 )
-def test_a_malformed_major_is_a_usage_error(
-    spec: str, repo: Callable[..., Path]
-) -> None:
+def test_a_malformed_major_is_a_usage_error(spec: str, repo: Repo) -> None:
     """Not a whole number or a list of them: refused before reading."""
     root = repo(PG_LIST)
     with pytest.raises(SystemExit) as exit_:

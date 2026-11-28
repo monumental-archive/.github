@@ -19,7 +19,7 @@ import re
 import subprocess
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 import pytest
 
@@ -86,8 +86,16 @@ SH_IS_32 = bash_version(SH).startswith("3.2")
 SH_IS_DASH = SH.is_file() and Path(SH).resolve().name == "dash"
 
 
+class Plant(Protocol):
+    """What the `plant` fixture hands a row."""
+
+    def __call__(self, *named: tuple[str, str]) -> list[str]:
+        """Run plant."""
+        ...
+
+
 @fixture
-def plant(tmp_path: Path) -> Callable[..., list[str]]:
+def plant(tmp_path: Path) -> Plant:
     """Plant named files for the lint, the way the task lists them.
 
     Returns:
@@ -157,7 +165,7 @@ SHEBANGS = [
 
 # The rule over planted scripts and task bodies.
 def test_unguarded_trap_reds_both_ways(
-    capfd: pytest.CaptureFixture[str], plant: Callable[..., list[str]]
+    capfd: pytest.CaptureFixture[str], plant: Plant
 ) -> None:
     """A bare trap owes the guard, and the mark it reads."""
     paths = plant(("a.sh", script("tmp=$(mktemp)", BARE, "echo ok")))
@@ -169,7 +177,7 @@ def test_unguarded_trap_reds_both_ways(
 
 
 def test_guarded_without_the_mark_reds(
-    capfd: pytest.CaptureFixture[str], plant: Callable[..., list[str]]
+    capfd: pytest.CaptureFixture[str], plant: Plant
 ) -> None:
     """The guard alone turns every clean run into a failure."""
     paths = plant((
@@ -183,9 +191,7 @@ def test_guarded_without_the_mark_reds(
     assert lines == want
 
 
-def test_mark_not_last_reds(
-    capfd: pytest.CaptureFixture[str], plant: Callable[..., list[str]]
-) -> None:
+def test_mark_not_last_reds(capfd: pytest.CaptureFixture[str], plant: Plant) -> None:
     """A mark followed by more script is not the last statement."""
     paths = plant(("a.sh", script(GUARDED, "org_done=1", 'exit "${status}"')))
     status = et.main(paths)
@@ -196,7 +202,7 @@ def test_mark_not_last_reds(
 
 
 def test_guard_on_a_combined_signal_list_reds(
-    capfd: pytest.CaptureFixture[str], plant: Callable[..., list[str]]
+    capfd: pytest.CaptureFixture[str], plant: Plant
 ) -> None:
     """The shape is EXIT alone; `EXIT INT` is a different trap."""
     paths = plant((
@@ -211,7 +217,7 @@ def test_guard_on_a_combined_signal_list_reds(
 
 
 def test_guarded_and_marked_is_clean(
-    capfd: pytest.CaptureFixture[str], plant: Callable[..., list[str]]
+    capfd: pytest.CaptureFixture[str], plant: Plant
 ) -> None:
     """The two lines, with comments and blanks after the mark."""
     paths = plant((
@@ -232,7 +238,7 @@ def test_guarded_and_marked_is_clean(
 
 
 def test_each_form_under_each_shebang(
-    capfd: pytest.CaptureFixture[str], plant: Callable[..., list[str]]
+    capfd: pytest.CaptureFixture[str], plant: Plant
 ) -> None:
     """POSIX is clean anywhere; `[[ ]]` only under a bash shebang."""
     for shebang, is_bash in SHEBANGS:
@@ -261,7 +267,7 @@ def test_each_form_under_each_shebang(
 
 
 def test_bare_trap_under_sh_reds_as_unguarded(
-    capfd: pytest.CaptureFixture[str], plant: Callable[..., list[str]]
+    capfd: pytest.CaptureFixture[str], plant: Plant
 ) -> None:
     """Under `#!/bin/sh` a bare trap owes the guard as anywhere."""
     paths = plant(("a.sh", script(BARE, "org_done=1", shebang="#!/bin/sh")))
@@ -273,7 +279,7 @@ def test_bare_trap_under_sh_reds_as_unguarded(
 
 
 def test_task_body_takes_either_form(
-    capfd: pytest.CaptureFixture[str], plant: Callable[..., list[str]]
+    capfd: pytest.CaptureFixture[str], plant: Plant
 ) -> None:
     """A task body runs under the belt's bash: both forms are clean."""
     config = (
@@ -292,7 +298,7 @@ def test_task_body_takes_either_form(
 
 
 def test_no_trap_and_reset_owe_nothing(
-    capfd: pytest.CaptureFixture[str], plant: Callable[..., list[str]]
+    capfd: pytest.CaptureFixture[str], plant: Plant
 ) -> None:
     """No EXIT trap, a comment naming one, and `trap - EXIT`."""
     paths = plant(
@@ -305,7 +311,7 @@ def test_no_trap_and_reset_owe_nothing(
 
 
 def test_task_body_points_at_the_config_line(
-    capfd: pytest.CaptureFixture[str], plant: Callable[..., list[str]]
+    capfd: pytest.CaptureFixture[str], plant: Plant
 ) -> None:
     """Each body is its own script; findings carry the file line."""
     config = (
@@ -333,7 +339,7 @@ def test_task_body_points_at_the_config_line(
 
 
 def test_one_line_body_is_its_run_line(
-    capfd: pytest.CaptureFixture[str], plant: Callable[..., list[str]]
+    capfd: pytest.CaptureFixture[str], plant: Plant
 ) -> None:
     """A `run = "…"` body starts on the `run =` line itself."""
     paths = plant(("mise.toml", "[tasks.a]\nrun = \"trap 'rm -f x' EXIT\"\n"))
@@ -398,14 +404,14 @@ def test_guard_fails_the_unfinished_run() -> None:
 
 @pytest.mark.usefixtures("_set_up_test_pattern")
 @pytest.mark.parametrize("guard", [GUARDED, BASH_GUARDED])
-def test_guard_passes_the_finished_run(guard: object) -> None:
+def test_guard_passes_the_finished_run(guard: str) -> None:
     """A run that reaches the mark exits 0."""
     assert run_bash(guard, "echo ok", "org_done=1") == 0
 
 
 @pytest.mark.usefixtures("_set_up_test_pattern")
 @pytest.mark.parametrize("guard", [GUARDED, BASH_GUARDED])
-def test_guard_keeps_an_explicit_code(guard: object) -> None:
+def test_guard_keeps_an_explicit_code(guard: str) -> None:
     """A non-zero exit, explicit or from errexit, keeps its code."""
     assert run_bash(guard, f"exit {EXPLICIT}", "org_done=1") == EXPLICIT
     assert run_bash(guard, "false", "org_done=1") == 1
@@ -413,7 +419,7 @@ def test_guard_keeps_an_explicit_code(guard: object) -> None:
 
 @pytest.mark.usefixtures("_set_up_test_pattern")
 @pytest.mark.parametrize("guard", [GUARDED, BASH_GUARDED])
-def test_early_exit_zero_needs_the_mark(guard: object) -> None:
+def test_early_exit_zero_needs_the_mark(guard: str) -> None:
     """`exit 0` reads as a death unless the mark is set first."""
     assert run_bash(guard, "exit 0", "org_done=1") == 1
     assert run_bash(guard, "org_done=1", "exit 0", "org_done=1") == 0
@@ -468,7 +474,7 @@ def run_sh(shell: str, body: str) -> int:
 
 # The printed guard under the shells a `#!/bin/sh` script meets.
 @pytest.mark.parametrize(("body", "as_32", "as_dash"), POSIX_ROWS)
-def test_under_bin_sh(body: object, as_32: object, as_dash: object) -> None:
+def test_under_bin_sh(body: str, as_32: int, as_dash: int) -> None:
     """`/bin/sh` gives the row for the shell it is."""
     if not (SH_IS_32 or SH_IS_DASH):
         pytest.skip("/bin/sh is neither bash 3.2 nor dash")
@@ -477,7 +483,7 @@ def test_under_bin_sh(body: object, as_32: object, as_dash: object) -> None:
 
 
 @pytest.mark.parametrize(("body", "_", "as_dash"), POSIX_ROWS)
-def test_under_dash(body: object, _: object, as_dash: object) -> None:
+def test_under_dash(body: str, _: int, as_dash: int) -> None:
     """Under dash the guard runs: a clean run exits 0, no `[[: not found`."""
     if not DASH:
         pytest.skip("dash is not installed")

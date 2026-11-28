@@ -24,7 +24,7 @@ from pathlib import Path
 
 import pytest
 
-from belt import decoded, workflow_yaml
+from belt import decoded, typed_std, workflow_yaml
 from belt import rust_properties as rp
 from tests import support
 
@@ -203,7 +203,7 @@ def test_a_pre_release_of_1_7_is_red(env: support.Env) -> None:
 
 
 @pytest.mark.parametrize("version", ["1.7.0", "1.12.0"])
-def test_1_7_and_1_12_are_green(version: object, env: support.Env) -> None:
+def test_1_7_and_1_12_are_green(version: str, env: support.Env) -> None:
     """The first release that reads the seed, and what edtf locks."""
     got = run(LINT, {"Cargo.lock": lock(("proptest", version))}, make_env=env)
     assert got.returncode == 0, got.stderr
@@ -228,7 +228,7 @@ def test_one_old_lock_among_good_ones_is_red(env: support.Env) -> None:
 
 
 @pytest.mark.parametrize("name", ["vendor/x/Cargo.lock", "crates/vendor/y/Cargo.lock"])
-def test_a_vendored_lock_is_not_read(name: object, env: support.Env) -> None:
+def test_a_vendored_lock_is_not_read(name: str, env: support.Env) -> None:
     """vendor/ is not the repository's, at the root or nested."""
     got = run(LINT, {name: lock(("proptest", "1.6.0"))}, make_env=env)
     assert got.returncode == 0, got.stderr
@@ -271,10 +271,10 @@ def test_an_unset_seed_is_drawn_printed_and_handed_on(env: support.Env) -> None:
     found = SEED_LINE.search(got.stdout)
     if found is None:
         pytest.fail(f"no seed line: {got.stdout}")
-    assert found.group(1) == found.group(2)
-    assert got.stdout.startswith(found.group(0)), got.stdout
-    assert found.group(1) == got.seed
-    assert int(found.group(1)) < 1 << 64
+    assert typed_std.group(found, 1) == typed_std.group(found, 2)
+    assert got.stdout.startswith(typed_std.group(found) or ""), got.stdout
+    assert typed_std.group(found, 1) == got.seed
+    assert int(typed_std.group(found, 1) or "") < 1 << 64
     assert got.calls[-1] == "run test"
     assert got.cases == "unset"
 
@@ -298,7 +298,7 @@ def test_a_given_seed_is_the_one_handed_on(env: support.Env) -> None:
 
 @pytest.mark.parametrize("given", ["notanumber", "-1", str(1 << 64)])
 def test_a_seed_proptest_would_not_read_is_a_usage_error(
-    given: object, env: support.Env
+    given: str, env: support.Env
 ) -> None:
     """Proptest ignores a non-number without a word (measured)."""
     got = run(AUDIT, LOCKED, {"ORG_PROPERTY_SEED": given}, make_env=env)
@@ -310,9 +310,7 @@ def test_a_seed_proptest_would_not_read_is_a_usage_error(
 
 
 @pytest.mark.parametrize("status", ["0", "1", "101"])
-def test_the_test_task_status_is_the_task_status(
-    status: object, env: support.Env
-) -> None:
+def test_the_test_task_status_is_the_task_status(status: str, env: support.Env) -> None:
     """A failing test task fails the audit and says where it lands."""
     got = run(AUDIT, LOCKED, {"STUB_EXIT": status}, make_env=env)
     assert int(status) == got.returncode, got.stderr

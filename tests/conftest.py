@@ -78,7 +78,8 @@ def _teardown(item: pytest.Item) -> None:
 
     """
     os.environ.clear()
-    os.environ.update(item.stash[ENVIRON])
+    saved: dict[str, str] = item.stash[ENVIRON]
+    os.environ.update(saved)
     start = item.stash[DIRECTORY]
     try:
         now = str(Path.cwd())

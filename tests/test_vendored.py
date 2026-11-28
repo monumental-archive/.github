@@ -253,7 +253,7 @@ def test_a_branch_reds(env: support.Env) -> None:
 
 
 @pytest.mark.parametrize("key", ["repo", "commit", "upstream_path"])
-def test_a_missing_key_reds(key: object, env: support.Env) -> None:
+def test_a_missing_key_reds(key: str, env: support.Env) -> None:
     """repo, commit and upstream_path are each required."""
     result = run_tree(skill_tree({MANIFEST: manifest(PINNED, drop=key)}), env=env)
     assert_red(

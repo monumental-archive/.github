@@ -288,8 +288,9 @@ def test_manifest_that_is_not_json(
 
 @pytest.mark.parametrize("entries", [True, {"": None}, "abc"])
 def test_manifest_whose_entries_are_not_a_list(
+    *,
     read_the_latest_release: ReadTheLatestRelease,
-    entries: object,
+    entries: bool | dict[str, None] | str,
     capfd: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

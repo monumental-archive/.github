@@ -18,7 +18,7 @@ the ordinary suite (`mise run test`) never imports this file.
 
 import hashlib
 import tempfile
-from typing import TYPE_CHECKING
+from typing import Protocol
 
 import pytest
 from hypothesis import example
@@ -26,9 +26,6 @@ from hypothesis import strategies as st
 
 from belt.release import package_crates as crates
 from belt.typed_hypothesis import given
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
 
 MEMBER = st.from_regex(r"[a-z][a-z0-9_-]{0,8}", fullmatch=True)
 # Each member's version, the verified run's crates, the unverified
@@ -87,7 +84,15 @@ def workspaces(draws: st.DataObject) -> Workspace:
     return versions, first, second, moved
 
 
-def fake_cargo(drawn: Workspace) -> Callable[..., None]:
+class FakeCargo(Protocol):
+    """What the `fake_cargo` fixture hands a row."""
+
+    def __call__(self, *_: str) -> None:
+        """Run fake_cargo."""
+        ...
+
+
+def fake_cargo(drawn: Workspace) -> FakeCargo:
     """Stand a `cargo package` in: each run writes the next drawn crates.
 
     Returns:

@@ -47,7 +47,7 @@ REFUSED = "ignored for security reasons"
     "body", [pytest.param(body, id=what) for what, body in BODIES.items()]
 )
 def test_the_declared_shell_stops_at_the_first_failure(
-    body: object, env: support.Env
+    body: str, env: support.Env
 ) -> None:
     """No body reaches its last line, and each run is red."""
     done = subprocess.run(

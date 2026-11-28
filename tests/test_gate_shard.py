@@ -432,7 +432,7 @@ def test_a_count_of_zero(planted_state: Planted) -> None:
     ("value", "shown"), [("2.5", "2.5"), ('"4"', "'4'"), ("true", "True")]
 )
 def test_a_count_that_is_not_an_integer(
-    planted_state: Planted, value: object, shown: object
+    planted_state: Planted, value: str, shown: str
 ) -> None:
     """2.5, "4" and true are not whole numbers of shards: each red, by name."""
     got = planted_state.red(THREE, f'[test]\n"test:py" = {value}\n')
@@ -515,7 +515,7 @@ def test_the_matrix_stays_under_githubs_limit(planted_state: Planted) -> None:
         ('"${ORG_BELT_DIR}/measured" cargo test', None),
     ],
 )
-def test_each_runner(line: object, want: object) -> None:
+def test_each_runner(line: str, want: str | None) -> None:
     """Each adapter, read off the line that runs it."""
     assert want == gate_shard.adapter({"run": line})
 

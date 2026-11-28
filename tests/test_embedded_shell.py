@@ -523,7 +523,7 @@ def test_a_clean_folded_block_passes_and_shfmt_does_not_read_it(
 @pytest.mark.parametrize(
     "header", ["|+", "|2", "|2-", "| # zizmor: ignore[github-env]"]
 )
-def test_literal_headers_get_both_passes(folded_state: Folded, header: object) -> None:
+def test_literal_headers_get_both_passes(folded_state: Folded, header: str) -> None:
     """`|+`, an indicator and a commented header get shfmt and shellcheck."""
     path, found = folded_state.check(action(header, "if true;then echo ${X};fi"))
     assert f"{path}:8: run: block is not shfmt-formatted" in found
@@ -1167,7 +1167,7 @@ def task_state(tmp_path: Path, env: support.Env) -> Task:
     ],
 )
 def test_no_workflows_skips_clean(
-    task_state: Task, name: object, message: object, env: support.Env
+    task_state: Task, name: str, message: str, env: support.Env
 ) -> None:
     """A tree tracking no workflow skips both tasks by name."""
     root = task_state.repo()
@@ -1621,7 +1621,7 @@ def test_tracked_long_body_is_red_then_generated(
     ],
 )
 def test_no_mise_config_skips_clean(
-    task_shell_task: TaskShellTask, name: object, message: object, env: support.Env
+    task_shell_task: TaskShellTask, name: str, message: str, env: support.Env
 ) -> None:
     """A tree tracking no mise config skips both tasks by name."""
     root = task_shell_task.repo()

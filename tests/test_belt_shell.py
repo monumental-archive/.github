@@ -190,7 +190,7 @@ def test_env_array_names_every_table() -> None:
         '[tasks.t]\nenv = 1\nrun = "x"\n',
     ],
 )
-def test_wrong_shaped_tables_read_as_nothing(text: object) -> None:
+def test_wrong_shaped_tables_read_as_nothing(text: str) -> None:
     """A non-table env, tasks or task_config sets nothing, no traceback."""
     with TemporaryDirectory() as tmp:
         config = bs.read(write(tmp, text))

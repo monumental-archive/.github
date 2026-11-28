@@ -160,7 +160,7 @@ def test_the_newest_of_two_is_chosen() -> None:
         ]
     ],
 )
-def test_refusals_say_why(given: object, said: object) -> None:
+def test_refusals_say_why(given: object, said: str) -> None:
     """No artifact, an expired one, another commit's, a strange listing."""
     with pytest.raises(figures.RefusedError) as raised:
         figures.choose(given, SHA)
@@ -169,7 +169,7 @@ def test_refusals_say_why(given: object, said: object) -> None:
 
 # The run that kept the artifact judged the tree that lands.
 @pytest.mark.parametrize("event", ["merge_group", "push"])
-def test_a_green_merge_group_or_push_run_is_named(event: object) -> None:
+def test_a_green_merge_group_or_push_run_is_named(event: str) -> None:
     """Its address is what the step's log names."""
     assert (
         figures.judge(run_record(SHA, event=event), SHA)
@@ -197,7 +197,9 @@ def test_a_green_merge_group_or_push_run_is_named(event: object) -> None:
         ]
     ],
 )
-def test_judge_refusals_say_why(given: object, said: object) -> None:
+def test_judge_refusals_say_why(
+    given: dict[str, str | int] | dict[str, str | int | None], said: str
+) -> None:
     """Another commit, a pull request's run, a run not green."""
     with pytest.raises(figures.RefusedError) as raised:
         figures.judge(given, SHA)
@@ -242,7 +244,7 @@ def test_a_leg_not_held_is_a_leg_line() -> None:
         ]
     ],
 )
-def test_figures_refusals_say_why(data: object, said: object) -> None:
+def test_figures_refusals_say_why(data: bytes, said: str) -> None:
     """Empty, a stray line, no file in the zip, not a zip."""
     with pytest.raises(figures.RefusedError) as raised:
         figures.figures(figures.unpack(data))
@@ -282,7 +284,7 @@ def test_choose_reads_the_legs_name_only() -> None:
         ),
     ],
 )
-def test_exactly_the_leg(text: object, said: object) -> None:
+def test_exactly_the_leg(text: str, said: str) -> None:
     """Its line alone; another major's, or a second line, is refused."""
     assert figures.figures("pgrx-pg17 96.5\n", "pgrx-pg17") == "pgrx-pg17 96.5\n"
     with pytest.raises(figures.RefusedError) as raised:
@@ -513,20 +515,20 @@ class Derive:
         # The canon whole, as the release job has it: a helper that comes
         # to import another belt module finds it, and only the
         # measurement is a stub.
-        canon = self.plant_canon(
+        canon_dir = self.plant_canon(
             self.base / "canon", stubs={"mise/coverage-measure.sh": MEASURE}
         )
-        (canon / "mise" / "coverage-measure.sh").chmod(0o755)
+        (canon_dir / "mise" / "coverage-measure.sh").chmod(0o755)
         self.stubs = self.base / "stubs"
         self.stubs.mkdir()
         for path, text in ((self.stubs / "gh", GH), (self.stubs / "mise", MISE)):
             path.write_text(text, encoding="utf-8")
             path.chmod(0o755)
-        self.script = canon / "release" / "derive-coverage-floor.sh"
+        self.script = canon_dir / "release" / "derive-coverage-floor.sh"
         self.tree = self.base / "tree"
         self.tree.mkdir()
         (self.tree / "a.py").write_text("", encoding="utf-8")
-        env = self.make_env(self.base / "home")
+        environ = self.make_env(self.base / "home")
         monkeypatch.setattr(sys, "stdin", io.StringIO(LEGS))
         assert not coverage_floor.main([
             *("--path", str(self.tree / ".coverage-floor")),
@@ -538,11 +540,11 @@ class Derive:
             [GIT, "add", "-A"],
             [GIT, "commit", "-qm", "plant"],
         ):
-            subprocess.run(argv, cwd=self.tree, env=env, check=True)
+            subprocess.run(argv, cwd=self.tree, env=environ, check=True)
         self.sha = subprocess.run(
             [GIT, "rev-parse", "HEAD"],
             cwd=self.tree,
-            env=env,
+            env=environ,
             check=True,
             capture_output=True,
             text=True,

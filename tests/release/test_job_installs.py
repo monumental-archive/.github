@@ -42,7 +42,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from belt import decoded, python_runs, workflow_yaml
+from belt import decoded, python_runs, typed_std, workflow_yaml
 from belt.python_runs import python_code
 from belt.release import caller_pins
 from tests import support
@@ -931,7 +931,7 @@ def test_every_job_names_its_list() -> None:
 
 
 @pytest.mark.parametrize(("workflow", "job_id"), WHOLE_CONFIG)
-def test_the_exemption_is_still_true(workflow: object, job_id: object) -> None:
+def test_the_exemption_is_still_true(workflow: str, job_id: str) -> None:
     """The exempt job really installs the whole config, and is in scope."""
     assert (workflow, job_id) in IN_SCOPE
     (step,) = mise_steps(load(workflow)[job_id])
@@ -985,7 +985,7 @@ def test_every_belt_key_is_a_belt_key() -> None:
     ("workflow", "job_id"), [j for j in IN_SCOPE if j not in WHOLE_CONFIG]
 )
 def test_every_job_installs_what_it_calls(
-    workflow: object, job_id: object, env: support.Env
+    workflow: str, job_id: str, env: support.Env
 ) -> None:
     """The real jobs against their real steps and scripts."""
     assert strings() == uninstalled(workflow, job_id, load(workflow)[job_id], env=env)
@@ -1053,14 +1053,14 @@ def test_a_tool_named_only_in_a_comment_is_not_a_call(env: support.Env) -> None:
 # The gate's pgrx legs install what they call (#1408).
 @pytest.mark.parametrize(("workflow", "job_id"), GATE_LISTS)
 def test_every_gate_list_installs_what_it_calls(
-    workflow: object, job_id: object, env: support.Env
+    workflow: str, job_id: str, env: support.Env
 ) -> None:
     """The real jobs against pgrx-test.sh and pgrx-env.sh."""
     assert strings() == uninstalled(workflow, job_id, load(workflow)[job_id], env=env)
 
 
 @pytest.mark.parametrize(("workflow", "job_id"), GATE_LISTS)
-def test_no_gate_list_is_undone_by_mise_run(workflow: object, job_id: object) -> None:
+def test_no_gate_list_is_undone_by_mise_run(workflow: str, job_id: str) -> None:
     """Each listed job that runs a task keeps `mise run` to the list."""
     assert strings() == auto_installs(workflow, job_id, load(workflow)[job_id])
 
@@ -1223,7 +1223,7 @@ def test_the_release_job_reads_with_a_token_that_can() -> None:
         WORKFLOWS / "self-release.yml",
     ],
 )
-def test_every_caller_grants_the_read(path: object) -> None:
+def test_every_caller_grants_the_read(path: Path) -> None:
     """The template and the canon's own caller grant `actions: read`."""
     assert re.search(r"\n {6}actions: read\b", path.read_text("utf-8"))
 
@@ -1349,7 +1349,7 @@ def task_auto_install(workflow: str, job_id: str, job: Job) -> list[str]:
 # A named list stays the whole install when a task runs (#1412).
 @pytest.mark.parametrize(("workflow", "job_id"), IN_SCOPE)
 def test_every_named_list_job_turns_task_auto_install_off(
-    workflow: object, job_id: object
+    workflow: str, job_id: str
 ) -> None:
     """Every job in scope that installs a list, the exempt one aside."""
     job = load(workflow)[job_id]
@@ -1441,7 +1441,7 @@ def test_a_function_or_variable_name_is_not_a_call(
 
 @pytest.mark.parametrize("line", ["import ruff.api", "from ruff import api"])
 def test_an_imported_tool_module_is_a_call(
-    line: object,
+    line: str,
     canon: support.Canon,
     env: support.Env,
     monkeypatch: pytest.MonkeyPatch,
@@ -1595,7 +1595,7 @@ def test_a_colon_command_message_is_not_a_call(
 
 @pytest.mark.parametrize("op", [":?", "?"])
 def test_a_sourced_path_message_is_not_a_call(
-    op: object, canon: support.Canon, env: support.Env, monkeypatch: pytest.MonkeyPatch
+    op: str, canon: support.Canon, env: support.Env, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """`. "${V:?…}/f.sh"`, the audit-badges.sh shape; `?` alone too."""
     helper = f'. "${{V{op}run: lefthook run post-checkout}}/f.sh"\n'
@@ -1606,7 +1606,7 @@ def test_a_sourced_path_message_is_not_a_call(
 
 @pytest.mark.parametrize("sub", ["$(lefthook version)", "`lefthook version`"])
 def test_a_substitution_in_a_message_is_a_call(
-    sub: object, canon: support.Canon, env: support.Env, monkeypatch: pytest.MonkeyPatch
+    sub: str, canon: support.Canon, env: support.Env, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """`${V:?$(lefthook …)}`: the shell runs it, so it stays code."""
     helper = f': "${{V:?{sub}}}"\n'
@@ -1630,7 +1630,7 @@ def test_a_substitution_in_a_message_is_a_call(
     ],
 )
 def test_a_call_beside_prose_is_named(
-    helper: object,
+    helper: str,
     canon: support.Canon,
     env: support.Env,
     monkeypatch: pytest.MonkeyPatch,
@@ -1650,7 +1650,7 @@ def test_a_call_beside_prose_is_named(
     ],
 )
 def test_a_remedy_line_names_nothing(
-    helper: object,
+    helper: str,
     canon: support.Canon,
     env: support.Env,
     monkeypatch: pytest.MonkeyPatch,
@@ -1664,9 +1664,7 @@ def test_a_remedy_line_names_nothing(
 @pytest.mark.parametrize(
     "rel", ["mise/roster-reconcile.sh", "release/inventory-digests.sh"]
 )
-def test_the_jq_calls_on_assignment_lines_are_read(
-    rel: object, env: support.Env
-) -> None:
+def test_the_jq_calls_on_assignment_lines_are_read(rel: str, env: support.Env) -> None:
     """The two `jq` calls the line regex dropped are seen."""
     text = (CANON / rel).read_text("utf-8")
     assert word("jq", code(text, env=env)), rel
@@ -1756,7 +1754,7 @@ def test_a_string_command_is_a_call(
 
 @pytest.mark.parametrize("binding", ['"ruff"', 'shutil.which("ruff") or "ruff"'])
 def test_a_module_constant_argv_is_a_call(
-    binding: object,
+    binding: str,
     canon: support.Canon,
     env: support.Env,
     monkeypatch: pytest.MonkeyPatch,
@@ -1799,7 +1797,7 @@ def test_a_name_in_a_message_is_not_a_call(
     ],
 )
 def test_a_tool_headed_list_is_a_call_wherever_it_stands(
-    helper: object,
+    helper: str,
     canon: support.Canon,
     env: support.Env,
     monkeypatch: pytest.MonkeyPatch,
@@ -1861,7 +1859,7 @@ def test_a_planted_reader_is_named() -> None:
         CANON / "release" / "generate-pgrx-upgrade.sh",
     ],
 )
-def test_the_pgrx_build_calls_the_reader(path: object) -> None:
+def test_the_pgrx_build_calls_the_reader(path: Path) -> None:
     """Both pgrx readers moved onto the helper, not merely deleted."""
     assert "caller-pins" in support.launched(path.read_text("utf-8"))
 
@@ -1937,7 +1935,7 @@ def line_starts(line: str, tracked: set[str]) -> list[tuple[str, str]]:
     """
     found: list[tuple[str, str]] = []
     for launch in LAUNCH.finditer(line):
-        command = launch.group(1)
+        command = typed_std.group(launch, 1) or ""
         if f"{command.replace('-', '_')}.py" not in tracked:
             continue
         how = started_how(line[: launch.start()].lstrip("'"))

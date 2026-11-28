@@ -319,7 +319,7 @@ def test_a_file_outside_the_workflows_schedules_nothing(
 @pytest.mark.parametrize("canon", ["", "/", "owner/", "/repo"])
 def test_own_tasks_need_a_canon(
     helper_state: Helper,
-    canon: object,
+    canon: str,
     capfd: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

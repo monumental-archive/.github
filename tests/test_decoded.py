@@ -159,7 +159,7 @@ def test_a_duplicate_key_is_refused() -> None:
 
 
 @pytest.mark.parametrize("name", ["NaN", "Infinity", "-Infinity"])
-def test_nan_and_the_infinities_are_refused(name: object) -> None:
+def test_nan_and_the_infinities_are_refused(name: str) -> None:
     """JSON has no NaN, Infinity or -Infinity."""
     assert f"{name} is not a JSON number" == refused(f"[{name}]")
 

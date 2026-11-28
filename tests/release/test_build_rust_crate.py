@@ -58,7 +58,7 @@ import os
 import subprocess
 import sys
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 import pytest
 
@@ -68,7 +68,6 @@ from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
     from pathlib import Path
 
 CANON = support.CANON
@@ -280,13 +279,28 @@ class Packaging:
         )
 
 
+class Package(Protocol):
+    """What the `package` fixture hands a row."""
+
+    def __call__(
+        self,
+        excludes: str,
+        second: dict[str, bytes] | None = ...,
+        members: tuple[str, ...] = ...,
+        publish: dict[str, list[str]] | None = ...,
+        unwritten: tuple[str, ...] = ...,
+    ) -> Packaging:
+        """Run package."""
+        ...
+
+
 @fixture
 def package(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     canon: support.Canon,
     env: support.Env,
-) -> Callable[..., Packaging]:
+) -> Package:
     """Lay out a workspace for the job, the arguments `Job`'s fields.
 
     Returns:
@@ -386,7 +400,7 @@ def test_the_shipped_step_calls_the_helper() -> None:
 
 # One row per branch of the Package step (#1273).
 def test_an_excluded_member_is_packaged_hashed_and_planned(
-    capfd: pytest.CaptureFixture[str], package: Callable[..., Packaging]
+    capfd: pytest.CaptureFixture[str], package: Package
 ) -> None:
     """Ship the extension edtf excludes, uncompiled."""
     packaging = package(EXCLUDE)
@@ -414,7 +428,7 @@ def test_an_excluded_member_is_packaged_hashed_and_planned(
 
 
 def test_a_crate_rewritten_differently_fails_naming_both(
-    capfd: pytest.CaptureFixture[str], package: Callable[..., Packaging]
+    capfd: pytest.CaptureFixture[str], package: Package
 ) -> None:
     """The verified bytes must be the bytes hashed and published."""
     planted = b"not the bytes that were verified\n"
@@ -432,7 +446,7 @@ def test_a_crate_rewritten_differently_fails_naming_both(
 
 
 def test_a_changed_excluded_crate_alone_is_not_a_mismatch(
-    capfd: pytest.CaptureFixture[str], package: Callable[..., Packaging]
+    capfd: pytest.CaptureFixture[str], package: Package
 ) -> None:
     """Only crates the verified run wrote are compared."""
     packaging = package(EXCLUDE, second={UNCOMPILABLE: b"first written here\n"})
@@ -443,7 +457,7 @@ def test_a_changed_excluded_crate_alone_is_not_a_mismatch(
 
 
 def test_a_verified_run_that_wrote_nothing_is_refused(
-    capfd: pytest.CaptureFixture[str], package: Callable[..., Packaging]
+    capfd: pytest.CaptureFixture[str], package: Package
 ) -> None:
     """Every member excluded leaves nothing to compare (#1384)."""
     flags = "".join(f" --exclude {m}" for m in MEMBERS)
@@ -461,7 +475,7 @@ def test_a_verified_run_that_wrote_nothing_is_refused(
 
 
 def test_a_failing_cargo_fails_the_step_with_its_status(
-    capfd: pytest.CaptureFixture[str], package: Callable[..., Packaging]
+    capfd: pytest.CaptureFixture[str], package: Package
 ) -> None:
     """The uncompilable member, not excluded: cargo's 101 is the step's."""
     packaging = package("")
@@ -475,7 +489,7 @@ def test_a_failing_cargo_fails_the_step_with_its_status(
 
 # A workspace the job compiles entirely packages once.
 def test_one_verified_run_and_every_crate_hashed(
-    capfd: pytest.CaptureFixture[str], package: Callable[..., Packaging]
+    capfd: pytest.CaptureFixture[str], package: Package
 ) -> None:
     """No --no-verify run when nothing is excluded."""
     compiles = ("edtf-core", "edtf-cli")
@@ -493,7 +507,7 @@ def test_one_verified_run_and_every_crate_hashed(
 
 
 def test_a_blank_exclusion_is_no_exclusion(
-    capfd: pytest.CaptureFixture[str], package: Callable[..., Packaging]
+    capfd: pytest.CaptureFixture[str], package: Package
 ) -> None:
     """Whitespace-only flags take the one-run branch too."""
     packaging = package("  ", members=("edtf-core",))
@@ -505,7 +519,7 @@ def test_a_blank_exclusion_is_no_exclusion(
 
 # The Package step keeps exactly the helper's set (#1310).
 def test_a_publish_false_member_leaves_every_subject_list(
-    capfd: pytest.CaptureFixture[str], package: Callable[..., Packaging]
+    capfd: pytest.CaptureFixture[str], package: Package
 ) -> None:
     """Packaged and verified, then removed before anything hashes it."""
     packaging = package(
@@ -538,7 +552,7 @@ def test_a_publish_false_member_leaves_every_subject_list(
 
 
 def test_another_registry_only_is_not_a_subject(
-    capfd: pytest.CaptureFixture[str], package: Callable[..., Packaging]
+    capfd: pytest.CaptureFixture[str], package: Package
 ) -> None:
     """A member publishing elsewhere is not crates.io's to serve."""
     packaging = package(
@@ -559,7 +573,7 @@ def test_another_registry_only_is_not_a_subject(
 
 
 def test_an_excluded_publish_false_member_is_removed_too(
-    capfd: pytest.CaptureFixture[str], package: Callable[..., Packaging]
+    capfd: pytest.CaptureFixture[str], package: Package
 ) -> None:
     """Packaged by the --no-verify run, then cut like any other."""
     packaging = package(EXCLUDE, publish={UNCOMPILABLE: []})
@@ -575,7 +589,7 @@ def test_an_excluded_publish_false_member_is_removed_too(
 
 
 def test_a_named_crate_cargo_did_not_write_fails_by_name(
-    capfd: pytest.CaptureFixture[str], package: Callable[..., Packaging]
+    capfd: pytest.CaptureFixture[str], package: Package
 ) -> None:
     """Nothing the publisher will upload goes unhashed."""
     packaging = package("", members=("edtf-core", "edtf-cli"), unwritten=("edtf-cli",))

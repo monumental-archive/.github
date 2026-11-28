@@ -1084,7 +1084,7 @@ def test_an_exact_pin_or_a_template_without_it_reads_no_lock() -> None:
         "to {{#if isLockfileUpdate}}{{#if x}}y{{/if}}{{else}}{{newValue}}{{/if}}",
     ],
 )
-def test_an_unrecognised_helper_is_still_unmodelled(extra: object) -> None:
+def test_an_unrecognised_helper_is_still_unmodelled(extra: str) -> None:
     """Only the one conditional is rendered; any other block is reported."""
     config = template(commitMessageExtra=extra)
     for lockfile in (False, True):

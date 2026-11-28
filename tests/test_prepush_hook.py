@@ -102,14 +102,14 @@ class PrePushGate:
         (stubs / "mise").write_text(STUB_MISE, encoding="utf-8")
         (stubs / "mise").chmod(0o755)
 
-        env = self.make_env()
+        environ = self.make_env()
         tools = [
             str(stubs),
             str(Path(support.tool("lefthook")).parent),
             str(Path(support.tool("git")).parent),
         ]
-        env |= {
-            "PATH": os.pathsep.join([*tools, env.get("PATH", "")]),
+        environ |= {
+            "PATH": os.pathsep.join([*tools, environ.get("PATH", "")]),
             "HOME": str(self.root),
             "GIT_CONFIG_GLOBAL": os.devnull,
             "GIT_CONFIG_NOSYSTEM": "1",
@@ -119,7 +119,7 @@ class PrePushGate:
             "GIT_COMMITTER_EMAIL": "t@example.invalid",
             "PREPUSH_MARKER": str(self.marker),
         }
-        self.env = env
+        self.env = environ
 
         # The canon, as a lefthook remote: this tree's hook and script.
         self.canon = self.root / "canon.git"

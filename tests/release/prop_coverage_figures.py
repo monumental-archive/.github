@@ -114,7 +114,7 @@ def test_any_listing_and_run(doc: object) -> None:
         except figures.RefusedError as refused:
             said = str(refused)
         else:
-            assert got is not None
+            del got
             continue
         assert said, "a refusal says why"
 

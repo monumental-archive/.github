@@ -18,15 +18,12 @@ import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, TypedDict, Unpack
+from typing import Protocol, TypedDict, Unpack
 
 import pytest
 
 from belt.release import publish_npm
 from belt.typed_pytest import fixture
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
 
 # The status the stub `npm publish` fails with in the row that reads it.
 NPM_FAILED = 7
@@ -125,8 +122,16 @@ class Answers(TypedDict, total=False):
     logs: str
 
 
+class NpmCall(Protocol):
+    """What the `npm` fixture hands a row."""
+
+    def __call__(self, **options: Unpack[Answers]) -> Npm:
+        """Lay out a job with the stub answering as told."""
+        ...
+
+
 @fixture
-def npm(tmp_path: Path) -> Callable[..., Npm]:
+def npm(tmp_path: Path) -> NpmCall:
     """Lay out the publish job's stub npm and dist/.
 
     Returns:
@@ -198,7 +203,7 @@ def npm(tmp_path: Path) -> Callable[..., Npm]:
 
 # Each refusal the step printed, word for word.
 def test_npm_below_the_required_version(
-    capfd: pytest.CaptureFixture[str], npm: Callable[..., Npm]
+    capfd: pytest.CaptureFixture[str], npm: NpmCall
 ) -> None:
     """An npm of 11.5.0 cannot do trusted publishing: bump the pin."""
     job = npm(version="11.5.0")
@@ -215,7 +220,7 @@ def test_npm_below_the_required_version(
 
 
 def test_versions_compare_as_numbers(
-    capfd: pytest.CaptureFixture[str], npm: Callable[..., Npm]
+    capfd: pytest.CaptureFixture[str], npm: NpmCall
 ) -> None:
     """11.10.0 is newer than 11.5.1, which a string compare gets wrong."""
     job = npm(version="11.10.0")
@@ -225,7 +230,7 @@ def test_versions_compare_as_numbers(
 
 
 def test_no_oidc_endpoint_in_the_environment(
-    capfd: pytest.CaptureFixture[str], npm: Callable[..., Npm]
+    capfd: pytest.CaptureFixture[str], npm: NpmCall
 ) -> None:
     """#907's second half: npm can, but the runner did not offer it."""
     job = npm(oidc=False)
@@ -244,10 +249,10 @@ def test_no_oidc_endpoint_in_the_environment(
 
 @pytest.mark.parametrize(("tarballs", "count"), [((), 0), (("a.tgz", "b.tgz"), 2)])
 def test_not_exactly_one_tarball(
-    tarballs: object,
-    count: object,
+    tarballs: tuple[()] | tuple[str, str],
+    count: int,
     capfd: pytest.CaptureFixture[str],
-    npm: Callable[..., Npm],
+    npm: NpmCall,
 ) -> None:
     """None, or two, is refused with the count."""
     job = npm(tarballs=tarballs)
@@ -262,7 +267,7 @@ def test_not_exactly_one_tarball(
 
 
 def test_a_hidden_tarball_is_not_a_tarball(
-    capfd: pytest.CaptureFixture[str], npm: Callable[..., Npm]
+    capfd: pytest.CaptureFixture[str], npm: NpmCall
 ) -> None:
     """The shell's `dist/*.tgz` matched no dotfile; neither does this."""
     job = npm(tarballs=("widget-1.2.3.tgz", ".partial.tgz"))
@@ -273,7 +278,7 @@ def test_a_hidden_tarball_is_not_a_tarball(
 
 # The path that uploads, and the one that converges.
 def test_the_package_already_on_the_registry_converges(
-    capfd: pytest.CaptureFixture[str], npm: Callable[..., Npm]
+    capfd: pytest.CaptureFixture[str], npm: NpmCall
 ) -> None:
     """A finished leg is success, and nothing is uploaded."""
     job = npm(view_rc=0)
@@ -289,7 +294,7 @@ def test_the_package_already_on_the_registry_converges(
 
 
 def test_the_one_tarball_is_published_by_its_relative_path(
-    capfd: pytest.CaptureFixture[str], npm: Callable[..., Npm]
+    capfd: pytest.CaptureFixture[str], npm: NpmCall
 ) -> None:
     """`./dist/<name>.tgz`, never `dist/...`, which npm reads as owner/repo."""
     job = npm()
@@ -301,7 +306,7 @@ def test_the_one_tarball_is_published_by_its_relative_path(
 
 # #907: the failing step's own words reach the job log, masked.
 def test_the_log_is_printed_with_the_token_redacted(
-    capfd: pytest.CaptureFixture[str], npm: Callable[..., Npm]
+    capfd: pytest.CaptureFixture[str], npm: NpmCall
 ) -> None:
     """The credential line is dropped and the token-shaped run redacted."""
     job = npm(publish_rc=1)
@@ -318,14 +323,14 @@ def test_the_log_is_printed_with_the_token_redacted(
     )
 
 
-def test_npm_s_own_exit_is_the_run_s(npm: Callable[..., Npm]) -> None:
+def test_npm_s_own_exit_is_the_run_s(npm: NpmCall) -> None:
     """A failed upload fails with npm's status, after the log."""
     job = npm(publish_rc=NPM_FAILED)
     assert publish_npm.run(PACKAGE, job.env, job.work) == NPM_FAILED
 
 
 def test_the_default_log_directory_when_config_names_none(
-    capfd: pytest.CaptureFixture[str], npm: Callable[..., Npm]
+    capfd: pytest.CaptureFixture[str], npm: NpmCall
 ) -> None:
     """No logs-dir from npm config: ~/.npm/_logs, as npm defaults."""
     job = npm(publish_rc=1, logs="home")
@@ -334,9 +339,7 @@ def test_the_default_log_directory_when_config_names_none(
     assert "/.npm/_logs/2026-11-18T00_00_00_000Z-debug-0.log\n" in run.stdout
 
 
-def test_no_debug_log_is_said(
-    capfd: pytest.CaptureFixture[str], npm: Callable[..., Npm]
-) -> None:
+def test_no_debug_log_is_said(capfd: pytest.CaptureFixture[str], npm: NpmCall) -> None:
     """A failure that left no log says where it looked."""
     job = npm(publish_rc=1, logs="none")
     status = publish_npm.run(PACKAGE, job.env, job.work)

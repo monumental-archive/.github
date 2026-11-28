@@ -306,8 +306,8 @@ class SearchCase:
             where.mkdir(parents=True, exist_ok=True)
             (where / name).write_text(text, encoding="utf-8")
             (where / name).chmod(0o755)
-        env = self.make_env()
-        self.env = env | {
+        environ = self.make_env()
+        self.env = environ | {
             "ORG_BELT_DIR": str(BELT),
             "ORG_PYTHON": sys.executable,
             "ORG_FUZZ_CANDIDATES": str(self.stage),
@@ -315,7 +315,7 @@ class SearchCase:
             "FUZZ_TOOLCHAIN": NIGHTLY,
             "FUZZ_SECONDS": "300",
             "RUSTUP_TOOLCHAIN": "stable",
-            "PATH": f"{stubs}{os.pathsep}{env.get('PATH', '')}",
+            "PATH": f"{stubs}{os.pathsep}{environ.get('PATH', '')}",
             "STUB_DIR": str(self.tmp),
             "STUB_SYSROOT": str(sysroot),
             "STUB_GOCACHE": str(self.tmp / "gocache"),

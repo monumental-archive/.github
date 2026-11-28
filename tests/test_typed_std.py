@@ -321,7 +321,7 @@ def test_the_tree_holds_the_law() -> None:
         ),
     ],
 )
-def test_each_spelling_is_an_open(text: object) -> None:
+def test_each_spelling_is_an_open(text: str) -> None:
     """Planted: every way a file can open a URL itself is found."""
     assert opens(text), text
 

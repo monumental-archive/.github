@@ -439,6 +439,18 @@ class Env(Protocol):
         ...
 
 
+def answers_none(*_args: object, **_kwargs: object) -> None:
+    """Stand in for a call whose answer is None: no tool found, nothing opened."""
+
+
+class Tool(Protocol):
+    """A stand-in for a tool a helper runs: its arguments in, its output out."""
+
+    def __call__(self, *args: str) -> str:
+        """Answer one run of the tool."""
+        ...
+
+
 class Belt(Protocol):
     """The `belt` fixture: plant a whole belt tree, return its `mise/`."""
 

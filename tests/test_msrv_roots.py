@@ -113,9 +113,9 @@ class TwoRoots:
         (self.tree / "fuzz").mkdir(parents=True)
         for manifest in ("Cargo.toml", FUZZ):
             (self.tree / manifest).write_text("", encoding="utf-8")
-        env = self.make_env()
-        subprocess.run([GIT, "init", "-q"], cwd=self.tree, env=env, check=True)
-        subprocess.run([GIT, "add", "."], cwd=self.tree, env=env, check=True)
+        environ = self.make_env()
+        subprocess.run([GIT, "init", "-q"], cwd=self.tree, env=environ, check=True)
+        subprocess.run([GIT, "add", "."], cwd=self.tree, env=environ, check=True)
         self.plants = tmp / "plants"
         self.plants.mkdir()
         bins = self.bins = tmp / "bin"
@@ -132,7 +132,7 @@ class TwoRoots:
         self.log = tmp / "log"
         self.log.touch()
         self.overrides = {
-            "PATH": f"{bins}:{env['PATH']}",
+            "PATH": f"{bins}:{environ['PATH']}",
             "ORG_BELT_DIR": str(BELT),
             "ORG_FINDINGS": "",
             "MISE_TASK_NAME": TASK,
@@ -210,9 +210,9 @@ def test_the_second_roots_undeclared_crate_is_red_by_name(
         f"{TASK}: {FUZZ}: a minimum is undeclared or differs from the one"
         " the rule derives"
     )
-    err = err.splitlines()
-    assert head in err
-    named = err[err.index(head) + 1]
+    said = err.splitlines()
+    assert head in said
+    named = said[said.index(head) + 1]
     assert "app-fuzz" in named
     assert f"{TASK}: Cargo.toml: a minimum" not in err
 

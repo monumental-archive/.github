@@ -667,7 +667,7 @@ def test_a_widened_live_setting_is_drift_by_name(
 
 @pytest.mark.usefixtures("allowlist_audit")
 @pytest.mark.parametrize("task", ["lint:actions-allowed", "audit:actions-allowlist"])
-def test_the_lint_and_the_audit_read_one_list(task: object) -> None:
+def test_the_lint_and_the_audit_read_one_list(task: str) -> None:
     """Neither task body spells a pattern of its own."""
     text = body(task)
     assert '. "${ORG_BELT_DIR}/actions-allowed.sh"' in text
@@ -676,7 +676,7 @@ def test_the_lint_and_the_audit_read_one_list(task: object) -> None:
 
 # mise/gate-tools.toml installs the tools wherever the selection reads.
 @pytest.mark.parametrize("key", ["aqua:suzuki-shunsuke/pinact", "zizmor"])
-def test_a_top_level_action_alone_installs_pinact_and_zizmor(key: object) -> None:
+def test_a_top_level_action_alone_installs_pinact_and_zizmor(key: str) -> None:
     """A tree whose only action file is actions/x/action.yml."""
     reasons = gate_tools.needed(gate_tools.load_table(), ["actions/x/action.yml"])
     assert reasons[key] == "needed: actions/x/action.yml is tracked"

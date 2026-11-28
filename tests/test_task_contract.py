@@ -158,7 +158,7 @@ def test_ci_runs_no_mutation_leg() -> None:
 @pytest.mark.parametrize(
     "leg", ["test:python-properties", "test:typescript-properties"]
 )
-def test_ci_names_each_property_leg(leg: object) -> None:
+def test_ci_names_each_property_leg(leg: str) -> None:
     """A belt test leg is named in the gate, never collected (#1332, #1549).
 
     `test` is the repository's, so a belt-defined test reaches the
@@ -401,7 +401,7 @@ def test_mutants_run_in_their_own_workflow() -> None:
 
 
 @pytest.mark.parametrize("lang", leg_files())
-def test_each_language_has_its_own_jobs(lang: object) -> None:
+def test_each_language_has_its_own_jobs(lang: str) -> None:
     """One `mutants-<language>` job per leg, selecting only that leg.
 
     Each language's jobs are its own tick, shard count and timeout,

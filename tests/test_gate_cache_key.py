@@ -196,8 +196,15 @@ def runner(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
         monkeypatch.delenv(name)
     for name, value in {**RUNNER, "GITHUB_OUTPUT": str(out)}.items():
         monkeypatch.setenv(name, value)
-    monkeypatch.setattr(platform, "system", lambda *_args, **_kwargs: "Linux")
-    monkeypatch.setattr(platform, "machine", lambda *_args, **_kwargs: "x86_64")
+
+    def system() -> str:
+        return "Linux"
+
+    def machine() -> str:
+        return "x86_64"
+
+    monkeypatch.setattr(platform, "system", system)
+    monkeypatch.setattr(platform, "machine", machine)
     return out
 
 
@@ -363,7 +370,7 @@ def test_the_digest_is_mise_actions() -> None:
 
 
 @pytest.mark.parametrize("install", ["", "  ", "--locked"])
-def test_no_list_is_todays_key(install: object) -> None:
+def test_no_list_is_todays_key(install: str) -> None:
     """The gate passes no list, and its key does not move by a byte."""
     facts = gate_cache_key.Facts("2026.11.6", "linux-x64", WHEN, BELT)
     out = gate_cache_key.names("mise-v2", RUNNER, facts, install)
@@ -545,7 +552,7 @@ def test_each_line_moves_the_digest() -> None:
 
 
 @pytest.mark.parametrize("text", ["", "binary: rustc\n"])
-def test_text_naming_no_compiler_is_red(text: object) -> None:
+def test_text_naming_no_compiler_is_red(text: str) -> None:
     """Empty output is refused, never digested into a key."""
     with pytest.raises(ValueError, match="printed no release line"):
         gate_cache_key.rustc_digest(text)

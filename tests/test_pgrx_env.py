@@ -1193,9 +1193,7 @@ def subshell(lines: list[str], at: int) -> list[str]:
 # Postgres, #1940) itself with org_pgrx_major_env inside a subshell
 # that compiles after it. And the check runs first.
 @pytest.mark.parametrize(("site", "calls"), SITES.items())
-def test_every_compile_carries_its_major_in_a_subshell(
-    site: object, calls: object
-) -> None:
+def test_every_compile_carries_its_major_in_a_subshell(site: str, calls: int) -> None:
     """Each site's compiles are the shapes above, and checked first."""
     lines = site_text(site).splitlines()
     hits = [
@@ -1209,8 +1207,6 @@ def test_every_compile_carries_its_major_in_a_subshell(
     first_call = CALL.search(text)
     assert first_check is not None, "no check before compiling"
     assert first_call is not None
-    if first_check is None or first_call is None:
-        return
     assert first_check.start() < first_call.start()
     for at in hits:
         if "org_pgrx_major " in lines[at]:

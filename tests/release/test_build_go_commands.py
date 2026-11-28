@@ -17,7 +17,7 @@ import itertools
 import os
 import sys
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 import pytest
 
@@ -27,7 +27,6 @@ from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
     from pathlib import Path
 
 CANON = support.CANON
@@ -104,10 +103,16 @@ class Building:
         )
 
 
+class Build(Protocol):
+    """What the `build` fixture hands a row."""
+
+    def __call__(self, mains: str, broken: str = ...) -> Building:
+        """Run build."""
+        ...
+
+
 @fixture
-def build(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, env: support.Env
-) -> Callable[..., Building]:
+def build(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, env: support.Env) -> Build:
     """Lay out a module whose `go list` prints a row's mains.
 
     Returns:
@@ -164,7 +169,7 @@ def test_the_shipped_step_calls_the_helper() -> None:
 
 # Every main package becomes one staged binary.
 def test_two_commands_build_two_binaries(
-    capfd: pytest.CaptureFixture[str], build: Callable[..., Building]
+    capfd: pytest.CaptureFixture[str], build: Build
 ) -> None:
     """Each named by its import path's last element."""
     building = build("example.com/m/cmd/stele\nexample.com/m/cmd/probe\n")
@@ -183,7 +188,7 @@ def test_two_commands_build_two_binaries(
 
 
 def test_the_blank_lines_of_go_list_are_no_package(
-    capfd: pytest.CaptureFixture[str], build: Callable[..., Building]
+    capfd: pytest.CaptureFixture[str], build: Build
 ) -> None:
     """Non-main packages print an empty line each."""
     building = build("\n\nexample.com/m\n\n")
@@ -196,7 +201,7 @@ def test_the_blank_lines_of_go_list_are_no_package(
 
 # One row per refusal, each message asserted.
 def test_a_module_with_no_main_package_is_refused(
-    capfd: pytest.CaptureFixture[str], build: Callable[..., Building]
+    capfd: pytest.CaptureFixture[str], build: Build
 ) -> None:
     """A library is the wrong class."""
     building = build("\n\n")
@@ -211,7 +216,7 @@ def test_a_module_with_no_main_package_is_refused(
 
 
 def test_two_commands_with_one_binary_name_are_refused(
-    capfd: pytest.CaptureFixture[str], build: Callable[..., Building]
+    capfd: pytest.CaptureFixture[str], build: Build
 ) -> None:
     """The second would overwrite the first; it is never built."""
     building = build("example.com/m/cmd/tool\nexample.com/m/internal/tool\n")
@@ -227,7 +232,7 @@ def test_two_commands_with_one_binary_name_are_refused(
 
 
 def test_a_failing_build_fails_the_step_with_its_status(
-    capfd: pytest.CaptureFixture[str], build: Callable[..., Building]
+    capfd: pytest.CaptureFixture[str], build: Build
 ) -> None:
     """The failing build's run.returncode and message; none after it is built.
 

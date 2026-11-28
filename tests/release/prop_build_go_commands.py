@@ -26,7 +26,8 @@ from belt.typed_hypothesis import given
 
 if TYPE_CHECKING:
     import random
-    from collections.abc import Callable
+
+    from tests import support
 
 # An import path as `go list` prints one; lowercase, as the shipped
 # names are on a case-sensitive runner.
@@ -36,7 +37,7 @@ IMPORT_PATH = st.lists(ELEMENT, min_size=1, max_size=4).map("/".join)
 CLASHING: list[str] = ["example.com/a/tool", "example.com/b/tool"]
 
 
-def fake_go(pkgs: list[str]) -> tuple[Callable[..., str], list[str]]:
+def fake_go(pkgs: list[str]) -> tuple[support.Tool, list[str]]:
     """Stand a `go` in for the build: `list` prints `pkgs`, a build writes.
 
     Returns:
