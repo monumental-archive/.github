@@ -25,10 +25,10 @@ import sys
 import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple, Protocol
 
 import pytest
 
@@ -269,15 +269,6 @@ def run(
     )
 
 
-@dataclass(frozen=True)
-class Done:
-    """What an in-process call to the helper returned and wrote."""
-
-    returncode: int
-    stdout: str
-    stderr: str
-
-
 def as_the_child(
     monkeypatch: pytest.MonkeyPatch, env: dict[str, str], cwd: Path
 ) -> None:
@@ -303,7 +294,6 @@ def measured_run(  # ruff: ignore[too-many-arguments] -- one keyword per part of
     collects: bool,
     databases: int = 1,
     monkeypatch: pytest.MonkeyPatch,
-    capfd: pytest.CaptureFixture[str],
 ) -> None:
     """Leave a run's directory as a suite run through `measured` does (#1667).
 
@@ -311,9 +301,6 @@ def measured_run(  # ruff: ignore[too-many-arguments] -- one keyword per part of
     `coverage` reads; `collects` runs the suite's teardown, the helper
     called in-process (#1711), with the ORG_PLPGSQL_COVERAGE `measured`
     names in the run, once for each of `databases` (#2163).
-
-    Raises:
-        AssertionError: the teardown failed; its output is the message.
 
     """
     run_dir.mkdir(parents=True)
@@ -324,298 +311,80 @@ def measured_run(  # ruff: ignore[too-many-arguments] -- one keyword per part of
     for _ in range(databases if collects else 0):
         report = {"ORG_PLPGSQL_COVERAGE": str(run_dir / "plpgsql-coverage")}
         as_the_child(monkeypatch, env | report, tree)
-        done = Done(pc.main(["collect", "postgres://stub"]), *capfd.readouterr())
-        if done.returncode != 0:
-            raise AssertionError(done.stderr)
+        assert pc.main(COLLECT) == 0
 
 
-class Collecting:
-    """Collects from a planted database and reads the report."""
+# The teardown's call, naming no client.
+COLLECT = ["collect", "postgres://stub"]
 
-    # The words the call names after `--`; None names none (#2114).
-    client: list[str] | None = None
 
-    def __init__(
-        self,
-        tmp_path: Path,
-        *,
-        env: support.Env,
-        monkeypatch: pytest.MonkeyPatch,
-        capfd: pytest.CaptureFixture[str],
-    ) -> None:
-        """Give the row's scratch directories one home, removed after it."""
-        self.monkeypatch = monkeypatch
-        self.capfd = capfd
-        self.make_env = env
-        self.tmp = tmp_path
+@dataclass(frozen=True)
+class Database:
+    """What a row's stub database holds and answers.
 
-    def measure(
-        self,
-        functions: dict[str, tuple[str, str]],
-        unreadable: dict[str, str] | None = None,
-        listing: str | None = None,
-        lint: dict[str, str] | None = None,
-        sources: dict[str, str] | None = None,
-        **planted: str,
-    ) -> tuple[Done, Done]:
-        """Collect a report from the planted database and read it.
+    `listing` replaces the function listing psql prints, verbatim;
+    `lint` plants the static check's rows, keyed `<oid>.<relid>`;
+    `sources` a function's body by oid; `env` the stub's own knobs.
+    """
 
-        `listing` replaces the function listing psql prints, verbatim;
-        `lint` plants the static check's rows, keyed `<oid>.<relid>`.
-        `self.client` is the words the call names after `--`.
-        The answers directory and the report stay on the row as
-        `self.answers` and `self.report`.
+    functions: dict[str, tuple[str, str]]
+    unreadable: dict[str, str] = field(default_factory=dict[str, str])
+    listing: str | None = None
+    lint: dict[str, str] = field(default_factory=dict[str, str])
+    sources: dict[str, str] = field(default_factory=dict[str, str])
+    env: dict[str, str] = field(default_factory=dict[str, str])
+
+
+@dataclass(frozen=True)
+class Planted:
+    """A planted stub database: its answers and where reports go."""
+
+    answers: Path
+    reports: Path
+
+    def report(self) -> Path:
+        """Name the one report a collection wrote.
 
         Returns:
-            The collect and the totals processes.
+            The report's path.
 
         """
-        tmp = Path(tempfile.mkdtemp(dir=self.tmp))
-        stubs, answers = plant_stubs(tmp, functions, unreadable)
-        if listing is not None:
-            (answers / "functions").write_text(listing, encoding="utf-8")
-        for key, rows in (lint or {}).items():
+        (written,) = self.reports.glob("*.json")
+        return written
+
+
+@fixture
+def plant(
+    tmp_path: Path, env: support.Env, monkeypatch: pytest.MonkeyPatch
+) -> Callable[[Database], Planted]:
+    """Plant a stub database and set the teardown's environment.
+
+    Returns:
+        A function that plants one database, in a directory of its own,
+        and makes this process's environment and directory the child's.
+
+    """
+
+    def planting(database: Database) -> Planted:
+        tmp = Path(tempfile.mkdtemp(dir=tmp_path))
+        stubs, answers = plant_stubs(tmp, database.functions, database.unreadable)
+        if database.listing is not None:
+            (answers / "functions").write_text(database.listing, encoding="utf-8")
+        for key, rows in database.lint.items():
             (answers / f"lint.{key}").write_text(rows, encoding="utf-8")
-        for oid, source in (sources or {}).items():
+        for oid, source in database.sources.items():
             (answers / f"source.{oid}").write_text(source, encoding="utf-8")
         reports = tmp / "reports"
-        env = stub_env(
+        environ = stub_env(
             stubs,
             answers,
-            ORG_PLPGSQL_COVERAGE=str(reports),
-            **planted,
-            env=self.make_env,
+            **({"ORG_PLPGSQL_COVERAGE": str(reports)} | database.env),
+            env=env,
         )
-        named = [] if self.client is None else ["--", *self.client]
-        as_the_child(self.monkeypatch, env, tmp)
-        collected = Done(
-            pc.main(["collect", "postgres://stub", *named]), *self.capfd.readouterr()
-        )
-        as_the_child(self.monkeypatch, env, tmp)
-        read = Done(pc.main(["totals", "leg", str(reports)]), *self.capfd.readouterr())
-        # The one report the collection wrote, for the rows that read it.
-        written = sorted(reports.glob("*.json")) if reports.is_dir() else []
-        self.answers = answers
-        self.report = written[0] if len(written) == 1 else reports
-        return collected, read
+        as_the_child(monkeypatch, environ, tmp)
+        return Planted(answers, reports)
 
-
-@fixture
-def collecting(
-    tmp_path: Path,
-    env: support.Env,
-    monkeypatch: pytest.MonkeyPatch,
-    capfd: pytest.CaptureFixture[str],
-) -> Collecting:
-    """Give each row its own Collecting."""
-    return Collecting(tmp_path, env=env, monkeypatch=monkeypatch, capfd=capfd)
-
-
-class HelperRows(Collecting):
-    """`collect` against a stub psql, then `totals` over its report."""
-
-    def __init__(
-        self,
-        tmp_path: Path,
-        *,
-        env: support.Env,
-        monkeypatch: pytest.MonkeyPatch,
-        capfd: pytest.CaptureFixture[str],
-    ) -> None:
-        """Give the row's scratch directories one home, removed after it."""
-        super().__init__(tmp_path, env=env, monkeypatch=monkeypatch, capfd=capfd)
-        self.tmp = tmp_path
-
-
-@fixture
-def helper_rows(
-    tmp_path: Path,
-    env: support.Env,
-    monkeypatch: pytest.MonkeyPatch,
-    capfd: pytest.CaptureFixture[str],
-) -> HelperRows:
-    """Give each row its own HelperRows."""
-    return HelperRows(tmp_path, env=env, monkeypatch=monkeypatch, capfd=capfd)
-
-
-def test_two_functions_weighted_into_the_totals(helper_rows: HelperRows) -> None:
-    """Each figure is weighted by its function's statement count."""
-    collected, read = helper_rows.measure(TWO)
-    assert collected.returncode == 0, collected.stderr
-    assert read.returncode == 0, read.stderr
-    assert read.stdout == "plpgsql 60.00\nplpgsql-branches 66.66\n"
-    assert TWO_REPORT.format(label="leg") == read.stderr
-
-
-def test_a_branch_free_function_is_left_out_of_the_branch_total(
-    helper_rows: HelperRows,
-) -> None:
-    """It counts toward statements; the branch total is unchanged."""
-    collected, read = helper_rows.measure(TWO | {"103": TOUCH})
-    assert collected.returncode == 0, collected.stderr
-    assert read.returncode == 0, read.stderr
-    assert read.stdout == "plpgsql 64.70\nplpgsql-branches 66.66\n"
-    assert (
-        GUARD
-        + STAMP
-        + TOUCH_LINE
-        + "{label}: plpgsql: total statements 11 of 17 (64.70%),"
-        " branches 66.66% statement-weighted\n"
-    ).format(label="leg") == read.stderr
-
-
-def test_no_branch_anywhere_prints_no_branch_leg(helper_rows: HelperRows) -> None:
-    """A branch total over no branch would be a number about nothing."""
-    collected, read = helper_rows.measure({"103": TOUCH})
-    assert collected.returncode == 0, collected.stderr
-    assert read.returncode == 0, read.stderr
-    assert read.stdout == "plpgsql 100.00\n"
-    assert (
-        TOUCH_LINE.format(label="leg")
-        + "leg: plpgsql: total statements 2 of 2 (100.00%), branches none:"
-        " no function has a branch\n"
-    ) == read.stderr
-
-
-def test_extension_members_are_not_listed(helper_rows: HelperRows) -> None:
-    """An extension's own PL/pgSQL (postgis's) never enters the total."""
-    collected, read = helper_rows.measure(TWO)
-    assert collected.returncode == 0, collected.stderr
-    assert "postgis_owned" not in read.stderr
-    assert read.stdout == "plpgsql 60.00\nplpgsql-branches 66.66\n"
-
-
-def test_an_unreadable_function_is_listed_and_red(helper_rows: HelperRows) -> None:
-    """The function stays in the report, named, and nothing is totalled."""
-    collected, read = helper_rows.measure(
-        TWO, unreadable={"102": "ERROR:  stub: cache lookup failed"}
-    )
-    assert collected.returncode == 0, collected.stderr
-    assert read.returncode == 1
-    assert read.stdout == ""
-    assert read.stderr == (
-        "leg: plpgsql: plpgsql_check cannot read public.stamp(integer):"
-        " ERROR:  stub: cache lookup failed\n"
-        "leg: plpgsql: 1 function(s) unreadable — a function the extension"
-        " cannot read is never dropped from the total\n"
-    )
-
-
-def test_an_oid_that_is_not_a_number_is_never_formatted(
-    helper_rows: HelperRows,
-) -> None:
-    """A listing row whose oid is not digits is unreadable, by name."""
-    odd = {"7; DROP TABLE t": ("public.odd()", "1\t1\t1\t1\t0")}
-    collected, read = helper_rows.measure(odd)
-    assert collected.returncode == 0, collected.stderr
-    assert read.returncode == 1
-    assert read.stderr == (
-        "leg: plpgsql: plpgsql_check cannot read public.odd(): its oid"
-        " '7; DROP TABLE t' is not a number\n"
-        "leg: plpgsql: 1 function(s) unreadable — a function the extension"
-        " cannot read is never dropped from the total\n"
-    )
-
-
-def test_no_plpgsql_function_prints_no_totals(helper_rows: HelperRows) -> None:
-    """A database with no PL/pgSQL function has nothing to total."""
-    collected, read = helper_rows.measure({})
-    assert collected.returncode == 0, collected.stderr
-    assert read.returncode == 0, read.stderr
-    assert read.stdout == ""
-    assert read.stderr == "leg: plpgsql: the database holds no PL/pgSQL function\n"
-
-
-def test_the_profiler_off_is_red_by_name_never_zero(helper_rows: HelperRows) -> None:
-    """Off reads 0% for every function; the setting is refused instead."""
-    off = {"101": ("public.guard()", "0\t0\t5\t0\t1")}
-    collected, read = helper_rows.measure(off, STUB_PROFILER="off")
-    assert collected.returncode == 0, collected.stderr
-    assert read.returncode == 1
-    assert read.stdout == ""
-    assert read.stderr == (
-        "leg: plpgsql: plpgsql_check.profiler is 'off' — with the profiler"
-        " off every function reads 0%, which is not a measurement; start"
-        " the test database with -c plpgsql_check.profiler=on\n"
-    )
-
-
-def test_a_profiler_not_preloaded_is_red_by_name(helper_rows: HelperRows) -> None:
-    """A session-local profile cannot reach the teardown's session."""
-    collected, read = helper_rows.measure(TWO, STUB_PRELOAD="pg_stat_statements")
-    assert collected.returncode == 0, collected.stderr
-    assert read.returncode == 1
-    assert read.stderr == (
-        "leg: plpgsql: plpgsql_check is not in shared_preload_libraries"
-        " ('pg_stat_statements') — the profile is per session and the"
-        " teardown sees none of the suite's; preload plpgsql,plpgsql_check\n"
-    )
-
-
-def test_a_missing_report_names_the_teardown(
-    helper_rows: HelperRows,
-    env: support.Env,
-    monkeypatch: pytest.MonkeyPatch,
-    capfd: pytest.CaptureFixture[str],
-) -> None:
-    """A suite whose teardown never called collect is refused."""
-    tmp = Path(tempfile.mkdtemp(dir=helper_rows.tmp))
-    as_the_child(monkeypatch, env(MISE_TASK_NAME=TASK), tmp)
-    read = Done(pc.main(["totals", "leg", str(tmp / "none.json")]), *capfd.readouterr())
-    assert read.returncode == 1
-    assert read.stderr == (
-        "leg: plpgsql: the test task wrote no report — its teardown must"
-        " call belt plpgsql-coverage collect while ORG_PLPGSQL_COVERAGE is set\n"
-    )
-
-
-def test_a_file_that_is_not_a_report_is_refused_by_what(
-    helper_rows: HelperRows,
-    env: support.Env,
-    monkeypatch: pytest.MonkeyPatch,
-    capfd: pytest.CaptureFixture[str],
-) -> None:
-    """The one decoder names what about the file is wrong."""
-    tmp = Path(tempfile.mkdtemp(dir=helper_rows.tmp))
-    planted = tmp / "report.json"
-    entry = {
-        "function": "public.guard()",
-        "statements": 0.8,
-        "branches": "1",
-        "statement_count": 5,
-        "executed": 4,
-        "branch_free": False,
-        "findings": [],
-        "suppressions": [],
-    }
-    document = {"profiler": "on", "preload": PRELOAD, "functions": [entry]}
-    planted.write_text(json.dumps(document), encoding="utf-8")
-    as_the_child(monkeypatch, env(MISE_TASK_NAME=TASK), tmp)
-    read = Done(pc.main(["totals", "leg", str(planted)]), *capfd.readouterr())
-    assert read.returncode == 1
-    assert read.stdout == ""
-    assert read.stderr == (
-        "leg: plpgsql: the report is not a coverage report: function 0:"
-        " 'statements' is not a string\n"
-    )
-
-
-def test_collect_without_a_report_path_is_refused(
-    helper_rows: HelperRows,
-    env: support.Env,
-    monkeypatch: pytest.MonkeyPatch,
-    capfd: pytest.CaptureFixture[str],
-) -> None:
-    """The teardown calls collect only when the leg set the path."""
-    tmp = Path(tempfile.mkdtemp(dir=helper_rows.tmp))
-    stubs, answers = plant_stubs(tmp, TWO)
-    as_the_child(monkeypatch, stub_env(stubs, answers, env=env), tmp)
-    done = Done(pc.main(["collect", "postgres://stub"]), *capfd.readouterr())
-    assert done.returncode == 1
-    assert (
-        f"{TASK}: ORG_PLPGSQL_COVERAGE is not set — the leg sets"
-        " it; call collect only then\n"
-    ) == done.stderr
+    return planting
 
 
 def finding(line: str, level: str, message: str) -> str:
@@ -635,231 +404,392 @@ LINT_RED = (
     " as a body that cannot do what it says\n"
 )
 
-
-class LintRows(Collecting):
-    """plpgsql_check's static check, in the same report (#1605)."""
-
-    def __init__(
-        self,
-        tmp_path: Path,
-        *,
-        env: support.Env,
-        monkeypatch: pytest.MonkeyPatch,
-        capfd: pytest.CaptureFixture[str],
-    ) -> None:
-        """Give the row's scratch directories one home, removed after it."""
-        super().__init__(tmp_path, env=env, monkeypatch=monkeypatch, capfd=capfd)
-        self.tmp = tmp_path
-
-
-@fixture
-def lint_rows(
-    tmp_path: Path,
-    env: support.Env,
-    monkeypatch: pytest.MonkeyPatch,
-    capfd: pytest.CaptureFixture[str],
-) -> LintRows:
-    """Give each row its own LintRows."""
-    return LintRows(tmp_path, env=env, monkeypatch=monkeypatch, capfd=capfd)
-
-
-def test_a_report_with_no_findings_is_green(lint_rows: LintRows) -> None:
-    """Every function asked, none reported: the totals print."""
-    collected, read = lint_rows.measure(TWO)
-    assert collected.returncode == 0, collected.stderr
-    assert read.returncode == 0, read.stderr
-    assert read.stdout == "plpgsql 60.00\nplpgsql-branches 66.66\n"
-    document = as_object(load_json(lint_rows.report.read_text("utf-8")), "report")
-    functions = as_array(document.get("functions"), "functions")
-    findings = [as_object(f, "function").get("findings") for f in functions]
-    none: list[object] = [[], []]
-    assert none == findings
-    assert (lint_rows.answers / "linted").read_text("utf-8") == "101 0\n102 0\n"
-
-
-def test_an_error_is_red_by_function_and_line(lint_rows: LintRows) -> None:
-    """A column that does not exist: the leg is red before the floor."""
-    message = 'column "no_such_column" does not exist'
-    _, read = lint_rows.measure(TWO, lint={"102.0": finding("2", "error", message)})
-    assert read.returncode == 1
-    assert read.stdout == ""
-    assert (
-        LINT_RED.format(
-            function="public.stamp(integer)",
-            line=2,
-            level="error",
-            message=message,
-            count=1,
-        )
-        == read.stderr
-    )
-
-
-def test_a_warning_is_red(lint_rows: LintRows) -> None:
-    """Unreachable code, an extra warning, is red like an error."""
-    _, read = lint_rows.measure(
-        TWO, lint={"101.0": finding("14", "warning extra", "unreachable code")}
-    )
-    assert read.returncode == 1
-    assert (
-        LINT_RED.format(
-            function="public.guard()",
-            line=14,
-            level="warning extra",
-            message="unreachable code",
-            count=1,
-        )
-        == read.stderr
-    )
-
-
-def test_a_finding_with_no_line_is_named_without_one(lint_rows: LintRows) -> None:
-    """A routine-wide finding (volatility) has no line."""
-    message = "routine is marked as VOLATILE, should be IMMUTABLE"
-    _, read = lint_rows.measure(
-        TWO, lint={"101.0": finding("", "performance", message)}
-    )
-    assert read.returncode == 1
-    assert (
-        LINT_RED.format(
-            function="public.guard()",
-            line="-",
-            level="performance",
-            message=message,
-            count=1,
-        )
-        == read.stderr
-    )
-
-
-def test_a_trigger_function_is_checked_against_each_table(lint_rows: LintRows) -> None:
-    """Its NEW and OLD are each table's rows; a shared finding is one."""
-    listing = "101\tpublic.guard()\t5001 5002\n102\tpublic.stamp(integer)\t\n"
-    row = finding("14", "warning extra", "unreachable code")
-    _, read = lint_rows.measure(
-        TWO, listing=listing, lint={"101.5001": row, "101.5002": row}
-    )
-    assert (lint_rows.answers / "linted").read_text(
-        "utf-8"
-    ) == "101 5001\n101 5002\n102 0\n"
-    assert (
-        LINT_RED.format(
-            function="public.guard()",
-            line=14,
-            level="warning extra",
-            message="unreachable code",
-            count=1,
-        )
-        == read.stderr
-    )
-
-
-def test_an_extension_member_is_never_asked(lint_rows: LintRows) -> None:
-    """An extension's PL/pgSQL (postgis's) is not the repository's to check."""
-    lint_rows.measure(TWO)
-    assert "900" not in (lint_rows.answers / "linted").read_text("utf-8")
-
-
-def test_the_extension_absent_is_refused_by_name(lint_rows: LintRows) -> None:
-    """No plpgsql_check in the test stack: the collection fails, named."""
-    why = 'ERROR:  extension "plpgsql_check" is not available'
-    collected, read = lint_rows.measure(TWO, STUB_NO_EXTENSION=why)
-    assert collected.returncode == 0, collected.stderr
-    assert read.returncode == 1
-    assert f"leg: plpgsql: the teardown's collection failed: {why}\n" == read.stderr
-
-
-def test_a_reading_without_its_lint_answer_is_refused(
-    lint_rows: LintRows,
-    env: support.Env,
-    monkeypatch: pytest.MonkeyPatch,
-    capfd: pytest.CaptureFixture[str],
-) -> None:
-    """A report from a helper that did not ask is not a clean result."""
-    tmp = Path(tempfile.mkdtemp(dir=lint_rows.tmp))
-    entry = {
-        "function": "public.guard()",
-        "statements": "0.8",
-        "branches": "1",
-        "statement_count": 5,
-        "executed": 4,
-        "branch_free": False,
-    }
-    planted = tmp / "report.json"
-    document = {"profiler": "on", "preload": PRELOAD, "functions": [entry]}
-    planted.write_text(json.dumps(document), encoding="utf-8")
-    as_the_child(monkeypatch, env(MISE_TASK_NAME=TASK), tmp)
-    read = Done(pc.main(["totals", "leg", str(planted)]), *capfd.readouterr())
-    assert read.returncode == 1
-    assert read.stderr == (
-        "leg: plpgsql: the report is not a coverage report: function 0:"
-        " 'findings' is not a list\n"
-    )
-
-
 REASON = "-- the RAISE ends the guard, so the RETURN after it never runs"
 OPTIONS_OFF = "-- @plpgsql_check_options: extra_warnings = false"
 BODY = "\nBEGIN\n  RAISE EXCEPTION 'no';\n  RETURN NULL;\nEND\n"
 
+OWN = "(the repository's own client)"
+REMEDY = (
+    "pass the client after --, for example:"
+    " collect <conninfo> -- docker exec -i <container> psql"
+)
 
-def test_a_suppression_with_its_reason_is_green_and_printed(
-    collecting: Collecting,
-) -> None:
-    """Every suppression is named on every run, with why."""
-    source = f"\n{REASON}\n{OPTIONS_OFF}{BODY}"
-    _, read = collecting.measure(TWO, sources={"101": source})
-    assert read.returncode == 0, read.stderr
-    assert (
+UNREADABLE = (
+    "leg: plpgsql: 1 function(s) unreadable — a function the extension"
+    " cannot read is never dropped from the total\n"
+)
+FAILED = "leg: plpgsql: the teardown's collection failed: {why}\n"
+NO_REPORT = (
+    "leg: plpgsql: the test task wrote no report — its teardown must"
+    " call belt plpgsql-coverage collect while ORG_PLPGSQL_COVERAGE is set\n"
+)
+TOTALLED = "plpgsql 60.00\nplpgsql-branches 66.66\n"
+NO_REASON = (
+    "leg: plpgsql: public.guard(): line {line}: suppression"
+    " `extra_warnings = false` has no reason — the comment line"
+    " directly above it says why\n"
+)
+EXTENSION_ABSENT = 'ERROR:  extension "plpgsql_check" is not available'
+UNREACHED = 'FATAL:  database "stub" does not exist'
+MISSING_CLIENT = "/nonexistent/client"
+
+
+class Collected(NamedTuple):
+    """A row: the database, the teardown's argv, then what `totals` says."""
+
+    name: str
+    database: Database
+    collect: list[str]
+    status: int
+    stdout: str
+    stderr: str
+
+
+class Merged(NamedTuple):
+    """A row: the database, its planted answers, the teardowns, the totals."""
+
+    name: str
+    database: Database
+    answers: dict[str, str]
+    collects: int
+    status: int
+    stdout: str
+    stderr: str
+
+
+# Each row: the database, the teardown's argv, then what `totals` over
+# the report it wrote returns, prints and says.
+COLLECTED = [
+    Collected(
+        "two functions weighted, an extension's own left out",
+        Database(TWO),
+        COLLECT,
+        0,
+        TOTALLED,
+        TWO_REPORT.format(label="leg"),
+    ),
+    Collected(
+        "a branch-free function left out of the branch total",
+        Database(TWO | {"103": TOUCH}),
+        COLLECT,
+        0,
+        "plpgsql 64.70\nplpgsql-branches 66.66\n",
+        (
+            GUARD
+            + STAMP
+            + TOUCH_LINE
+            + "{label}: plpgsql: total statements 11 of 17 (64.70%),"
+            " branches 66.66% statement-weighted\n"
+        ).format(label="leg"),
+    ),
+    Collected(
+        "no branch anywhere prints no branch leg",
+        Database({"103": TOUCH}),
+        COLLECT,
+        0,
+        "plpgsql 100.00\n",
+        TOUCH_LINE.format(label="leg")
+        + "leg: plpgsql: total statements 2 of 2 (100.00%), branches none:"
+        " no function has a branch\n",
+    ),
+    Collected(
+        "an unreadable function is listed and red",
+        Database(TWO, unreadable={"102": "ERROR:  stub: cache lookup failed"}),
+        COLLECT,
+        1,
+        "",
+        "leg: plpgsql: plpgsql_check cannot read public.stamp(integer):"
+        " ERROR:  stub: cache lookup failed\n" + UNREADABLE,
+    ),
+    Collected(
+        "an oid that is not a number is never formatted",
+        Database({"7; DROP TABLE t": ("public.odd()", "1\t1\t1\t1\t0")}),
+        COLLECT,
+        1,
+        "",
+        "leg: plpgsql: plpgsql_check cannot read public.odd(): its oid"
+        " '7; DROP TABLE t' is not a number\n" + UNREADABLE,
+    ),
+    Collected(
+        "figures that are not numbers are unreadable",
+        Database({"101": ("public.guard()", "x\ty")}),
+        COLLECT,
+        1,
+        "",
+        "leg: plpgsql: plpgsql_check cannot read public.guard():"
+        " unreadable figures: [['x', 'y']]\n" + UNREADABLE,
+    ),
+    Collected(
+        "no PL/pgSQL function prints no totals",
+        Database({}),
+        COLLECT,
+        0,
+        "",
+        "leg: plpgsql: the database holds no PL/pgSQL function\n",
+    ),
+    Collected(
+        "the profiler off is red by name, never zero",
+        Database(
+            {"101": ("public.guard()", "0\t0\t5\t0\t1")}, env={"STUB_PROFILER": "off"}
+        ),
+        COLLECT,
+        1,
+        "",
+        "leg: plpgsql: plpgsql_check.profiler is 'off' — with the profiler"
+        " off every function reads 0%, which is not a measurement; start"
+        " the test database with -c plpgsql_check.profiler=on\n",
+    ),
+    Collected(
+        "a profiler not preloaded is red by name",
+        Database(TWO, env={"STUB_PRELOAD": "pg_stat_statements"}),
+        COLLECT,
+        1,
+        "",
+        "leg: plpgsql: plpgsql_check is not in shared_preload_libraries"
+        " ('pg_stat_statements') — the profile is per session and the"
+        " teardown sees none of the suite's; preload plpgsql,plpgsql_check\n",
+    ),
+    Collected(
+        "an error is red by function and line",
+        Database(
+            TWO,
+            lint={
+                "102.0": finding("2", "error", 'column "no_such_column" does not exist')
+            },
+        ),
+        COLLECT,
+        1,
+        "",
+        LINT_RED.format(
+            function="public.stamp(integer)",
+            line=2,
+            level="error",
+            message='column "no_such_column" does not exist',
+            count=1,
+        ),
+    ),
+    Collected(
+        "a warning is red",
+        Database(
+            TWO, lint={"101.0": finding("14", "warning extra", "unreachable code")}
+        ),
+        COLLECT,
+        1,
+        "",
+        LINT_RED.format(
+            function="public.guard()",
+            line=14,
+            level="warning extra",
+            message="unreachable code",
+            count=1,
+        ),
+    ),
+    Collected(
+        "a routine-wide finding is named without a line",
+        Database(
+            TWO,
+            lint={
+                "101.0": finding(
+                    "",
+                    "performance",
+                    "routine is marked as VOLATILE, should be IMMUTABLE",
+                )
+            },
+        ),
+        COLLECT,
+        1,
+        "",
+        LINT_RED.format(
+            function="public.guard()",
+            line="-",
+            level="performance",
+            message="routine is marked as VOLATILE, should be IMMUTABLE",
+            count=1,
+        ),
+    ),
+    Collected(
+        "the extension absent is refused by name",
+        Database(TWO, env={"STUB_NO_EXTENSION": EXTENSION_ABSENT}),
+        COLLECT,
+        1,
+        "",
+        FAILED.format(why=EXTENSION_ABSENT),
+    ),
+    Collected(
+        "a suppression with its reason is green and printed",
+        Database(TWO, sources={"101": f"\n{REASON}\n{OPTIONS_OFF}{BODY}"}),
+        COLLECT,
+        0,
+        TOTALLED,
         "leg: plpgsql: public.guard(): line 3: suppresses"
         " `extra_warnings = false` — the RAISE ends the guard, so the"
-        " RETURN after it never runs\n"
-    ) in read.stderr
-    assert read.stdout == "plpgsql 60.00\nplpgsql-branches 66.66\n"
-
-
-@pytest.mark.parametrize(
-    ("name", "above", "line"),
-    [
-        ("nothing above", "", 1),
-        ("an empty comment", "--", 2),
-        (
-            "another options line",
-            "-- @plpgsql_check_options: fatal_errors = true",
-            2,
+        " RETURN after it never runs\n" + TWO_REPORT.format(label="leg"),
+    ),
+    Collected(
+        "a suppression with nothing above has no reason",
+        Database(TWO, sources={"101": OPTIONS_OFF + BODY}),
+        COLLECT,
+        1,
+        "",
+        NO_REASON.format(line=1),
+    ),
+    Collected(
+        "a suppression under an empty comment has no reason",
+        Database(TWO, sources={"101": f"--\n{OPTIONS_OFF}{BODY}"}),
+        COLLECT,
+        1,
+        "",
+        NO_REASON.format(line=2),
+    ),
+    Collected(
+        "a suppression under another options line has no reason",
+        Database(
+            TWO,
+            sources={
+                "101": "-- @plpgsql_check_options: fatal_errors = true\n"
+                + OPTIONS_OFF
+                + BODY
+            },
         ),
-    ],
-)
-def test_a_suppression_without_a_reason_is_red(
-    collecting: Collecting, name: object, above: object, line: object
+        COLLECT,
+        1,
+        "",
+        NO_REASON.format(line=2),
+    ),
+    Collected(
+        "an options line that only turns checks on is no suppression",
+        Database(
+            TWO,
+            sources={
+                "101": "\n-- @plpgsql_check_options: performance_warnings = true" + BODY
+            },
+        ),
+        COLLECT,
+        0,
+        TOTALLED,
+        TWO_REPORT.format(label="leg"),
+    ),
+    Collected(
+        "without_warnings is a suppression",
+        Database(
+            TWO,
+            sources={
+                "101": "\n-- @plpgsql_check_options: without_warnings = true" + BODY
+            },
+        ),
+        COLLECT,
+        1,
+        "",
+        "leg: plpgsql: public.guard(): line 2: suppression"
+        " `without_warnings = true` has no reason — the comment line"
+        " directly above it says why\n",
+    ),
+    Collected(
+        "a client that cannot start names the remedy",
+        Database(TWO),
+        [*COLLECT, "--", MISSING_CLIENT, "exec"],
+        1,
+        "",
+        FAILED.format(why=f"{MISSING_CLIENT} is not on PATH {OWN}; {REMEDY}"),
+    ),
+    Collected(
+        "a database psql cannot reach fails by its error",
+        Database(TWO, env={"STUB_META_FAIL": UNREACHED}),
+        COLLECT,
+        1,
+        "",
+        FAILED.format(why=UNREACHED),
+    ),
+    Collected(
+        "unreadable settings fail the collection",
+        Database(TWO, env={"STUB_META": "on"}),
+        COLLECT,
+        1,
+        "",
+        FAILED.format(why="unreadable settings from the database: [['on']]"),
+    ),
+    Collected(
+        "an unreadable listing row fails the collection",
+        Database(TWO, listing="101\n"),
+        COLLECT,
+        1,
+        "",
+        FAILED.format(why="unreadable function listing: ['101']"),
+    ),
+]
+
+
+@pytest.mark.parametrize("row", COLLECTED, ids=[row.name for row in COLLECTED])
+def test_collect_then_totals(
+    plant: Callable[[Database], Planted],
+    capfd: pytest.CaptureFixture[str],
+    row: Collected,
 ) -> None:
-    """No comment above, an empty one, or another options line."""
-    source = (f"{above}\n" if above else "") + OPTIONS_OFF + BODY
-    _, read = collecting.measure(TWO, sources={"101": source})
-    assert read.returncode == 1
-    assert read.stdout == ""
-    assert (
-        f"leg: plpgsql: public.guard(): line {line}: suppression"
-        " `extra_warnings = false` has no reason — the comment line"
-        " directly above it says why\n"
-    ) == read.stderr
+    """The teardown collects; `totals` over its report says exactly this."""
+    planted = plant(row.database)
+    collected = pc.main(row.collect)
+    assert (collected, *capfd.readouterr()) == (0, "", "")
+    status = pc.main(["totals", "leg", str(planted.reports)])
+    out, err = capfd.readouterr()
+    assert (status, out, err) == (row.status, row.stdout, row.stderr)
 
 
-def test_an_options_line_that_only_turns_checks_on_is_no_suppression(
-    collecting: Collecting,
+def test_no_psql_on_path_fails_the_collection_by_name(
+    plant: Callable[[Database], Planted],
+    capfd: pytest.CaptureFixture[str],
+    tmp_path: Path,
 ) -> None:
-    """Turning a check on needs no reason and is not listed."""
-    source = "\n-- @plpgsql_check_options: performance_warnings = true" + BODY
-    _, read = collecting.measure(TWO, sources={"101": source})
-    assert read.returncode == 0, read.stderr
-    assert "suppress" not in read.stderr
+    """The client is the repository's; without it nothing is read."""
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    planted = plant(Database(TWO, env={"PATH": str(empty)}))
+    assert pc.main(COLLECT) == 0
+    status = pc.main(["totals", "leg", str(planted.reports)])
+    out, err = capfd.readouterr()
+    why = f"psql is not on PATH {OWN}; {REMEDY}"
+    assert (status, out, err) == (1, "", FAILED.format(why=why))
 
 
-def test_without_warnings_is_a_suppression(collecting: Collecting) -> None:
-    """Its `true` turns every warning off."""
-    source = "\n-- @plpgsql_check_options: without_warnings = true" + BODY
-    _, read = collecting.measure(TWO, sources={"101": source})
-    assert read.returncode == 1
-    assert "suppression `without_warnings = true` has no reason" in read.stderr
+def test_a_clean_report_records_no_finding_and_asks_each_function(
+    plant: Callable[[Database], Planted],
+) -> None:
+    """Every function asked, none reported; an extension's never asked."""
+    planted = plant(Database(TWO))
+    assert pc.main(COLLECT) == 0
+    document = as_object(load_json(planted.report().read_text("utf-8")), "report")
+    functions = as_array(document.get("functions"), "functions")
+    findings = [as_object(f, "function").get("findings") for f in functions]
+    none: list[object] = [[], []]
+    assert none == findings
+    assert (planted.answers / "linted").read_text("utf-8") == "101 0\n102 0\n"
+
+
+def test_a_trigger_function_is_checked_against_each_table(
+    plant: Callable[[Database], Planted],
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """Its NEW and OLD are each table's rows; a shared finding is one."""
+    row = finding("14", "warning extra", "unreachable code")
+    planted = plant(
+        Database(
+            TWO,
+            listing="101\tpublic.guard()\t5001 5002\n102\tpublic.stamp(integer)\t\n",
+            lint={"101.5001": row, "101.5002": row},
+        )
+    )
+    assert pc.main(COLLECT) == 0
+    status = pc.main(["totals", "leg", str(planted.reports)])
+    out, err = capfd.readouterr()
+    linted = (planted.answers / "linted").read_text("utf-8")
+    assert linted == "101 5001\n101 5002\n102 0\n"
+    red = LINT_RED.format(
+        function="public.guard()",
+        line=14,
+        level="warning extra",
+        message="unreachable code",
+        count=1,
+    )
+    assert (status, out, err) == (1, "", red)
 
 
 # A client the call names (#2114): logs the two words it was handed
@@ -871,322 +801,258 @@ shift 2
 exec "${STUB_PSQL}" "$@"
 """
 
-OWN = "(the repository's own client)"
-REMEDY = (
-    "pass the client after --, for example:"
-    " collect <conninfo> -- docker exec -i <container> psql"
-)
 
-
-class ClientRows(Collecting):
-    """The client is psql on PATH unless the call names another."""
-
-    def __init__(
-        self,
-        tmp_path: Path,
-        *,
-        env: support.Env,
-        monkeypatch: pytest.MonkeyPatch,
-        capfd: pytest.CaptureFixture[str],
-    ) -> None:
-        """Give the row's scratch directories one home, removed after it."""
-        super().__init__(tmp_path, env=env, monkeypatch=monkeypatch, capfd=capfd)
-        self.tmp = tmp_path
-
-    def named_client(self) -> list[str]:
-        """Plant CLIENT outside PATH; the stub psql is out of PATH too.
-
-        Returns:
-            The client's path.
-
-        """
-        tmp = Path(tempfile.mkdtemp(dir=self.tmp))
-        client = tmp / "client"
-        client.write_text(CLIENT, encoding="utf-8")
-        client.chmod(0o755)
-        psql = tmp / "psql"
-        psql.write_text(PSQL, encoding="utf-8")
-        psql.chmod(0o755)
-        self.stub_psql = str(psql)
-        return [str(client)]
-
-
-@fixture
-def client_rows(
-    tmp_path: Path,
-    env: support.Env,
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize("named", [COLLECT, [*COLLECT, "--"]])
+def test_no_client_named_runs_psql_on_path(
+    plant: Callable[[Database], Planted],
     capfd: pytest.CaptureFixture[str],
-) -> ClientRows:
-    """Give each row its own ClientRows."""
-    return ClientRows(tmp_path, env=env, monkeypatch=monkeypatch, capfd=capfd)
-
-
-def test_no_client_named_runs_psql_on_path(client_rows: ClientRows) -> None:
+    named: list[str],
+) -> None:
     """`collect <conninfo>`, with or without a bare `--`, runs psql."""
-    clients: tuple[list[str] | None, ...] = (None, [])
-    for client in clients:
-        client_rows.client = client
-        collected, read = client_rows.measure(TWO)
-        assert collected.returncode == 0, collected.stderr
-        assert read.returncode == 0, read.stderr
-        assert (client_rows.answers / "linted").is_file()
+    planted = plant(Database(TWO))
+    collected = pc.main(named)
+    assert (collected, *capfd.readouterr()) == (0, "", "")
+    status = pc.main(["totals", "leg", str(planted.reports)])
+    out, err = capfd.readouterr()
+    assert (status, out, err) == (0, TOTALLED, TWO_REPORT.format(label="leg"))
+    assert (planted.answers / "linted").is_file()
 
 
-def test_a_named_client_is_run_with_its_words_first(client_rows: ClientRows) -> None:
-    """The words run as an argv, unjoined, then the helper's own."""
-    empty = Path(tempfile.mkdtemp(dir=client_rows.tmp))
-    client_rows.client = [*client_rows.named_client(), "a b", "c"]
-    collected, read = client_rows.measure(
-        TWO,
-        PATH=f"{empty}{os.pathsep}/usr/bin{os.pathsep}/bin",
-        STUB_PSQL=client_rows.stub_psql,
+def test_a_named_client_is_run_with_its_words_first(
+    plant: Callable[[Database], Planted],
+    capfd: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """The words run as an argv, unjoined, then the helper's own.
+
+    The client and the stub psql are planted outside PATH.
+    """
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    for name, text in (("client", CLIENT), ("psql", PSQL)):
+        (elsewhere / name).write_text(text, encoding="utf-8")
+        (elsewhere / name).chmod(0o755)
+    planted = plant(
+        Database(
+            TWO,
+            env={
+                "PATH": f"{elsewhere / 'empty'}{os.pathsep}/usr/bin{os.pathsep}/bin",
+                "STUB_PSQL": str(elsewhere / "psql"),
+            },
+        )
     )
-    assert collected.returncode == 0, collected.stderr
-    assert read.returncode == 0, read.stderr
-    assert client_rows.report.is_file()
-    calls = (client_rows.answers / "client").read_text(encoding="utf-8").splitlines()
+    collected = pc.main([*COLLECT, "--", str(elsewhere / "client"), "a b", "c"])
+    assert (collected, *capfd.readouterr()) == (0, "", "")
+    assert planted.report().is_file()
+    calls = (planted.answers / "client").read_text(encoding="utf-8").splitlines()
     assert len(calls) > 3
     every: list[str] = ["[a b][c][-X]"] * len(calls)
     assert every == calls
 
 
-def test_a_client_that_cannot_start_names_the_remedy(client_rows: ClientRows) -> None:
-    """A named client that does not exist is refused, with the remedy."""
-    missing = "/nonexistent/client"
-    client_rows.client = [missing, "exec"]
-    collected, read = client_rows.measure(TWO)
-    assert collected.returncode == 0, collected.stderr
-    assert read.returncode == 1
-    assert (
-        "leg: plpgsql: the teardown's collection failed:"
-        f" {missing} is not on PATH {OWN}; {REMEDY}\n"
-    ) == read.stderr
-
-
-class RefusalRows(Collecting):
-    """Every way a collection or a report file is refused, by name."""
-
-    def __init__(
-        self,
-        tmp_path: Path,
-        *,
-        env: support.Env,
-        monkeypatch: pytest.MonkeyPatch,
-        capfd: pytest.CaptureFixture[str],
-    ) -> None:
-        """Give the row's scratch directories one home, removed after it."""
-        super().__init__(tmp_path, env=env, monkeypatch=monkeypatch, capfd=capfd)
-        self.tmp = tmp_path
-
-    def read_planted(self, document: object) -> Done:
-        """Run `totals` over a planted report file.
-
-        Returns:
-            The finished process.
-
-        """
-        tmp = Path(tempfile.mkdtemp(dir=self.tmp))
-        planted = tmp / "report.json"
-        text = document if isinstance(document, str) else json.dumps(document)
-        planted.write_text(text, encoding="utf-8")
-        as_the_child(self.monkeypatch, self.make_env(MISE_TASK_NAME=TASK), tmp)
-        return Done(pc.main(["totals", "leg", str(planted)]), *self.capfd.readouterr())
+def test_collect_without_a_report_path_is_refused(
+    plant: Callable[[Database], Planted],
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """The teardown calls collect only when the leg set the path."""
+    plant(Database(TWO, env={"ORG_PLPGSQL_COVERAGE": ""}))
+    status = pc.main(COLLECT)
+    out, err = capfd.readouterr()
+    refused = (
+        f"{TASK}: ORG_PLPGSQL_COVERAGE is not set — the leg sets"
+        " it; call collect only then\n"
+    )
+    assert (status, out, err) == (1, "", refused)
 
 
 @fixture
-def refusal_rows(
-    tmp_path: Path,
-    env: support.Env,
-    monkeypatch: pytest.MonkeyPatch,
-    capfd: pytest.CaptureFixture[str],
-) -> RefusalRows:
-    """Give each row its own RefusalRows."""
-    return RefusalRows(tmp_path, env=env, monkeypatch=monkeypatch, capfd=capfd)
-
-
-def collection_failed(read: Done, why: str) -> None:
-    """Assert the leg refuses a failed collection, naming why."""
-    assert read.returncode == 1
-    assert read.stdout == ""
-    assert f"leg: plpgsql: the teardown's collection failed: {why}\n" == read.stderr
-
-
-def test_no_psql_on_path_fails_the_collection_by_name(
-    refusal_rows: RefusalRows,
+def in_the_task(
+    tmp_path: Path, env: support.Env, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The client is the repository's; without it nothing is read."""
-    empty = Path(tempfile.mkdtemp(dir=refusal_rows.tmp))
-    collected, read = refusal_rows.measure(TWO, PATH=str(empty))
-    assert collected.returncode == 0, collected.stderr
-    collection_failed(read, f"psql is not on PATH {OWN}; {REMEDY}")
+    """Run the row as the task, in its scratch directory."""
+    as_the_child(monkeypatch, env(MISE_TASK_NAME=TASK), tmp_path)
 
 
-def test_a_database_psql_cannot_reach_fails_by_its_error(
-    refusal_rows: RefusalRows,
-) -> None:
-    """The message psql printed is the reason, verbatim."""
-    why = 'FATAL:  database "stub" does not exist'
-    collected, read = refusal_rows.measure(TWO, STUB_META_FAIL=why)
-    assert collected.returncode == 0, collected.stderr
-    collection_failed(read, why)
+GOOD = {
+    "function": "public.guard()",
+    "statements": "0.8",
+    "branches": "1",
+    "statement_count": 5,
+    "executed": 4,
+    "branch_free": False,
+    "ran": [1, 2, 3, 4],
+    "source": SOURCE,
+    "findings": [],
+    "suppressions": [],
+}
 
 
-def test_unreadable_settings_fail_the_collection(refusal_rows: RefusalRows) -> None:
-    """Two settings or nothing: one field is not the profiler and preload."""
-    collected, read = refusal_rows.measure(TWO, STUB_META="on")
-    assert collected.returncode == 0, collected.stderr
-    collection_failed(read, "unreadable settings from the database: [['on']]")
+def report(*entries: object) -> dict[str, object]:
+    """Wrap function entries in a report document.
+
+    Returns:
+        The document.
+
+    """
+    return {"profiler": "on", "preload": PRELOAD, "functions": list(entries)}
 
 
-def test_an_unreadable_listing_row_fails_the_collection(
-    refusal_rows: RefusalRows,
-) -> None:
-    """A listing row without its signature is not guessed at."""
-    collected, read = refusal_rows.measure(TWO, listing="101\n")
-    assert collected.returncode == 0, collected.stderr
-    collection_failed(read, "unreadable function listing: ['101']")
+def without(key: str) -> dict[str, object]:
+    """Copy GOOD without one key.
+
+    Returns:
+        The entry.
+
+    """
+    return {k: v for k, v in GOOD.items() if k != key}
 
 
-def test_figures_that_are_not_numbers_are_unreadable(refusal_rows: RefusalRows) -> None:
-    """A reading psql printed in the wrong shape is listed, red."""
-    odd = {"101": ("public.guard()", "x\ty")}
-    collected, read = refusal_rows.measure(odd)
-    assert collected.returncode == 0, collected.stderr
-    assert read.returncode == 1
-    assert read.stderr == (
-        "leg: plpgsql: plpgsql_check cannot read public.guard():"
-        " unreadable figures: [['x', 'y']]\n"
-        "leg: plpgsql: 1 function(s) unreadable — a function the extension"
-        " cannot read is never dropped from the total\n"
-    )
+NOT_A_REPORT = "leg: plpgsql: the report is not a coverage report: {what}\n"
+UNNAMED = (
+    "function 0: 'ran' does not name 'executed' statements from 1 to 'statement_count'"
+)
 
 
-def test_a_failed_collection_in_the_file_is_refused(refusal_rows: RefusalRows) -> None:
-    """The failure shape decodes, and the leg refuses with its reason."""
-    collection_failed(refusal_rows.read_planted({"error": "boom"}), "boom")
+def as_json(document: object) -> str:
+    """Write a planted report's text.
+
+    Returns:
+        The document as JSON.
+
+    """
+    return json.dumps(document)
 
 
-def test_the_decoder_names_what_is_not_a_report(refusal_rows: RefusalRows) -> None:
-    """Every shape the one decoder refuses, by what is wrong with it."""
-    good = {
-        "function": "public.guard()",
-        "statements": "0.8",
-        "branches": "1",
-        "statement_count": 5,
-        "executed": 4,
-        "branch_free": False,
-        "ran": [1, 2, 3, 4],
-        "source": SOURCE,
-        "findings": [],
-        "suppressions": [],
-    }
-
-    def report(*entries: object) -> dict[str, object]:
-        return {"profiler": "on", "preload": PRELOAD, "functions": list(entries)}
-
-    rows: list[tuple[object, str]] = [
-        ("[", "not JSON (Expecting value: line 1 column 2 (char 1))"),
-        ([], "the document is not an object"),
-        ({"error": 3}, "the document: 'error' is not a string"),
-        (
-            {"profiler": "on", "preload": PRELOAD, "functions": {}},
-            "the document: 'functions' is not a list",
+# Each row: the report file's text, then what `totals` says of it.
+PLANTED: list[tuple[str, str]] = [
+    (as_json({"error": "boom"}), FAILED.format(why="boom")),
+    (
+        "[",
+        NOT_A_REPORT.format(
+            what="not JSON (Expecting value: line 1 column 2 (char 1))"
         ),
-        (
-            {"preload": PRELOAD, "functions": []},
-            "the document: 'profiler' is not a string",
+    ),
+    ("[]", NOT_A_REPORT.format(what="the document is not an object")),
+    (
+        as_json({"error": 3}),
+        NOT_A_REPORT.format(what="the document: 'error' is not a string"),
+    ),
+    (
+        as_json({"profiler": "on", "preload": PRELOAD, "functions": {}}),
+        NOT_A_REPORT.format(what="the document: 'functions' is not a list"),
+    ),
+    (
+        as_json({"preload": PRELOAD, "functions": []}),
+        NOT_A_REPORT.format(what="the document: 'profiler' is not a string"),
+    ),
+    (as_json(report(1)), NOT_A_REPORT.format(what="function 0 is not an object")),
+    (
+        as_json(report(GOOD | {"statements": 0.8})),
+        NOT_A_REPORT.format(what="function 0: 'statements' is not a string"),
+    ),
+    (
+        as_json(report(without("findings"))),
+        NOT_A_REPORT.format(what="function 0: 'findings' is not a list"),
+    ),
+    (
+        as_json(report(GOOD | {"branch_free": "no"})),
+        NOT_A_REPORT.format(what="function 0: 'branch_free' is not a boolean"),
+    ),
+    (
+        as_json(report(GOOD | {"statement_count": -1})),
+        NOT_A_REPORT.format(what="function 0: 'statement_count' is not a count"),
+    ),
+    (
+        as_json(report(GOOD | {"executed": True})),
+        NOT_A_REPORT.format(what="function 0: 'executed' is not a count"),
+    ),
+    (
+        as_json(report(GOOD | {"statements": "1.5"})),
+        NOT_A_REPORT.format(
+            what="function 0: 'statements' is not a fraction from 0 to 1"
         ),
-        (report(1), "function 0 is not an object"),
-        (
-            report(good | {"branch_free": "no"}),
-            "function 0: 'branch_free' is not a boolean",
+    ),
+    (
+        as_json(report(GOOD | {"branches": "abc"})),
+        NOT_A_REPORT.format(
+            what="function 0: 'branches' is not a fraction from 0 to 1"
         ),
-        (
-            report(good | {"statement_count": -1}),
-            "function 0: 'statement_count' is not a count",
+    ),
+    (
+        as_json(report(GOOD, GOOD | {"statements": "NaN"})),
+        NOT_A_REPORT.format(
+            what="function 1: 'statements' is not a fraction from 0 to 1"
         ),
+    ),
+    (
+        as_json(report({"function": "public.guard()", "error": 7})),
+        NOT_A_REPORT.format(what="function 0: 'error' is not a string"),
+    ),
+    *(
         (
-            report(good | {"executed": True}),
-            "function 0: 'executed' is not a count",
-        ),
-        (
-            report(good | {"statements": "1.5"}),
-            "function 0: 'statements' is not a fraction from 0 to 1",
-        ),
-        (
-            report(good | {"branches": "abc"}),
-            "function 0: 'branches' is not a fraction from 0 to 1",
-        ),
-        (
-            report(good, good | {"statements": "NaN"}),
-            "function 1: 'statements' is not a fraction from 0 to 1",
-        ),
-        (
-            report({"function": "public.guard()", "error": 7}),
-            "function 0: 'error' is not a string",
-        ),
-        (
-            report({k: v for k, v in good.items() if k != "ran"}),
-            "function 0: 'ran' is not a list of statement ids",
-        ),
-        (
-            report(good | {"ran": [1, True, 3, 4]}),
-            "function 0: 'ran' is not a list of statement ids",
-        ),
-        (
-            report(good | {"ran": [2, 1, 3, 4]}),
-            "function 0: 'ran' is not a list of statement ids",
-        ),
-        (
-            report(good | {"ran": [0, 1, 2, 3]}),
-            "function 0: 'ran' is not a list of statement ids",
-        ),
-        (
-            report(good | {"ran": [1, 2, 3]}),
-            (
-                "function 0: 'ran' does not name 'executed' statements"
-                " from 1 to 'statement_count'"
+            as_json(report(entry)),
+            NOT_A_REPORT.format(
+                what="function 0: 'ran' is not a list of statement ids"
             ),
-        ),
-        (
-            report(good | {"ran": [1, 2, 3, 6]}),
-            (
-                "function 0: 'ran' does not name 'executed' statements"
-                " from 1 to 'statement_count'"
-            ),
-        ),
-        (
-            report({k: v for k, v in good.items() if k != "source"}),
-            "function 0: 'source' is not a string",
-        ),
-    ]
-    for document, what in rows:
-        read = refusal_rows.read_planted(document)
-        assert read.returncode == 1
-        assert read.stdout == ""
-        assert (
-            f"leg: plpgsql: the report is not a coverage report: {what}\n"
-            == read.stderr
         )
+        for entry in (
+            without("ran"),
+            GOOD | {"ran": [1, True, 3, 4]},
+            GOOD | {"ran": [2, 1, 3, 4]},
+            GOOD | {"ran": [0, 1, 2, 3]},
+        )
+    ),
+    (as_json(report(GOOD | {"ran": [1, 2, 3]})), NOT_A_REPORT.format(what=UNNAMED)),
+    (
+        as_json(report(GOOD | {"ran": [1, 2, 3, 6]})),
+        NOT_A_REPORT.format(what=UNNAMED),
+    ),
+    (
+        as_json(report(without("source"))),
+        NOT_A_REPORT.format(what="function 0: 'source' is not a string"),
+    ),
+]
 
 
-@pytest.mark.usefixtures("refusal_rows")
+@pytest.mark.usefixtures("in_the_task")
+@pytest.mark.parametrize(("text", "stderr"), PLANTED)
+def test_totals_refuses_a_report_by_what_is_wrong(
+    tmp_path: Path, capfd: pytest.CaptureFixture[str], text: str, stderr: str
+) -> None:
+    """A failed collection, or a file the one decoder refuses, by name."""
+    planted = tmp_path / "report.json"
+    planted.write_text(text, encoding="utf-8")
+    status = pc.main(["totals", "leg", str(planted)])
+    out, err = capfd.readouterr()
+    assert (status, out, err) == (1, "", stderr)
+
+
+@pytest.mark.usefixtures("in_the_task")
+def test_a_missing_report_names_the_teardown(
+    tmp_path: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A suite whose teardown never called collect is refused."""
+    status = pc.main(["totals", "leg", str(tmp_path / "none.json")])
+    out, err = capfd.readouterr()
+    assert (status, out, err) == (1, "", NO_REPORT)
+
+
+@pytest.mark.usefixtures("in_the_task")
 @pytest.mark.parametrize("argv", [[], ["measure", "leg"]])
 def test_a_usage_error_names_both_subcommands(
-    argv: list[str],
-    env: support.Env,
-    monkeypatch: pytest.MonkeyPatch,
-    capfd: pytest.CaptureFixture[str],
+    argv: list[str], capfd: pytest.CaptureFixture[str]
 ) -> None:
     """No subcommand, or an unknown one, is exit 2 with the usage."""
-    as_the_child(monkeypatch, env(MISE_TASK_NAME=TASK), CANON)
-    done = Done(pc.main(list(argv)), *capfd.readouterr())
-    assert done.returncode == 2
-    assert (
-        f"{TASK}: usage: plpgsql-coverage collect <conninfo>"
-        " [-- <client> [<argument>...]] | totals <label> <report>\n"
-    ) == done.stderr
+    status = pc.main(list(argv))
+    out, err = capfd.readouterr()
+    assert (status, out, err) == (
+        2,
+        "",
+        (
+            f"{TASK}: usage: plpgsql-coverage collect <conninfo>"
+            " [-- <client> [<argument>...]] | totals <label> <report>\n"
+        ),
+    )
 
 
 # The clause, whole, in three tracked files of three kinds.
@@ -1210,24 +1076,21 @@ PYTHON_HELD = (
 )
 
 
-class LegRows:
-    """`coverage:check` over the plpgsql leg, decided by the floor's record."""
+@dataclass(frozen=True)
+class Leg:
+    """coverage:check's body laid out in a planted tree, ready to run."""
 
-    def __init__(
-        self,
-        tmp_path: Path,
-        *,
-        env: support.Env,
-        monkeypatch: pytest.MonkeyPatch,
-        capfd: pytest.CaptureFixture[str],
-    ) -> None:
-        """Give the row's scratch directories one home, removed after it."""
-        self.monkeypatch = monkeypatch
-        self.capfd = capfd
-        self.make_env = env
-        self.tmp = tmp_path
+    argv: list[str]
+    env: dict[str, str]
+    tree: Path
+    floor: Path
+    planted: str
 
-    def check(  # ruff: ignore[too-many-arguments] -- one keyword per part of a run
+
+class LaysOutLeg(Protocol):
+    """Lay out one `coverage:check` run; `lay_out_leg` says how."""
+
+    def __call__(  # ruff: ignore[too-many-arguments] -- one keyword per part of a run
         self,
         functions: dict[str, tuple[str, str]],
         *,
@@ -1236,22 +1099,45 @@ class LegRows:
         collects: bool = True,
         measured: dict[str, str] | None = None,
         databases: int = 1,
-    ) -> subprocess.CompletedProcess[str]:
-        """Run coverage:check's body in a planted tree.
+    ) -> Leg:
+        """Plant the tree, the floor and the run the suite left."""
+        ...
+
+
+@fixture
+def lay_out_leg(
+    tmp_path: Path, env: support.Env, monkeypatch: pytest.MonkeyPatch
+) -> LaysOutLeg:
+    """Lay out `coverage:check` over the plpgsql leg, decided by the floor's record.
+
+    Returns:
+        A function that plants one tree and its run, and returns the leg.
+
+    """
+
+    def laying_out(  # ruff: ignore[too-many-arguments] -- one keyword per part of a run
+        functions: dict[str, tuple[str, str]],
+        *,
+        legs: str,
+        files: dict[str, str],
+        collects: bool = True,
+        measured: dict[str, str] | None = None,
+        databases: int = 1,
+    ) -> Leg:
+        """Plant the tree, the floor and the run the suite left.
 
         `legs` is the floor's `legs:` record, each leg at 80.0 unless
         `measured` names the figure its floor was derived from (#2143),
         `files` the tracked files beside it, and `collects` whether the
         suite's teardown calls the helper, once per database of
         `databases` (#2163). A tracked `*.py` brings the python leg in,
-        measured by the stub coverage.py. The floor file stays on the
-        row as `self.floor`.
+        measured by the stub coverage.py.
 
         Returns:
-            The finished task.
+            The leg, ready to run.
 
         """
-        tmp = Path(tempfile.mkdtemp(dir=self.tmp))
+        tmp = Path(tempfile.mkdtemp(dir=tmp_path))
         stubs, answers = plant_stubs(tmp, functions)
         (stubs / "coverage").write_text(COVERAGE, encoding="utf-8")
         (stubs / "coverage").chmod(0o755)
@@ -1267,13 +1153,12 @@ class LegRows:
             "v1.0.0",
         )
         (tree / ".coverage-floor").write_text(floor, encoding="utf-8")
-        self.floor, self.planted = tree / ".coverage-floor", floor
         # The test task, for the read of it the python leg makes; the
         # check never runs it.
         task = tmp / "task.json"
         suite: dict[str, object] = {"dir": str(tree), "run": ["echo suite ran >&2"]}
         task.write_text(json.dumps(suite), "utf-8")
-        env = stub_env(
+        environ = stub_env(
             stubs,
             answers,
             STUB_TASK=str(task),
@@ -1281,35 +1166,27 @@ class LegRows:
             STUB_PY="90.0",
             STUB_BR="85.0",
             ORG_COVERAGE_RUN=str(tmp / "run"),
-            env=self.make_env,
+            env=env,
         )
-        run([GIT, "init", "-q"], env, tree)
-        run([GIT, "add", *files, ".coverage-floor"], env, tree)
+        run([GIT, "init", "-q"], environ, tree)
+        run([GIT, "add", *files, ".coverage-floor"], environ, tree)
         measured_run(
             tmp / "run",
-            env,
+            environ,
             tree,
             python=any(name.endswith(".py") for name in files),
             collects=collects,
             databases=databases,
-            capfd=self.capfd,
-            monkeypatch=self.monkeypatch,
+            monkeypatch=monkeypatch,
         )
         check = as_object(TASKS["coverage:check"], "coverage:check")
         script = as_str(check["run"], "coverage:check's run")
         as_mise = support.task_run("coverage:check", script)
-        return run(as_mise.argv, env | as_mise.env, tree)
+        return Leg(
+            as_mise.argv, environ | as_mise.env, tree, tree / ".coverage-floor", floor
+        )
 
-
-@fixture
-def leg_rows(
-    tmp_path: Path,
-    env: support.Env,
-    monkeypatch: pytest.MonkeyPatch,
-    capfd: pytest.CaptureFixture[str],
-) -> LegRows:
-    """Give each row its own LegRows."""
-    return LegRows(tmp_path, env=env, monkeypatch=monkeypatch, capfd=capfd)
+    return laying_out
 
 
 def assert_held(held: str, stdout: str) -> None:
@@ -1323,26 +1200,32 @@ def assert_held(held: str, stdout: str) -> None:
     assert re.search(r"^coverage:check: upload /\S+/coverage\.xml$", upload)
 
 
-def test_the_clause_in_files_switches_nothing_on(leg_rows: LegRows) -> None:
+def test_the_clause_in_files_switches_nothing_on(
+    lay_out_leg: LaysOutLeg,
+) -> None:
     """No search: a README, a .py and a .sql naming the clause (#1666)."""
-    done = leg_rows.check(
+    leg = lay_out_leg(
         TWO,
         legs="python python-branches",
         files=MENTIONS,
         collects=False,
     )
+    done = run(leg.argv, leg.env, leg.tree)
     assert done.returncode == 0, done.stderr
     assert_held(PYTHON_HELD, done.stdout)
     assert "plpgsql" not in done.stdout + done.stderr
 
 
-def test_a_recorded_leg_is_held_with_no_sql_tracked(leg_rows: LegRows) -> None:
+def test_a_recorded_leg_is_held_with_no_sql_tracked(
+    lay_out_leg: LaysOutLeg,
+) -> None:
     """The report is the answer: no .sql file is needed to find it."""
-    done = leg_rows.check(
+    leg = lay_out_leg(
         HELD,
         legs="python python-branches plpgsql plpgsql-branches",
         files={"helper.py": "print('hi')\n"},
     )
+    done = run(leg.argv, leg.env, leg.tree)
     assert done.returncode == 0, done.stderr
     assert_held(
         PYTHON_HELD + "coverage:check: plpgsql leg holds its floor 80.0 (95.00%)\n"
@@ -1351,11 +1234,12 @@ def test_a_recorded_leg_is_held_with_no_sql_tracked(leg_rows: LegRows) -> None:
     )
 
 
-def test_below_the_floor_is_red_by_name(leg_rows: LegRows) -> None:
+def test_below_the_floor_is_red_by_name(lay_out_leg: LaysOutLeg) -> None:
     """Statements at 60% red the plpgsql leg by its name."""
-    done = leg_rows.check(
+    leg = lay_out_leg(
         TWO, legs="plpgsql plpgsql-branches", files={"schema.sql": "-- sql\n"}
     )
+    done = run(leg.argv, leg.env, leg.tree)
     assert done.returncode == 1
     assert (
         "coverage:check: plpgsql: 60.00% is below its derived floor 80.0%\n"
@@ -1363,19 +1247,22 @@ def test_below_the_floor_is_red_by_name(leg_rows: LegRows) -> None:
     )
 
 
-def test_a_leg_below_its_own_floor_above_a_weaker_leg_is_red(leg_rows: LegRows) -> None:
+def test_a_leg_below_its_own_floor_above_a_weaker_leg_is_red(
+    lay_out_leg: LaysOutLeg,
+) -> None:
     """plpgsql-branches at 88%: above python-branches, below its own 90.
 
     Every leg is held to a floor of its own (#2143). Held to the
     weakest leg's floor, the shape this replaced, the branch figure
     stood eight points above it and the gate was green.
     """
-    done = leg_rows.check(
+    leg = lay_out_leg(
         STRONG,
         legs="python python-branches plpgsql plpgsql-branches",
         files={"helper.py": "print('hi')\n"},
         measured={"plpgsql": "95.0", "plpgsql-branches": "95.0"},
     )
+    done = run(leg.argv, leg.env, leg.tree)
     assert done.returncode == 1, done.stderr
     assert (
         done.stderr.splitlines()[-1]
@@ -1387,14 +1274,17 @@ def test_a_leg_below_its_own_floor_above_a_weaker_leg_is_red(leg_rows: LegRows) 
     )
 
 
-def test_a_record_whose_every_leg_reports_nothing_names_them(leg_rows: LegRows) -> None:
+def test_a_record_whose_every_leg_reports_nothing_names_them(
+    lay_out_leg: LaysOutLeg,
+) -> None:
     """Every recorded leg lost: each named, never the generic refusal."""
-    done = leg_rows.check(
+    leg = lay_out_leg(
         TWO,
         legs="python python-branches",
         files={"README.md": "no python left\n"},
         collects=False,
     )
+    done = run(leg.argv, leg.env, leg.tree)
     assert done.returncode == 1
     remedy = (
         "  the python leg needs tracked *.py and a `test` task whose test"
@@ -1413,14 +1303,17 @@ def test_a_record_whose_every_leg_reports_nothing_names_them(leg_rows: LegRows) 
     assert done.stdout == ""
 
 
-def test_a_recorded_leg_that_reports_nothing_is_red_by_name(leg_rows: LegRows) -> None:
+def test_a_recorded_leg_that_reports_nothing_is_red_by_name(
+    lay_out_leg: LaysOutLeg,
+) -> None:
     """The teardown stopped collecting: the leg is named, never dropped."""
-    done = leg_rows.check(
+    leg = lay_out_leg(
         TWO,
         legs="python python-branches plpgsql plpgsql-branches",
         files={"helper.py": "print('hi')\n"},
         collects=False,
     )
+    done = run(leg.argv, leg.env, leg.tree)
     assert done.returncode == 1
     remedy = (
         "  the plpgsql leg needs a test command run through"
@@ -1439,14 +1332,17 @@ def test_a_recorded_leg_that_reports_nothing_is_red_by_name(leg_rows: LegRows) -
     ) in done.stderr
 
 
-def test_two_databases_leave_the_branch_floor_as_it_stands(leg_rows: LegRows) -> None:
+def test_two_databases_leave_the_branch_floor_as_it_stands(
+    lay_out_leg: LaysOutLeg,
+) -> None:
     """Not held over two databases: named, and the floor file unchanged."""
-    done = leg_rows.check(
+    leg = lay_out_leg(
         HELD,
         legs="python python-branches plpgsql plpgsql-branches",
         files={"helper.py": "print('hi')\n"},
         databases=2,
     )
+    done = run(leg.argv, leg.env, leg.tree)
     assert done.returncode == 0, done.stderr
     assert_held(
         PYTHON_HELD + "coverage:check: plpgsql leg holds its floor 80.0 (95.00%)\n"
@@ -1459,7 +1355,7 @@ def test_two_databases_leave_the_branch_floor_as_it_stands(leg_rows: LegRows) ->
         "coverage:check: plpgsql: plpgsql-branches: not held, 2 databases;"
         " plpgsql_check cannot merge branches across databases (#2169)\n"
     ) in done.stderr
-    assert leg_rows.planted == leg_rows.floor.read_text(encoding="utf-8")
+    assert leg.planted == leg.floor.read_text(encoding="utf-8")
 
 
 # The coverage.py stub the python leg's rows use, read from its suite.
@@ -1487,40 +1383,52 @@ def counter(tree: Path) -> int:
     return len((tree.parent / "counter").read_text("utf-8").splitlines())
 
 
-class ReadsTheRunRows:
-    """Both legs read the one run `measured` left, and run no suite (#1667)."""
+@dataclass(frozen=True)
+class Measuring:
+    """coverage-measure.sh laid out over a planted run, ready to run."""
 
-    def __init__(
-        self,
-        tmp_path: Path,
-        *,
-        env: support.Env,
-        monkeypatch: pytest.MonkeyPatch,
-        capfd: pytest.CaptureFixture[str],
-    ) -> None:
-        """Give the row's scratch directories one home, removed after it."""
-        self.monkeypatch = monkeypatch
-        self.capfd = capfd
-        self.make_env = env
-        self.tmp = tmp_path
+    argv: list[str]
+    env: dict[str, str]
+    tree: Path
 
-    def measure(
-        self,
+
+class LaysOutRun(Protocol):
+    """Lay out one coverage-measure.sh run; `lay_out_run` says how."""
+
+    def __call__(
+        self, selector: str = "all", *, python: bool = True, no_xml: bool = False
+    ) -> Measuring:
+        """Plant the run, python and PL/pgSQL."""
+        ...
+
+
+@fixture
+def lay_out_run(
+    tmp_path: Path, env: support.Env, monkeypatch: pytest.MonkeyPatch
+) -> LaysOutRun:
+    """Both legs read the one run `measured` left, and run no suite (#1667).
+
+    Returns:
+        A function that plants one run and returns the script to read it.
+
+    """
+
+    def laying_out(
         selector: str = "all",
         *,
         python: bool = True,
         no_xml: bool = False,
-    ) -> tuple[subprocess.CompletedProcess[str], Path]:
-        """Run coverage-measure.sh over a planted run, python and PL/pgSQL.
+    ) -> Measuring:
+        """Lay out coverage-measure.sh over a planted run, python and PL/pgSQL.
 
         Reports go to `reports` beside the tree (#1628); `no_xml` has the
         python leg write none.
 
         Returns:
-            The finished script and the planted tree.
+            The script's argv, its environment and the planted tree.
 
         """
-        tmp = Path(tempfile.mkdtemp(dir=self.tmp))
+        tmp = Path(tempfile.mkdtemp(dir=tmp_path))
         stubs, answers = plant_stubs(tmp, TWO)
         for name, text in (("coverage", COVERAGE), ("mise", MISE_TASKS)):
             (stubs / name).write_text(text, encoding="utf-8")
@@ -1538,7 +1446,7 @@ class ReadsTheRunRows:
         if python:
             (tree / "helper.py").write_text("print('hi')\n", encoding="utf-8")
             tracked.append("helper.py")
-        env = stub_env(
+        environ = stub_env(
             stubs,
             answers,
             STUB_TASKS=str(defs),
@@ -1549,37 +1457,30 @@ class ReadsTheRunRows:
             STUB_NO_XML="1" if no_xml else "",
             ORG_COVERAGE_REPORTS=str(tmp / "reports"),
             ORG_COVERAGE_RUN=str(tmp / "run"),
-            env=self.make_env,
+            env=env,
         )
-        run([GIT, "init", "-q"], env, tree)
-        run([GIT, "add", *tracked], env, tree)
+        run([GIT, "init", "-q"], environ, tree)
+        run([GIT, "add", *tracked], environ, tree)
         measured_run(
             tmp / "run",
-            env,
+            environ,
             tree,
             python=python,
             collects=True,
-            capfd=self.capfd,
-            monkeypatch=self.monkeypatch,
+            monkeypatch=monkeypatch,
         )
         script = str(BELT / "coverage-measure.sh")
-        return run([BASH, script, "leg", selector], env, tree), tree
+        return Measuring([BASH, script, "leg", selector], environ, tree)
+
+    return laying_out
 
 
-@fixture
-def reads_the_run_rows(
-    tmp_path: Path,
-    env: support.Env,
-    monkeypatch: pytest.MonkeyPatch,
-    capfd: pytest.CaptureFixture[str],
-) -> ReadsTheRunRows:
-    """Give each row its own ReadsTheRunRows."""
-    return ReadsTheRunRows(tmp_path, env=env, monkeypatch=monkeypatch, capfd=capfd)
-
-
-def test_both_legs_read_one_run_under_all(reads_the_run_rows: ReadsTheRunRows) -> None:
+def test_both_legs_read_one_run_under_all(
+    lay_out_run: LaysOutRun,
+) -> None:
     """Python and PL/pgSQL print their figures, and no suite runs."""
-    done, _ = reads_the_run_rows.measure()
+    measuring = lay_out_run()
+    done = run(measuring.argv, measuring.env, measuring.tree)
     assert done.returncode == 0, done.stderr
     assert done.stdout == (
         "python 90.0\npython-branches 85.0\nplpgsql 60.00\nplpgsql-branches 66.66\n"
@@ -1588,17 +1489,21 @@ def test_both_legs_read_one_run_under_all(reads_the_run_rows: ReadsTheRunRows) -
 
 
 def test_plpgsql_alone_reads_only_its_report(
-    reads_the_run_rows: ReadsTheRunRows,
+    lay_out_run: LaysOutRun,
 ) -> None:
     """The plpgsql selector prints its own figures and no python one."""
-    done, _ = reads_the_run_rows.measure("plpgsql")
+    measuring = lay_out_run("plpgsql")
+    done = run(measuring.argv, measuring.env, measuring.tree)
     assert done.returncode == 0, done.stderr
     assert done.stdout == "plpgsql 60.00\nplpgsql-branches 66.66\n"
 
 
-def test_only_formatless_legs_pass_by_name(reads_the_run_rows: ReadsTheRunRows) -> None:
+def test_only_formatless_legs_pass_by_name(
+    lay_out_run: LaysOutRun,
+) -> None:
     """No report is owed where no leg measured has a format."""
-    done, _ = reads_the_run_rows.measure("reports", python=False)
+    measuring = lay_out_run("reports", python=False)
+    done = run(measuring.argv, measuring.env, measuring.tree)
     assert done.returncode == 0, done.stderr
     assert done.stdout == (
         "plpgsql 60.00\nplpgsql-branches 66.66\n"
@@ -1612,10 +1517,11 @@ def test_only_formatless_legs_pass_by_name(reads_the_run_rows: ReadsTheRunRows) 
 
 
 def test_a_leg_with_a_format_that_wrote_nothing_is_refused(
-    reads_the_run_rows: ReadsTheRunRows,
+    lay_out_run: LaysOutRun,
 ) -> None:
     """A formatless leg beside it does not excuse the missing report."""
-    done, _ = reads_the_run_rows.measure("reports", no_xml=True)
+    measuring = lay_out_run("reports", no_xml=True)
+    done = run(measuring.argv, measuring.env, measuring.tree)
     assert done.returncode == 1
     assert done.stdout == ""
     assert (
@@ -1624,13 +1530,14 @@ def test_a_leg_with_a_format_that_wrote_nothing_is_refused(
 
 
 def test_a_formatless_leg_beside_a_written_report(
-    reads_the_run_rows: ReadsTheRunRows,
+    lay_out_run: LaysOutRun,
 ) -> None:
     """The written report uploads; the formatless legs are named."""
-    done, tree = reads_the_run_rows.measure("reports")
+    measuring = lay_out_run("reports")
+    done = run(measuring.argv, measuring.env, measuring.tree)
     assert done.returncode == 0, done.stderr
     assert done.stdout.endswith(
-        f"leg: upload {tree.parent / 'reports' / 'coverage.xml'}\n"
+        f"leg: upload {measuring.tree.parent / 'reports' / 'coverage.xml'}\n"
     ), done.stdout
     assert (
         "leg: plpgsql, plpgsql-branches: no upload format,"
@@ -1644,86 +1551,47 @@ NOT_HELD_LINE = (
 )
 
 
-class MergeRows:
-    """Several databases' reports, merged by signature (#2163), on the stub."""
-
-    def __init__(
-        self,
-        tmp_path: Path,
-        *,
-        env: support.Env,
-        monkeypatch: pytest.MonkeyPatch,
-        capfd: pytest.CaptureFixture[str],
-    ) -> None:
-        """Plant the stub database and an empty reports directory."""
-        self.monkeypatch = monkeypatch
-        self.capfd = capfd
-        self.make_env = env
-        self.tmp = tmp_path
-        self.stubs, self.answers = plant_stubs(self.tmp, TWO)
-        self.reports = self.tmp / "reports"
-        self.env = stub_env(
-            self.stubs,
-            self.answers,
-            ORG_PLPGSQL_COVERAGE=str(self.reports),
-            env=self.make_env,
-        )
-
-    def collect(self, ran: dict[str, str] | None = None) -> None:
-        """Tear one database down: plant what it ran, then collect it."""
-        for oid in TWO:
-            (self.answers / f"ran.{oid}").unlink(missing_ok=True)
-        for oid, ids in (ran or {}).items():
-            (self.answers / f"ran.{oid}").write_text(ids, encoding="utf-8")
-        as_the_child(self.monkeypatch, self.env, self.tmp)
-        done = Done(pc.main(["collect", "postgres://stub"]), *self.capfd.readouterr())
-        assert done.returncode == 0, done.stderr
-
-    def totals(self) -> Done:
-        """Read every report the teardowns wrote.
-
-        Returns:
-            What `totals` returned and printed.
-
-        """
-        as_the_child(self.monkeypatch, self.env, self.tmp)
-        return Done(
-            pc.main(["totals", "leg", str(self.reports)]), *self.capfd.readouterr()
-        )
+def plant_ran(answers: Path, ran: dict[str, str]) -> None:
+    """Plant the statement ids one database ran, by oid, replacing the last."""
+    for oid in TWO:
+        (answers / f"ran.{oid}").unlink(missing_ok=True)
+    for oid, ids in ran.items():
+        (answers / f"ran.{oid}").write_text(ids, encoding="utf-8")
 
 
 @fixture
-def merge_rows(
-    tmp_path: Path,
-    env: support.Env,
-    monkeypatch: pytest.MonkeyPatch,
-    capfd: pytest.CaptureFixture[str],
-) -> MergeRows:
-    """Give each row its own MergeRows."""
-    return MergeRows(tmp_path, env=env, monkeypatch=monkeypatch, capfd=capfd)
+def merging(plant: Callable[[Database], Planted]) -> Planted:
+    """Plant the stub database each of several teardowns collects from (#2163).
+
+    Returns:
+        The planted database; no report is written yet.
+
+    """
+    return plant(Database(TWO))
 
 
-def test_each_collect_writes_a_report_of_its_own(
-    merge_rows: MergeRows, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_each_collect_writes_a_report_of_its_own(merging: Planted) -> None:
     """Two teardowns, two files: neither replaces the other."""
-    merge_rows.collect()
-    merge_rows.collect()
-    written = sorted(p.name for p in merge_rows.reports.iterdir())
+    assert pc.main(COLLECT) == 0
+    assert pc.main(COLLECT) == 0
+    written = sorted(p.name for p in merging.reports.iterdir())
     assert len(written) == 2, written
     for name in written:
         assert re.search(r"^database-.+\.json$", name)
 
 
 def test_statements_merge_as_the_union_of_what_ran(
-    merge_rows: MergeRows, monkeypatch: pytest.MonkeyPatch
+    merging: Planted, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """Half of stamp's statements in each database: all ten, merged."""
-    merge_rows.collect({"102": "1\n2\n3\n4\n5\n"})
-    merge_rows.collect({"102": "6\n7\n8\n9\n10\n"})
-    read = merge_rows.totals()
-    assert read.returncode == 0, read.stderr
-    assert read.stdout == "plpgsql 93.33\nplpgsql-branches not-held\n"
+    plant_ran(merging.answers, {"102": "1\n2\n3\n4\n5\n"})
+    assert pc.main(COLLECT) == 0
+    plant_ran(merging.answers, {"102": "6\n7\n8\n9\n10\n"})
+    assert pc.main(COLLECT) == 0
+    status = pc.main(["totals", "leg", str(merging.reports)])
+    out, err = capfd.readouterr()
+    assert status == 0, err
+    assert out == "plpgsql 93.33\nplpgsql-branches not-held\n"
     assert (
         "leg: plpgsql: public.guard(): statements 4 of 5 (80.00%),"
         " branches at least 100.00% (the highest one database read)\n"
@@ -1734,166 +1602,164 @@ def test_statements_merge_as_the_union_of_what_ran(
         " databases, branches not held; at least 66.66%"
         " statement-weighted, a lower bound from the highest fraction"
         " one database read per function\n" + NOT_HELD_LINE.format(n=2)
-    ) == read.stderr
+    ) == err
 
 
-def test_no_branch_anywhere_prints_no_branch_leg_over_two(
-    merge_rows: MergeRows, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Branch-free functions only: nothing to hold or leave."""
-    (merge_rows.answers / "functions").write_text(
-        "103\tpublic.touch()\t\n", encoding="utf-8"
-    )
-    (merge_rows.answers / "read.103").write_text(f"{TOUCH[1]}\n", encoding="utf-8")
-    merge_rows.collect()
-    merge_rows.collect()
-    read = merge_rows.totals()
-    assert read.returncode == 0, read.stderr
-    assert read.stdout == "plpgsql 100.00\n"
-    assert (
+# Each row: the database, the answers planted in it, how many
+# teardowns collect from it, then what `totals` over their reports says.
+MERGED = [
+    Merged(
+        "no branch anywhere prints no branch leg over two",
+        Database({"103": TOUCH}),
+        {},
+        2,
+        0,
+        "plpgsql 100.00\n",
         TOUCH_LINE.format(label="leg")
         + "leg: plpgsql: total statements 2 of 2 (100.00%) across 2"
-        " databases, branches none: no function has a branch\n"
-    ) == read.stderr
+        " databases, branches none: no function has a branch\n",
+    ),
+    Merged(
+        "a function no database ran is red by name",
+        Database({"101": TWO["101"], "104": ("public.idle()", "0\t0\t3\t0\t0")}),
+        {},
+        2,
+        1,
+        "",
+        "leg: plpgsql: public.idle(): none of its 3 statements ran in any"
+        " of the 2 databases measured — a function no test runs is red,"
+        " whatever the total\n",
+    ),
+    Merged(
+        "one database names a function it never ran",
+        Database(TWO | {"102": ("public.stamp(integer)", "0\t0\t10\t0\t2")}),
+        {},
+        1,
+        1,
+        "",
+        "leg: plpgsql: public.stamp(integer): none of its 10 statements ran"
+        " in the database measured — a function no test runs is red,"
+        " whatever the total\n",
+    ),
+    Merged(
+        "refusals every database repeats are named once",
+        Database(TWO, env={"STUB_PROFILER": "off"}),
+        {},
+        2,
+        1,
+        "",
+        "leg: plpgsql: plpgsql_check.profiler is 'off' — with the profiler"
+        " off every function reads 0%, which is not a measurement; start"
+        " the test database with -c plpgsql_check.profiler=on\n",
+    ),
+    Merged(
+        "statement ids psql printed wrong are unreadable",
+        Database(TWO),
+        {"ran.101": "1\nx\n"},
+        1,
+        1,
+        "",
+        "leg: plpgsql: plpgsql_check cannot read public.guard():"
+        " unreadable statement ids: [['1'], ['x']]\n" + UNREADABLE,
+    ),
+]
+
+
+@pytest.mark.parametrize("row", MERGED, ids=[row.name for row in MERGED])
+def test_collects_then_totals(
+    plant: Callable[[Database], Planted],
+    capfd: pytest.CaptureFixture[str],
+    row: Merged,
+) -> None:
+    """Each teardown collects; `totals` over every report says exactly this."""
+    planted = plant(row.database)
+    for name, text in row.answers.items():
+        (planted.answers / name).write_text(text, encoding="utf-8")
+    for _ in range(row.collects):
+        collected = pc.main(COLLECT)
+        assert (collected, *capfd.readouterr()) == (0, "", "")
+    status = pc.main(["totals", "leg", str(planted.reports)])
+    out, err = capfd.readouterr()
+    assert (status, out, err) == (row.status, row.stdout, row.stderr)
 
 
 def test_one_signature_with_two_bodies_is_red_by_name(
-    merge_rows: MergeRows, monkeypatch: pytest.MonkeyPatch
+    merging: Planted, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """Statement ids number one body; two cannot be merged by id."""
-    merge_rows.collect()
-    (merge_rows.answers / "source.101").write_text("BEGIN RETURN 2; END", "utf-8")
-    merge_rows.collect()
-    read = merge_rows.totals()
-    assert read.returncode == 1
-    assert read.stdout == ""
-    assert read.stderr == (
-        "leg: plpgsql: public.guard(): its body differs between the"
-        " databases merged — statement ids are merged over one body only;"
-        " build every test database from the same schema\n"
-    )
-
-
-def test_a_function_no_database_ran_is_red_by_name(
-    merge_rows: MergeRows, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Present in both, run in neither: named, whatever the total."""
-    (merge_rows.answers / "functions").write_text(
-        "101\tpublic.guard()\t\n104\tpublic.idle()\t\n", encoding="utf-8"
-    )
-    (merge_rows.answers / "read.104").write_text("0\t0\t3\t0\t0\n", encoding="utf-8")
-    merge_rows.collect()
-    merge_rows.collect()
-    read = merge_rows.totals()
-    assert read.returncode == 1
-    assert read.stdout == ""
-    assert read.stderr == (
-        "leg: plpgsql: public.idle(): none of its 3 statements ran in any"
-        " of the 2 databases measured — a function no test runs is red,"
-        " whatever the total\n"
+    assert pc.main(COLLECT) == 0
+    (merging.answers / "source.101").write_text("BEGIN RETURN 2; END", "utf-8")
+    assert pc.main(COLLECT) == 0
+    status = pc.main(["totals", "leg", str(merging.reports)])
+    out, err = capfd.readouterr()
+    assert (status, out, err) == (
+        1,
+        "",
+        (
+            "leg: plpgsql: public.guard(): its body differs between the"
+            " databases merged — statement ids are merged over one body only;"
+            " build every test database from the same schema\n"
+        ),
     )
 
 
 def test_a_function_one_database_ran_is_covered(
-    merge_rows: MergeRows, monkeypatch: pytest.MonkeyPatch
+    merging: Planted, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """Run in one database and absent from the other: merged, green."""
-    merge_rows.collect()
-    (merge_rows.answers / "functions").write_text(
+    assert pc.main(COLLECT) == 0
+    (merging.answers / "functions").write_text(
         "101\tpublic.guard()\t\n", encoding="utf-8"
     )
-    merge_rows.collect()
-    read = merge_rows.totals()
-    assert read.returncode == 0, read.stderr
-    assert read.stdout == "plpgsql 60.00\nplpgsql-branches not-held\n"
-
-
-def test_one_database_names_a_function_it_never_ran(
-    merge_rows: MergeRows, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The same rule over a single report."""
-    (merge_rows.answers / "read.102").write_text("0\t0\t10\t0\t2\n", encoding="utf-8")
-    merge_rows.collect()
-    read = merge_rows.totals()
-    assert read.returncode == 1
-    assert read.stderr == (
-        "leg: plpgsql: public.stamp(integer): none of its 10 statements ran"
-        " in the database measured — a function no test runs is red,"
-        " whatever the total\n"
-    )
-
-
-def test_refusals_repeated_by_every_database_are_named_once(
-    merge_rows: MergeRows, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Two databases with the profiler off: one line, not two."""
-    merge_rows.env["STUB_PROFILER"] = "off"
-    merge_rows.collect()
-    merge_rows.collect()
-    read = merge_rows.totals()
-    assert read.returncode == 1
-    assert read.stderr == (
-        "leg: plpgsql: plpgsql_check.profiler is 'off' — with the profiler"
-        " off every function reads 0%, which is not a measurement; start"
-        " the test database with -c plpgsql_check.profiler=on\n"
-    )
+    assert pc.main(COLLECT) == 0
+    status = pc.main(["totals", "leg", str(merging.reports)])
+    out, err = capfd.readouterr()
+    assert status == 0, err
+    assert out == "plpgsql 60.00\nplpgsql-branches not-held\n"
 
 
 def test_a_report_that_is_not_one_is_named_by_its_file(
-    merge_rows: MergeRows, monkeypatch: pytest.MonkeyPatch
+    merging: Planted, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """Among several, the bad file is named."""
-    merge_rows.collect()
-    (merge_rows.reports / "database-planted.json").write_text("[", encoding="utf-8")
-    read = merge_rows.totals()
-    assert read.returncode == 1
-    assert read.stderr == (
-        "leg: plpgsql: the report database-planted.json is not a coverage"
-        " report: not JSON (Expecting value: line 1 column 2 (char 1))\n"
+    assert pc.main(COLLECT) == 0
+    (merging.reports / "database-planted.json").write_text("[", encoding="utf-8")
+    status = pc.main(["totals", "leg", str(merging.reports)])
+    out, err = capfd.readouterr()
+    assert (status, out, err) == (
+        1,
+        "",
+        (
+            "leg: plpgsql: the report database-planted.json is not a coverage"
+            " report: not JSON (Expecting value: line 1 column 2 (char 1))\n"
+        ),
     )
 
 
 def test_an_empty_directory_is_no_report(
-    merge_rows: MergeRows, monkeypatch: pytest.MonkeyPatch
+    merging: Planted, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """A directory no teardown wrote into holds no measurement."""
-    merge_rows.reports.mkdir()
-    read = merge_rows.totals()
-    assert read.returncode == 1
-    assert read.stderr == (
-        "leg: plpgsql: the test task wrote no report — its teardown must"
-        " call belt plpgsql-coverage collect while ORG_PLPGSQL_COVERAGE is set\n"
-    )
+    merging.reports.mkdir()
+    status = pc.main(["totals", "leg", str(merging.reports)])
+    out, err = capfd.readouterr()
+    assert (status, out, err) == (1, "", NO_REPORT)
 
 
 def test_a_report_path_that_is_a_file_is_refused_at_collect(
-    merge_rows: MergeRows,
-    monkeypatch: pytest.MonkeyPatch,
+    merging: Planted,
     capfd: pytest.CaptureFixture[str],
 ) -> None:
     """The variable names a directory; a file there is not replaced."""
-    merge_rows.reports.write_text("kept\n", encoding="utf-8")
-    as_the_child(monkeypatch, merge_rows.env, merge_rows.tmp)
-    done = Done(pc.main(["collect", "postgres://stub"]), *capfd.readouterr())
-    assert done.returncode == 1
-    assert (
-        f"{TASK}: ORG_PLPGSQL_COVERAGE names {merge_rows.reports}, which is not a"
+    merging.reports.write_text("kept\n", encoding="utf-8")
+    status = pc.main(COLLECT)
+    out, err = capfd.readouterr()
+    refused = (
+        f"{TASK}: ORG_PLPGSQL_COVERAGE names {merging.reports}, which is not a"
         " directory of reports\n"
-    ) == done.stderr
-    assert merge_rows.reports.read_text(encoding="utf-8") == "kept\n"
-
-
-def test_statement_ids_psql_printed_wrong_are_unreadable(
-    merge_rows: MergeRows, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """An id that is not a number is listed, red, never guessed."""
-    merge_rows.collect({"101": "1\nx\n"})
-    read = merge_rows.totals()
-    assert read.returncode == 1
-    assert (
-        "leg: plpgsql: plpgsql_check cannot read public.guard():"
-        " unreadable statement ids: [['1'], ['x']]\n"
-    ) in read.stderr
+    )
+    assert (status, out, err) == (1, "", refused)
+    assert merging.reports.read_text(encoding="utf-8") == "kept\n"
 
 
 # The database the real rows start (#2163): the org's image, digest-pinned.
@@ -2090,107 +1956,86 @@ def server(env: support.Env) -> Iterator[Server]:
         up.remove()
 
 
-def collect(
-    server: Server,
-    reports: Path,
-    *databases: str,
-    monkeypatch: pytest.MonkeyPatch,
-    capfd: pytest.CaptureFixture[str],
-) -> None:
-    """Tear each database down: the teardown's own call, in turn."""
-    for database in databases:
-        as_the_child(
-            monkeypatch, server.env | {"ORG_PLPGSQL_COVERAGE": str(reports)}, CANON
-        )
-        done = Done(
-            pc.main(["collect", f"dbname={database}", "--", *server.client()]),
-            *capfd.readouterr(),
-        )
-        assert done.returncode == 0, done.stderr
-
-
-def totals(
-    server: Server,
-    reports: Path,
-    *,
-    monkeypatch: pytest.MonkeyPatch,
-    capfd: pytest.CaptureFixture[str],
-) -> Done:
-    """Read the reports.
+@fixture
+def served(server: Server, monkeypatch: pytest.MonkeyPatch) -> Server:
+    """Run the row as the teardown does, against the real database.
 
     Returns:
-        What `totals` returned and printed.
+        The server.
 
     """
     as_the_child(monkeypatch, server.env, CANON)
-    return Done(pc.main(["totals", "leg", str(reports)]), *capfd.readouterr())
+    return server
 
 
-def two_databases(
-    server: Server,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capfd: pytest.CaptureFixture[str],
-) -> Path:
+def teardown(server: Server, database: str) -> list[str]:
+    """Name the teardown's collect from one real database.
+
+    Returns:
+        The argv.
+
+    """
+    return ["collect", f"dbname={database}", "--", *server.client()]
+
+
+def two_databases(server: Server) -> tuple[str, str]:
     """Run a different branch of sign in each of two databases.
 
     Returns:
-        The directory their two reports are in.
+        The two databases.
 
     """
     ahead, behind = server.database(), server.database()
     server.sql(ahead, "SELECT public.sign(1);")
     server.sql(behind, "SELECT public.sign(-1);")
-    reports = tmp_path / "two" / "reports"
-    collect(server, reports, ahead, behind, capfd=capfd, monkeypatch=monkeypatch)
-    return reports
+    return ahead, behind
 
 
 def test_two_databases_merge_to_one_database_running_both(
-    server: Server,
+    served: Server,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capfd: pytest.CaptureFixture[str],
 ) -> None:
     """Each branch in its own database reads as one database running both."""
-    both = server.database()
-    server.sql(both, "SELECT public.sign(1); SELECT public.sign(-1);")
-    alone = tmp_path / "reports"
-    collect(server, alone, both, capfd=capfd, monkeypatch=monkeypatch)
-    merged, single = (
-        totals(
-            server,
-            two_databases(server, tmp_path),
-            capfd=capfd,
-            monkeypatch=monkeypatch,
-        ),
-        totals(server, alone, capfd=capfd, monkeypatch=monkeypatch),
-    )
-    assert merged.returncode == 0, merged.stderr
-    assert single.returncode == 0, single.stderr
-    assert single.stdout.splitlines()[0] == merged.stdout.splitlines()[0]
-    assert merged.stdout.splitlines()[0] == "plpgsql 100.00"
+    both = served.database()
+    served.sql(both, "SELECT public.sign(1); SELECT public.sign(-1);")
+    alone, two = tmp_path / "alone", tmp_path / "two"
+    monkeypatch.setenv("ORG_PLPGSQL_COVERAGE", str(alone))
+    assert pc.main(teardown(served, both)) == 0
+    monkeypatch.setenv("ORG_PLPGSQL_COVERAGE", str(two))
+    for database in two_databases(served):
+        assert pc.main(teardown(served, database)) == 0
+    capfd.readouterr()
+    single = pc.main(["totals", "leg", str(alone)])
+    single_out, single_err = capfd.readouterr()
+    merged = pc.main(["totals", "leg", str(two)])
+    out, err = capfd.readouterr()
+    assert (single, merged) == (0, 0), single_err + err
+    assert single_out.splitlines()[0] == out.splitlines()[0] == "plpgsql 100.00"
     assert (
         "leg: plpgsql: sign(integer): statements 4 of 4 (100.00%),"
         " branches at least 50.00% (the highest one database read)\n"
-    ) in merged.stderr
+    ) in err
 
 
 def test_two_databases_leave_the_branch_floor_untouched(
-    server: Server,
+    served: Server,
     tmp_path: Path,
-    capfd: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
 ) -> None:
     """Not held, by name and count; coverage:check changes no floor line."""
-    read = totals(
-        server, two_databases(server, tmp_path), capfd=capfd, monkeypatch=monkeypatch
-    )
-    assert read.returncode == 0, read.stderr
-    assert read.stdout == "plpgsql 100.00\nplpgsql-branches not-held\n"
-    assert NOT_HELD_LINE.format(n=2) in read.stderr
-    tree = tmp_path
-    floor = tree / ".coverage-floor"
+    reports = tmp_path / "reports"
+    monkeypatch.setenv("ORG_PLPGSQL_COVERAGE", str(reports))
+    for database in two_databases(served):
+        assert pc.main(teardown(served, database)) == 0
+    status = pc.main(["totals", "leg", str(reports)])
+    out, err = capfd.readouterr()
+    assert status == 0, err
+    assert out == "plpgsql 100.00\nplpgsql-branches not-held\n"
+    assert NOT_HELD_LINE.format(n=2) in err
+    floor = tmp_path / ".coverage-floor"
     # Each leg on its own line (#2143): the branch line apart from the
     # statement one, so the row shows which line stands.
     text = cf.render(
@@ -2201,15 +2046,12 @@ def test_two_databases_leave_the_branch_floor_untouched(
         "v1.0.0",
     )
     floor.write_text(text, encoding="utf-8")
-    for name, value in server.env.items():
-        monkeypatch.setenv(name, value)
-    monkeypatch.chdir(tree)
-    monkeypatch.setattr(sys, "stdin", io.StringIO(read.stdout))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(sys, "stdin", io.StringIO(out))
     status = cf.main(["hold", "--label", "coverage:check", "--job", "gate"])
     out, err = capfd.readouterr()
-    held = Done(status, out, err)
-    assert held.returncode == 0, held.stderr
-    assert held.stdout == (
+    assert (status, err) == (0, "")
+    assert out == (
         "coverage:check: plpgsql leg holds its floor 80.0 (100.00%)\n"
         "coverage:check: plpgsql-branches leg not held: this run cannot"
         " measure it exactly (the measurement says why); its floor 58.0"
@@ -2219,37 +2061,38 @@ def test_two_databases_leave_the_branch_floor_untouched(
 
 
 def test_one_database_holds_the_branch_leg_as_now(
-    server: Server,
+    served: Server,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capfd: pytest.CaptureFixture[str],
 ) -> None:
     """One report: plpgsql_check's own branch figure, held."""
-    one = server.database()
-    server.sql(one, "SELECT public.sign(1);")
-    own = server.sql(
+    one = served.database()
+    served.sql(one, "SELECT public.sign(1);")
+    own = served.sql(
         one,
         "CREATE EXTENSION IF NOT EXISTS plpgsql_check;"
         " SELECT plpgsql_coverage_branches('public.sign(integer)');",
     )
     reports = tmp_path / "reports"
-    collect(server, reports, one, capfd=capfd, monkeypatch=monkeypatch)
-    read = totals(server, reports, capfd=capfd, monkeypatch=monkeypatch)
-    assert read.returncode == 0, read.stderr
+    monkeypatch.setenv("ORG_PLPGSQL_COVERAGE", str(reports))
+    assert pc.main(teardown(served, one)) == 0
+    status = pc.main(["totals", "leg", str(reports)])
+    out, err = capfd.readouterr()
+    assert status == 0, err
     assert own == "0.5\n"
-    assert read.stdout == "plpgsql 75.00\nplpgsql-branches 50.00\n"
-    assert "not held" not in read.stderr
+    assert out == "plpgsql 75.00\nplpgsql-branches 50.00\n"
+    assert "not held" not in err
 
 
 def test_two_concurrent_collects_leave_two_reports(
-    server: Server, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    served: Server, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Teardowns at the same moment write a report each."""
-    ahead, behind = server.database(), server.database()
+    ahead, behind = served.database(), served.database()
     reports = tmp_path / "reports"
-    for name, value in (server.env | {"ORG_PLPGSQL_COVERAGE": str(reports)}).items():
-        monkeypatch.setenv(name, value)
-    client = tuple(server.client())
+    monkeypatch.setenv("ORG_PLPGSQL_COVERAGE", str(reports))
+    client = tuple(served.client())
     with ThreadPoolExecutor(max_workers=2) as pool:
         statuses = list(
             pool.map(
@@ -2262,7 +2105,7 @@ def test_two_concurrent_collects_leave_two_reports(
 
 
 def test_a_function_no_database_runs_is_red_by_name(
-    server: Server,
+    served: Server,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capfd: pytest.CaptureFixture[str],
@@ -2272,17 +2115,22 @@ def test_a_function_no_database_runs_is_red_by_name(
     regprocedure names a function on the search path without its
     schema, as the listing prints it.
     """
-    ahead = server.database(FIXTURE, IDLE)
-    behind = server.database(FIXTURE, IDLE)
-    server.sql(ahead, "SELECT public.sign(1);")
-    server.sql(behind, "SELECT public.sign(-1);")
+    ahead = served.database(FIXTURE, IDLE)
+    behind = served.database(FIXTURE, IDLE)
+    served.sql(ahead, "SELECT public.sign(1);")
+    served.sql(behind, "SELECT public.sign(-1);")
     reports = tmp_path / "reports"
-    collect(server, reports, ahead, behind, capfd=capfd, monkeypatch=monkeypatch)
-    read = totals(server, reports, capfd=capfd, monkeypatch=monkeypatch)
-    assert read.returncode == 1
-    assert read.stdout == ""
-    assert read.stderr == (
-        "leg: plpgsql: idle(): none of its 2 statements ran in any"
-        " of the 2 databases measured — a function no test runs is red,"
-        " whatever the total\n"
+    monkeypatch.setenv("ORG_PLPGSQL_COVERAGE", str(reports))
+    for database in (ahead, behind):
+        assert pc.main(teardown(served, database)) == 0
+    status = pc.main(["totals", "leg", str(reports)])
+    out, err = capfd.readouterr()
+    assert (status, out, err) == (
+        1,
+        "",
+        (
+            "leg: plpgsql: idle(): none of its 2 statements ran in any"
+            " of the 2 databases measured — a function no test runs is red,"
+            " whatever the total\n"
+        ),
     )
