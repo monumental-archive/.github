@@ -5,7 +5,7 @@ The rows: each refusal of `load_json` and `load_toml` by its message
 not UTF-8, a syntax error), and each reader narrowing or refusing by
 `where`.
 
-The law: no tracked `.py` parses JSON or TOML outside `mise/decoded.py`.
+The law: no tracked `.py` parses JSON or TOML outside `belt/decoded.py`.
 It is read from the syntax tree with import aliases resolved, so
 `import json as j`, `from json import loads` and
 `from tomllib import load as l` are each the same parse; `json.dumps`
@@ -44,7 +44,7 @@ PARSES = frozenset({
 })
 
 # The one file that parses.
-LOADER = "mise/decoded.py"
+LOADER = "belt/decoded.py"
 
 
 def dotted(node: ast.expr) -> str | None:

@@ -414,7 +414,7 @@ def test_a_script_exit_trap_cannot_read_is_an_error(
         (conf, f"{TASK}: {conf}: cannot be read as UTF-8:"),
         ("d.sh", f"{TASK}: mise/exit_trap.py cannot read a file:"),
     ):
-        lists = ("--", name, "--") if name != conf else ("--", "--", name)
+        lists = ("--configs", name) if name == conf else ("--scripts", name)
         planted.enter(monkeypatch)
         status = bash_portability.main([*lists])
         _out, err = capfd.readouterr()

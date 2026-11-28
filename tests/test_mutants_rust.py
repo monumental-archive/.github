@@ -1076,9 +1076,9 @@ def test_a_count_not_stated_is_named_never_zero() -> None:
 
 def test_red_is_a_survivor_or_a_run_that_judged_nothing() -> None:
     """Clean is neither."""
-    assert not helper.red(helper.TestVerdict(total=3, killed=3))
-    assert helper.red(helper.TestVerdict(survived=1))
-    assert helper.red(helper.TestVerdict(runs=["x: exited 1"]))
+    assert not helper.red(helper.Verdict(total=3, killed=3))
+    assert helper.red(helper.Verdict(survived=1))
+    assert helper.red(helper.Verdict(runs=["x: exited 1"]))
 
 
 def test_a_pattern_escapes_what_rusts_regex_escape_escapes() -> None:

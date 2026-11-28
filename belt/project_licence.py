@@ -25,7 +25,6 @@ import pathlib
 from belt import findings, tracked
 from belt.decoded import UndecodableError, as_array, as_object, is_strings, load_toml
 
-EXPECTED_ARGC = 1
 DECLARE = "  say which is the project's in .badge-states: 'licence <SPDX expression>'"
 
 

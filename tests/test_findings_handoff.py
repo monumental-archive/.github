@@ -4,7 +4,7 @@ A finding's writer names its own records file on a runner, under
 `${RUNNER_TEMP}/findings/` (docs/findings.md, #1976), whatever ran it:
 `mise run`, a workflow step, a script run bare. Jobs of one run share
 nothing unless the workflow hands it on, so in every workflow whose
-`report` job runs mise/standing_issue.py:
+`report` job runs `belt standing-issue`:
 
 - every job with `steps` that does not run the helper ends with the
   upload of `${{ runner.temp }}/findings/`, as `findings-<job>-<index>`,
@@ -29,7 +29,7 @@ from tests import support
 
 CANON = support.CANON
 WORKFLOWS = Path(".github") / "workflows"
-HELPER = "mise/standing_issue.py"
+HELPER = "belt standing-issue"
 UPLOAD = "actions/upload-artifact@"
 DOWNLOAD = "actions/download-artifact@"
 NOT_CANCELLED = "${{ !cancelled() }}"
@@ -208,12 +208,12 @@ PLAIN = """\
 
 HELPER_STEP = """\
       - if: ${{ !cancelled() }}
-        run: .org-canon/mise/standing_issue.py --findings "${RUNNER_TEMP}/findings"
+        run: $ORG_PYTHON -I .org-canon/belt standing-issue --findings "${RUNNER_TEMP}/findings"
 """
 
 BARE_HELPER_STEP = """\
       - if: ${{ !cancelled() }}
-        run: .org-canon/mise/standing_issue.py
+        run: $ORG_PYTHON -I .org-canon/belt standing-issue
 """
 
 PLANTED = """\

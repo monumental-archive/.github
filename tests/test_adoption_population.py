@@ -366,7 +366,7 @@ def test_each_refusal_exits_two_and_names_its_field(
 def test_arguments_other_than_the_canon_are_refused(
     argv: list[str], error: str, capfd: pytest.CaptureFixture[str]
 ) -> None:
-    """The roster is no input any more: a caller passing one is told: argparse's exit 2, its usage and its error."""
+    """A roster or an empty name: argparse's exit 2, its usage and its error."""
     with pytest.raises(SystemExit) as ended:
         ap.main(argv)
     out, err = capfd.readouterr()
@@ -375,15 +375,3 @@ def test_arguments_other_than_the_canon_are_refused(
     assert err.splitlines()[-1] == error
 
 
-def test_an_empty_canon_name_is_refused(
-    capfd: pytest.CaptureFixture[str], env: support.Env, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """An identity read that failed leaves an empty name: refused."""
-    for name, value in (env(MISE_TASK_NAME=TASK)).items():
-        monkeypatch.setenv(name, value)
-    status = ap.main([""])
-    out, err = capfd.readouterr()
-    assert (status, out) == (2, "")
-    assert (
-        f"{TASK}: takes the canon's repository name and nothing else, got ['']\n" == err
-    )

@@ -593,10 +593,12 @@ def test_pgrx_plan_plans_nothing_for_an_untracked_manifest(env: support.Env) -> 
     assert (done.returncode, done.stdout, done.stderr) == (0, "[]\n", "")
 
 
-def test_badges_render_no_coverage_shield_for_an_untracked_floor() -> None:
+def test_badges_render_no_coverage_shield_for_an_untracked_floor(
+    env: support.Env,
+) -> None:
     """Red at 50c77201: refused for a floor no workflow feeds."""
     done, block = derive.render(
-        {".coverage-floor": "80\n"}, untracked=(".coverage-floor",)
+        {".coverage-floor": "80\n"}, untracked=(".coverage-floor",), env=env
     )
     assert (done.returncode, done.stderr) == (0, "")
     assert "codecov.io" not in block

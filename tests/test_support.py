@@ -295,9 +295,12 @@ class Environments:
                 targets = (
                     node.targets if isinstance(node, ast.Assign) else [node.target]
                 )
+                # A class body's names are its attributes: no function
+                # reads them by their bare name.
+                in_class = isinstance(self.parent.get(node), ast.ClassDef)
                 for target in targets:
                     name = traced(target)
-                    if name is not None:
+                    if name is not None and not (in_class and "." not in name):
                         scope = self.module if "." in name else self.scope(node)
                         self.assigned.setdefault((scope, name), []).append(node.value)
 
@@ -1161,6 +1164,10 @@ def test_each_way_to_build_an_environment_is_judged() -> None:
         + "    subprocess.run(a, env=env(A='1') | {'B': '2'})\n",
         "a state's builder": head
         + "def run(self) -> None:\n    subprocess.run(a, env=self.make_env())\n",
+        "a parameter named as a class's field": head
+        + "class Row:\n    env: dict[str, str] = {}\n"
+        + "def run(env):\n    subprocess.run(a, env=env)\n"
+        + "run(support.environment())\n",
     }
     for name, source in allowed.items():
         assert Environments(source).built_by_hand() == NOTHING

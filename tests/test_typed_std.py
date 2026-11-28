@@ -31,7 +31,7 @@ URL = "https://example.invalid/x"
 OPENS = frozenset({"urllib.request.urlopen", "urllib.request.OpenerDirector.open"})
 OPENER = "urllib.request.OpenerDirector"
 BUILD = "urllib.request.build_opener"
-HOME = "mise/typed_std.py"
+HOME = "belt/typed_std.py"
 VERSION = re.compile(r"v(?P<major>\d+)\.(\d+)(-(?P<pre>\w+))?")
 
 

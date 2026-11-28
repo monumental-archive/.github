@@ -32,7 +32,6 @@ import shutil
 from belt import findings, stele_findings
 
 EXIT_RED = 1
-EXIT_ERROR = 2
 # The canon and at least one workflow.
 
 
@@ -68,7 +67,7 @@ def main(argv: list[str]) -> int:
 
     Returns:
         0 when every grant suffices, EXIT_RED when one does not or stele
-        is missing, EXIT_ERROR on a usage error.
+        is missing; argparse's 2 on a usage error.
 
     """
     parser = argparse.ArgumentParser(

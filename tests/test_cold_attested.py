@@ -330,21 +330,21 @@ def test_an_unmarked_cache_is_red_through_the_task(
     )
 
 
+@pytest.mark.parametrize("case", CASES.values(), ids=list(CASES))
 def test_cases(
+    case: tuple[dict[str, str], int, list[str], list[str]],
     cold_attested_state: ColdAttested,
     capfd: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Every row of CASES, through the helper's main."""
-    for files, status, out, err in CASES.values():
-        for old in (cold_attested_state.tree / WF).iterdir():
-            old.unlink()
-        cold_attested_state.enter(monkeypatch)
-        status = cold_attested.main([*cold_attested_state.plant(files)])
-        out, err = capfd.readouterr()
-        same(status, status, err)
-        same(out.splitlines(), out)
-        same(err.splitlines(), err)
+    """Each row of CASES, through the helper's main."""
+    files, status, out, err = case
+    cold_attested_state.enter(monkeypatch)
+    done = cold_attested.main([*cold_attested_state.plant(files)])
+    said, complained = capfd.readouterr()
+    same(done, status, complained)
+    same(said.splitlines(), out)
+    same(complained.splitlines(), err)
 
 
 def test_no_workflow_is_a_usage_error(
@@ -354,12 +354,13 @@ def test_no_workflow_is_a_usage_error(
 ) -> None:
     """Called with nothing to read: exit 2, saying how to call it."""
     cold_attested_state.enter(monkeypatch)
-    status = cold_attested.main([])
-    _out, err = capfd.readouterr()
-    same(status, cold_attested.EXIT_ERROR)
-    same(
-        err.splitlines(),
-        [f"{TASK}: usage: cold_attested.py WORKFLOW..."],
+    with pytest.raises(SystemExit) as ended:
+        cold_attested.main([])
+    out, err = capfd.readouterr()
+    assert (ended.value.code, out) == (2, "")
+    assert err.startswith("usage: belt cold-attested "), err
+    assert err.splitlines()[-1] == (
+        "belt cold-attested: error: the following arguments are required: WORKFLOW"
     )
 
 

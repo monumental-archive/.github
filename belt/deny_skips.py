@@ -31,9 +31,6 @@ from belt import findings
 from belt.decoded import UndecodableError, as_array, as_object, load_toml
 from belt.typed_std import group
 
-# The one argument.
-EXPECTED_ARGC = 1
-
 
 SKIP_KEYS = ("skip", "skip-tree")
 # The line that opens a skip array, under `[bans]` or dotted at the top.

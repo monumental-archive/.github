@@ -35,7 +35,7 @@ REMOTE = re.compile(r"^[^/]+/\.github/\.github/workflows/([^/@]+)@")
 GRANTS = {"issues": "write", "actions": "read"}
 ALWAYS = "${{ always() }}"
 NOT_CANCELLED = "${{ !cancelled() }}"
-HELPER = "mise/standing_issue.py"
+HELPER = "belt standing-issue"
 
 Mapping = dict[str, object]
 
@@ -184,7 +184,7 @@ REPORT = """\
       actions: read
     steps:
       - if: ${{{{ !cancelled() }}}}
-        run: .org-canon/mise/standing_issue.py
+        run: $ORG_PYTHON -I .org-canon/belt standing-issue
 """
 
 PLANTED = """\

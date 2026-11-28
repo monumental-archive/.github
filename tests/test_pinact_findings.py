@@ -476,7 +476,7 @@ def test_the_pinned_pinact_offline_gives_two_messages(
         monkeypatch,
         env(ORG_FINDINGS=str(adapter.file), MISE_TASK_NAME=TASK, PYTHONUTF8="1"),
     )
-    status = pinact_findings.main(["--fix=false", "--no-api", WORKFLOW])
+    status = pinact_findings.main(["--", "--fix=false", "--no-api", WORKFLOW])
     out, err = capfd.readouterr()
     assert status != 0, err
     cannot = "failed to handle a line: action can't be pinned"

@@ -221,10 +221,13 @@ def test_not_utf8_is_an_error(
 def test_no_workflows_is_a_usage_error(
     pinned: Pinned, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """No workflow named: exit 2 with the usage line."""
+    """No workflow named: argparse's exit 2, its usage and its error."""
     pinned.enter(monkeypatch)
-    status = installer_pinned.main([])
-    _out, err = capfd.readouterr()
-    same(status, installer_pinned.EXIT_ERROR)
-    usage = f"{TASK}: usage: installer_pinned.py WORKFLOW..."
-    same(err.splitlines(), [usage])
+    with pytest.raises(SystemExit) as ended:
+        installer_pinned.main([])
+    out, err = capfd.readouterr()
+    assert (ended.value.code, out) == (2, "")
+    assert err.startswith("usage: belt installer-pinned "), err
+    assert err.splitlines()[-1] == (
+        "belt installer-pinned: error: the following arguments are required: WORKFLOW"
+    )

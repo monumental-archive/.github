@@ -506,10 +506,14 @@ def test_two_files_that_are_one_module_are_named(
 
 
 def test_too_few_arguments_is_a_usage_error(capfd: pytest.CaptureFixture[str]) -> None:
-    """No belt or no file: exit 2 with the usage."""
-    assert python_roots.main([str(BELT)]) == 2
-    assert capfd.readouterr().err == (
-        f"{TASK}: usage: belt python-roots <belt-root> <file>...\n"
+    """No file: argparse's exit 2, its usage and its error."""
+    with pytest.raises(SystemExit) as ended:
+        python_roots.main([str(BELT)])
+    out, err = capfd.readouterr()
+    assert (ended.value.code, out) == (2, "")
+    assert err.startswith("usage: belt python-roots "), err
+    assert err.splitlines()[-1] == (
+        "belt python-roots: error: the following arguments are required: FILE"
     )
 
 
@@ -775,11 +779,13 @@ def test_the_typed_fixture_is_clean(belt: support.Belt, env: support.Env) -> Non
 def test_pytests_own_fixture_is_red(belt: support.Belt, env: support.Env) -> None:
     """`pytest.fixture` carries `Any` under the belt's config: the reason."""
     text = FIXTURES.replace(
-        "from belt.typed_pytest import fixture", "from pytest import fixture"
+        "from belt.typed_pytest import Requested, fixture",
+        "from pytest import fixture\n\nfrom belt.typed_pytest import Requested",
     )
+    assert text != FIXTURES
     done = run({"test_a.py": text}, belt=belt, env=env)
     assert done.returncode == 1
-    assert 'test_a.py:8: error: Expression type contains "Any"' in done.stdout
+    assert 'test_a.py:10: error: Expression type contains "Any"' in done.stdout
 
 
 @pytest.mark.usefixtures("_real_mypy")

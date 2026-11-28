@@ -925,7 +925,7 @@ def test_the_forms_debian_writes_are_read(debian: object, want: object) -> None:
         ('debian_stable_rustc = "rustc-1.85.1"', "not a Debian rustc"),
         ('debian_stable_rustc = "1.85.1 trixie"', "not a Debian rustc"),
         ("rustc = 1", "debian_stable_rustc is not a string"),
-        ("debian_stable_rustc = ", ""),
+        ("debian_stable_rustc = ", "Invalid value"),
     ],
 )
 def test_what_is_not_a_rustc_package_version_is_refused(

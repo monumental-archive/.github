@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from belt import caller_permissions, decoded
+from belt import caller_permissions, decoded, stele_findings
 from belt.typed_pytest import fixture
 from tests import support
 
@@ -45,7 +45,9 @@ pytestmark = pytest.mark.usefixtures("_task")
 
 BELT = support.MISE
 GIT = support.tool("git")
-CANON = "/canon"
+# The real canon: the task body starts the belt from it, and the stub
+# stele reads no policy, so the call names it and nothing reads it.
+CANON = str(support.CANON)
 STUB = """\
 import os, sys
 with open(os.environ["STUB_LOG"], "a", encoding="utf-8") as log:
@@ -174,6 +176,8 @@ class Planted:
         for name, value in self.env.items():
             monkeypatch.setenv(name, value)
         monkeypatch.chdir(self.tree)
+        # stele as stele_findings resolved it at import, before PATH had the stub.
+        monkeypatch.setattr(stele_findings, "STELE", str(self.bin / "stele"))
 
     def task(self) -> subprocess.CompletedProcess[str]:
         """Run the task body in the planted tree.
@@ -291,16 +295,31 @@ def test_a_pass_is_quiet(
     same(out.splitlines(), ["lint:caller-permissions: stele: PASS"])
 
 
+@pytest.mark.parametrize(
+    ("argv", "error"),
+    [
+        pytest.param(
+            [], "the following arguments are required: CANON_DIR, WORKFLOW", id="none"
+        ),
+        pytest.param(
+            [CANON], "the following arguments are required: WORKFLOW", id="no workflow"
+        ),
+        pytest.param(["", "ci.yml"], "the canon directory is empty", id="empty canon"),
+    ],
+)
 def test_a_bad_call_is_a_usage_error(
-    planted: Planted, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    argv: list[str],
+    error: str,
+    planted: Planted,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """No canon, an empty canon, or no workflow: exit 2 with the usage line."""
-    usage = f"{TASK}: {caller_permissions.USAGE}"
-    calls: list[list[str]] = [[], [CANON], ["", "ci.yml"]]
-    for argv in calls:
-        planted.enter(monkeypatch)
-        status = caller_permissions.main([*argv])
-        _out, err = capfd.readouterr()
-        same(status, caller_permissions.EXIT_ERROR)
-        same(err.splitlines(), [usage])
+    """No canon, an empty canon, or no workflow: argparse's exit 2, its error."""
+    planted.enter(monkeypatch)
+    with pytest.raises(SystemExit) as ended:
+        caller_permissions.main(argv)
+    out, err = capfd.readouterr()
+    assert (ended.value.code, out) == (2, "")
+    assert err.startswith("usage: belt caller-permissions "), err
+    assert err.splitlines()[-1] == f"belt caller-permissions: error: {error}"
     same(planted.logged(), [])

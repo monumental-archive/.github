@@ -509,7 +509,7 @@ def test_planted_breaches_are_named() -> None:
 # compiler that built it made, so a key on Cargo.lock alone restored the
 # previous toolchain's objects after a bump and coverage read both. Every
 # cache holding a cargo path, in any workflow, keys on the digest
-# `gate_cache_key.py cargo` writes, and its fallback prefix carries the
+# `belt gate-cache-key cargo` writes, and its fallback prefix carries the
 # digest too. The step runs after the job's install, so the `rustc` it
 # reads is the one the tasks build with, and under the restore's own
 # condition, so it runs wherever the restore does.
@@ -594,7 +594,7 @@ def compiler_findings(text: str, where: str = "ci.yml") -> list[str]:
         installs = [i for i, s in enumerate(steps) if s in job_installs.mise_steps(job)]
         named = [(i, s) for i, s in enumerate(steps) if field(s, "id") == "rustc"]
         if not named or "belt gate-cache-key cargo" not in field(named[0][1], "run"):
-            out.append(f"{name}: no `gate_cache_key.py cargo` step with id rustc")
+            out.append(f"{name}: no `belt gate-cache-key cargo` step with id rustc")
             continue
         at, digest_step = named[0]
         if not installs or at < installs[0]:

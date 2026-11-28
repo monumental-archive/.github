@@ -1071,7 +1071,6 @@ def open_release_pr_head(tmp_path: Path, env: support.Env) -> OpenReleasePrHead:
     return OpenReleasePrHead(tmp_path, env=env)
 
 
-@pytest.mark.usefixtures("_forge")
 def test_head_at_the_planned_commit_proceeds_as_today(
     open_release_pr_head: OpenReleasePrHead,
 ) -> None:
@@ -1087,7 +1086,6 @@ def test_head_at_the_planned_commit_proceeds_as_today(
     assert want == open_release_pr_head.calls()
 
 
-@pytest.mark.usefixtures("_forge")
 def test_a_refused_call_names_itself_and_what_the_forge_said(
     open_release_pr_head: OpenReleasePrHead,
 ) -> None:
@@ -1138,7 +1136,6 @@ def test_a_refused_call_names_itself_and_what_the_forge_said(
         assert calls == open_release_pr_head.calls()
 
 
-@pytest.mark.usefixtures("_forge")
 def test_the_sign_off_names_the_app_bot_without_the_user_endpoint(
     open_release_pr_head: OpenReleasePrHead,
 ) -> None:
@@ -1161,7 +1158,6 @@ def test_the_sign_off_names_the_app_bot_without_the_user_endpoint(
     assert "GET user" not in open_release_pr_head.calls()
 
 
-@pytest.mark.usefixtures("_forge")
 def test_the_old_half_of_a_rename_rides_the_commit_as_a_deletion(
     open_release_pr_head: OpenReleasePrHead,
 ) -> None:
@@ -1194,7 +1190,6 @@ def test_the_old_half_of_a_rename_rides_the_commit_as_a_deletion(
     assert deleted == changes["deletions"]
 
 
-@pytest.mark.usefixtures("_forge")
 def test_head_moved_writes_nothing_and_says_why(
     open_release_pr_head: OpenReleasePrHead,
 ) -> None:
@@ -1210,7 +1205,6 @@ def test_head_moved_writes_nothing_and_says_why(
     assert want == open_release_pr_head.calls()
 
 
-@pytest.mark.usefixtures("_forge")
 def test_the_body_says_where_the_release_was_planned(
     open_release_pr_head: OpenReleasePrHead,
 ) -> None:
@@ -1229,7 +1223,6 @@ def test_the_body_says_where_the_release_was_planned(
     assert body.count("Planned-At:") == 1
 
 
-@pytest.mark.usefixtures("_forge")
 def test_a_queued_release_pr_is_dequeued_and_regenerated(
     open_release_pr_head: OpenReleasePrHead,
 ) -> None:
@@ -1274,7 +1267,6 @@ def test_a_queued_release_pr_is_dequeued_and_regenerated(
     assert f"Planned-At: {PLANNED}" == body.splitlines()[-1]
 
 
-@pytest.mark.usefixtures("_forge")
 def test_a_refused_dequeue_takes_the_permitted_response(
     open_release_pr_head: OpenReleasePrHead,
 ) -> None:
@@ -1299,7 +1291,6 @@ def test_a_refused_dequeue_takes_the_permitted_response(
     assert want == open_release_pr_head.calls()
 
 
-@pytest.mark.usefixtures("_forge")
 def test_a_dequeue_that_fails_otherwise_is_red(
     open_release_pr_head: OpenReleasePrHead,
 ) -> None:
@@ -1316,7 +1307,6 @@ def test_a_dequeue_that_fails_otherwise_is_red(
     ) in result.stderr
 
 
-@pytest.mark.usefixtures("_forge")
 def test_any_other_refusal_to_move_the_branch_still_fails(
     open_release_pr_head: OpenReleasePrHead,
 ) -> None:
@@ -1334,7 +1324,6 @@ def test_any_other_refusal_to_move_the_branch_still_fails(
     ) in result.stderr
 
 
-@pytest.mark.usefixtures("_forge")
 @pytest.mark.parametrize(
     ("label", "head"), [("refused", None), ("null", "null"), ("empty", "")]
 )
@@ -1354,7 +1343,6 @@ def test_a_head_read_that_fails_is_never_read_as_unchanged(
     assert want == open_release_pr_head.calls()
 
 
-@pytest.mark.usefixtures("_forge")
 def test_a_release_refresh_compares_the_checked_out_commit(
     open_release_pr_head: OpenReleasePrHead, env: support.Env
 ) -> None:
@@ -1444,7 +1432,6 @@ def close_release_pr(tmp_path: Path, env: support.Env) -> CloseReleasePr:
     return CloseReleasePr(tmp_path, env=env)
 
 
-@pytest.mark.usefixtures("_forge")
 def test_an_open_release_pr_is_closed_with_the_comment(
     close_release_pr: CloseReleasePr,
 ) -> None:
@@ -1461,7 +1448,6 @@ def test_an_open_release_pr_is_closed_with_the_comment(
     assert "closed PR #245" in result.stdout
 
 
-@pytest.mark.usefixtures("_forge")
 def test_no_open_release_pr_writes_nothing(close_release_pr: CloseReleasePr) -> None:
     """The quiet case says so and makes no write."""
     close_release_pr.forge(PLANNED)
@@ -1472,7 +1458,6 @@ def test_no_open_release_pr_writes_nothing(close_release_pr: CloseReleasePr) -> 
     assert want == close_release_pr.calls()
 
 
-@pytest.mark.usefixtures("_forge")
 def test_head_moved_closes_nothing(close_release_pr: CloseReleasePr) -> None:
     """A stale run must not close a PR a newer run just opened."""
     close_release_pr.forge(MOVED)
@@ -1488,7 +1473,6 @@ def test_head_moved_closes_nothing(close_release_pr: CloseReleasePr) -> None:
     assert close_release_pr.comment(246) == ""
 
 
-@pytest.mark.usefixtures("_forge")
 def test_a_head_read_that_fails_closes_nothing_and_fails(
     close_release_pr: CloseReleasePr,
 ) -> None:
@@ -1504,7 +1488,6 @@ def test_a_head_read_that_fails_closes_nothing_and_fails(
     assert want == close_release_pr.calls()
 
 
-@pytest.mark.usefixtures("_forge")
 def test_a_list_that_fails_is_never_read_as_none_open(
     close_release_pr: CloseReleasePr,
 ) -> None:
@@ -1521,7 +1504,6 @@ def test_a_list_that_fails_is_never_read_as_none_open(
     assert want == close_release_pr.calls()
 
 
-@pytest.mark.usefixtures("_forge")
 @pytest.mark.parametrize(
     "missing",
     [

@@ -1,37 +1,39 @@
 """lint:msrv holds every tracked workspace, not only the root's (#2011).
 
-Each row runs the task's own `run` body, read from mise/config.toml, in
-a planted git tree of two workspaces: the root `Cargo.toml` (crate
+Each row runs the task's helper, belt.msrv_lint's `main`, in this
+process, standing in a planted git tree of two workspaces: the root `Cargo.toml` (crate
 `app`) and `fuzz/Cargo.toml` (crate `app-fuzz`), each its own root, as
 a cargo-fuzz crate is. `cargo`, `rustup` and `mise` are stubs on PATH:
 cargo answers `locate-project` with the manifest it was given, and
 `metadata` with the planted document for the `--manifest-path` it was
 given, and logs every call; mise lists one pinned rust, 1.85.0. The
-belt is the real one, and so are rust_workspaces.py, msrv_lint.py and
-msrv_plan.py; `ORG_PYTHON` is a stub that answers gate_surface.py with
-no extension and runs every other helper on this interpreter. The floor
-is the canon's own mise/rust-floor.toml, 1.85.
+belt is the real one, and so are belt.rust_workspaces, belt.msrv_lint
+and belt.msrv_plan; `gate-surface` stands in by monkeypatch and answers
+no extension. The floor is the canon's own mise/rust-floor.toml, 1.85.
 
 Before #2011 the body read `cargo metadata` at the root alone, so the
 fuzz crate was held to nothing: each row fails there.
 
-GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom; every child
-environment is built from support.env (#1542).
+GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom; every environment
+is built from support.env (#1542).
 """
 
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from typing import TYPE_CHECKING
 
-from belt import decoded
+from belt import gate_surface, msrv_lint, rust_workspaces
 from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    import pytest
 
 BELT = support.MISE
 TASK = "lint:msrv"
@@ -62,13 +64,17 @@ RUSTUP_STUB = r"""#!/usr/bin/env bash
 printf 'rustup %s\n' "$*" >> "${PLANT_LOG}"
 exit 99
 """
-PYTHON_STUB = r"""#!/usr/bin/env bash
-if [[ $(basename "$1") == belt gate-surface ]]; then
-  cat > /dev/null
-  exit 0
-fi
-exec "${PLANT_PYTHON}" "$@"
-"""
+
+
+def no_extension(_argv: list[str]) -> int:
+    """Stand in for gate-surface: read the metadata, answer no extension.
+
+    Returns:
+        0, as the real one does for a tree with no pgrx crate.
+
+    """
+    sys.stdin.read()
+    return 0
 
 
 def document(name: str, promise: str | None) -> str:
@@ -93,19 +99,6 @@ def document(name: str, promise: str | None) -> str:
     return json.dumps(doc)
 
 
-def body() -> str:
-    """Read lint:msrv's run body from the belt's config.
-
-    Returns:
-        The bash the task runs.
-
-    """
-    config = decoded.load_toml((BELT / "config.toml").read_bytes())
-    tasks = decoded.as_object(config["tasks"], "tasks")
-    entry = decoded.as_object(tasks[TASK], TASK)
-    return decoded.as_str(entry["run"], f"{TASK}.run")
-
-
 class TwoRoots:
     """A tree of two workspaces: the root's and a fuzz crate's."""
 
@@ -122,13 +115,12 @@ class TwoRoots:
         subprocess.run([GIT, "add", "."], cwd=self.tree, env=env, check=True)
         self.plants = tmp / "plants"
         self.plants.mkdir()
-        bins = tmp / "bin"
+        bins = self.bins = tmp / "bin"
         bins.mkdir()
         stubs = {
             "cargo": CARGO_STUB,
             "mise": MISE_STUB,
             "rustup": RUSTUP_STUB,
-            "python": PYTHON_STUB,
         }
         for name, text in stubs.items():
             stub = bins / name
@@ -139,9 +131,9 @@ class TwoRoots:
         self.overrides = {
             "PATH": f"{bins}:{env['PATH']}",
             "ORG_BELT_DIR": str(BELT),
-            "ORG_PYTHON": str(bins / "python"),
             "ORG_FINDINGS": "",
-            "PLANT_PYTHON": sys.executable,
+            "MISE_TASK_NAME": TASK,
+            "BASH_ENV": str(BELT / "findings.sh"),
             "PLANT_LOG": str(self.log),
             "PLANT_DIR": str(self.plants),
         }
@@ -155,22 +147,30 @@ class TwoRoots:
             path = self.plants / f"{manifest.replace('/', '_')}.json"
             path.write_text(document(name, promise), encoding="utf-8")
 
-    def run_task(self, **plant: str) -> subprocess.CompletedProcess[str]:
-        """Run the task's body in the planted tree, as mise runs it.
+    def run_task(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capfd: pytest.CaptureFixture[str],
+        **plant: str,
+    ) -> tuple[int, str, str]:
+        """Run the task's helper in this process, standing in the planted tree.
 
         Returns:
-            The finished process.
+            The helper's status, its stdout and its stderr.
 
         """
-        as_mise = support.task_run(TASK, body())
-        return subprocess.run(
-            as_mise.argv,
-            cwd=self.tree,
-            env=self.make_env() | self.overrides | plant | as_mise.env,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        monkeypatch.chdir(self.tree)
+        for name in list(os.environ):
+            monkeypatch.delenv(name)
+        for name, value in (self.make_env() | self.overrides | plant).items():
+            monkeypatch.setenv(name, value)
+        monkeypatch.setattr(gate_surface, "main", no_extension)
+        # cargo as the helpers resolved it at import, before PATH had the stub.
+        monkeypatch.setattr(rust_workspaces, "CARGO", str(self.bins / "cargo"))
+        capfd.readouterr()
+        status = msrv_lint.main([])
+        out, err = capfd.readouterr()
+        return status, out, err
 
     def checks(self) -> list[str]:
         """Read the compiles the stub cargo was asked for.
@@ -189,29 +189,35 @@ def two_roots(tmp_path: Path, env: support.Env) -> TwoRoots:
     return TwoRoots(tmp_path, env=env)
 
 
-def test_the_second_roots_undeclared_crate_is_red_by_name(two_roots: TwoRoots) -> None:
+def test_the_second_roots_undeclared_crate_is_red_by_name(
+    two_roots: TwoRoots,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """The fuzz crate declares nothing: the undeclared finding, its root."""
     two_roots.plant("1.85", None)
-    done = two_roots.run_task()
-    assert done.returncode != 0
+    status, out, err = two_roots.run_task(monkeypatch, capfd)
+    assert status != 0
     head = (
         f"{TASK}: {FUZZ}: a minimum is undeclared or differs from the one"
         " the rule derives"
     )
-    err = done.stderr.splitlines()
+    err = err.splitlines()
     assert head in err
     named = err[err.index(head) + 1]
     assert "app-fuzz" in named
-    assert f"{TASK}: Cargo.toml: a minimum" not in done.stderr
+    assert f"{TASK}: Cargo.toml: a minimum" not in err
 
 
 def test_both_roots_declaring_the_derived_number_compile_each(
     two_roots: TwoRoots,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
 ) -> None:
     """A check per root, each naming its manifest; the count covers both."""
     two_roots.plant("1.85", "1.85")
-    done = two_roots.run_task()
-    assert done.returncode == 0, done.stderr
+    status, out, err = two_roots.run_task(monkeypatch, capfd)
+    assert status == 0, err
     want = [
         (
             "cargo check --locked --manifest-path Cargo.toml --all-features"
@@ -224,16 +230,18 @@ def test_both_roots_declaring_the_derived_number_compile_each(
     ]
     assert want == two_roots.checks()
     said = f"{TASK}: 2 declared minimum(s) compiled at the toolchain they name"
-    assert said == done.stdout.splitlines()[-1]
+    assert said == out.splitlines()[-1]
 
 
 def test_a_red_second_root_leaves_the_first_roots_check_run(
     two_roots: TwoRoots,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
 ) -> None:
     """Only the fuzz check is refused: red, and the root's check ran."""
     two_roots.plant("1.85", "1.85")
-    done = two_roots.run_task(PLANT_REFUSE=FUZZ)
-    assert done.returncode == 101, done.stderr
+    status, out, err = two_roots.run_task(monkeypatch, capfd, PLANT_REFUSE=FUZZ)
+    assert status == 101, err
     first = (
         "cargo check --locked --manifest-path Cargo.toml --all-features"
         " -p app@0.1.0 {1.85.0}"
@@ -241,4 +249,4 @@ def test_a_red_second_root_leaves_the_first_roots_check_run(
     assert first == two_roots.checks()[0]
     assert len(two_roots.checks()) == 2
     failed = f"{TASK}: {FUZZ}: app-fuzz@0.1.0 failed to compile at 1.85.0,"
-    assert failed in done.stderr.splitlines()
+    assert failed in err.splitlines()

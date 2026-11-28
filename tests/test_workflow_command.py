@@ -37,7 +37,7 @@ CANON = support.CANON
 # Any workflow command: `::` and a command name, then `::` or the space
 # before properties. A name not yet used is refused without a list.
 COMMAND = re.compile(r"::[A-Za-z][A-Za-z0-9_-]*(::| )")
-MODULE = Path("mise/workflow_command.py")
+MODULE = Path("belt/workflow_command.py")
 # Directories the walk never enters: tool state, vendored trees, caches.
 SKIP = {"vendor", "testdata"}
 

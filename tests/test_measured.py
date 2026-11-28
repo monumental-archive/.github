@@ -4,7 +4,6 @@ Draft, unpushed: the rows #1667's Done-when names for `measured` itself.
 """
 
 import os
-import re
 import shutil
 import signal
 import subprocess
@@ -160,19 +159,99 @@ def measured_env(tmp: str, *, env: support.Env, **given: str) -> dict[str, str]:
     return environment(out.stdout)
 
 
-def test_the_task_pythonpath_is_kept_behind_the_hook(env: support.Env) -> None:
-    """The task's own PYTHONPATH stays, with the hook in front of it."""
+# The belt's interpreter, a stub: asked for the pytest tool venv
+# (`-I <belt> tool-python measured pytest`), it answers the venv's
+# interpreter, itself a stub printing the argv it was exec'd with,
+# NUL-separated; TOOL_REFUSED has it refuse instead, as tool_python
+# does for a venv on another Python (#1788).
+BELT_PYTHON = """#!/bin/sh
+echo "$*" >> "{log}"
+if [ -n "${{TOOL_REFUSED:-}}" ]; then
+  echo "test: $TOOL_REFUSED" >&2
+  exit 1
+fi
+echo "{venv}"
+"""
+VENV_PYTHON = """#!/bin/sh
+printf '%s\\0' "$0" "$@"
+"""
+
+
+def pytest_run(
+    tmp: str, argv: list[str], *, env: support.Env, **given: str
+) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
+    """Run `measured` in a floored tree, the belt's Python a stub.
+
+    Returns:
+        The finished process, the venv's planted interpreter and the
+        log of what the belt's was asked.
+
+    """
+    tree = Path(tmp) / "tree"
+    if not tree.exists():
+        tree = plant(Path(tmp), floor=True, env=env)
+    bin_dir = Path(tmp) / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    venv, log = bin_dir / "venv-python", Path(tmp) / "asked"
+    venv.write_text(VENV_PYTHON, encoding="utf-8")
+    belt = bin_dir / "belt-python"
+    belt.write_text(BELT_PYTHON.format(log=log, venv=venv), encoding="utf-8")
+    for stub in (venv, belt):
+        stub.chmod(0o755)
+    out = run(
+        tree,
+        argv,
+        ORG_COVERAGE_RUN=str(Path(tmp) / "run"),
+        ORG_PYTHON=str(belt),
+        **given,
+        make_env=env,
+    )
+    return out, venv, log
+
+
+def rewritten(tmp: str, venv: Path, *rest: str) -> list[str]:
+    """Name the argv a pytest run is exec'd as, under coverage.
+
+    Returns:
+        The venv's interpreter running coverage over pytest and `rest`.
+
+    """
+    rc = f"--rcfile={Path(tmp) / 'run' / 'coverage.rc'}"
+    return [str(venv), "-m", "coverage", "run", rc, "-m", "pytest", *rest]
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [["pytest", "-q", "tests"], ["python3", "-m", "pytest", "-q", "tests"]],
+    ids=["pytest", "python3 -m pytest"],
+)
+def test_a_pytest_run_runs_under_coverage(argv: list[str], env: support.Env) -> None:
+    """`pytest …` or `<python> -m pytest …`: the venv's coverage runs it (#2177)."""
     with tempfile.TemporaryDirectory() as tmp:
-        seen = measured_env(tmp, PYTHONPATH="src:lib", env=env)
-        run_dir = Path(tmp) / "run"
-        assert f"{run_dir}/hook:src:lib" == seen["PYTHONPATH"]
-        assert str(run_dir / "coverage.rc") == seen["COVERAGE_PROCESS_START"]
+        out, venv, log = pytest_run(tmp, argv, env=env)
+        assert out.returncode == 0, out.stderr
+        assert out.stdout.split("\0")[:-1] == rewritten(tmp, venv, "-q", "tests")
+        belt = support.CANON / "belt"
+        assert log.read_text(encoding="utf-8") == (
+            f"-I {belt} tool-python measured pytest\n"
+        )
+
+
+def test_any_other_command_measures_no_python(env: support.Env) -> None:
+    """`sh -c …` is no pytest run: exec'd as it is, the venv never asked."""
+    with tempfile.TemporaryDirectory() as tmp:
+        argv = [SH, "-c", 'printf %s "$PYTHONPATH"']
+        out, _venv, log = pytest_run(tmp, argv, PYTHONPATH="src", env=env)
+        assert (out.returncode, out.stdout) == (0, "src"), out.stderr
+        assert not log.exists()
+        assert not (Path(tmp) / "run" / "coverage.rc").exists()
 
 
 def test_the_rc_file_names_the_run_and_the_root(env: support.Env) -> None:
     """The run's rc file: its data file in the run, the tree as source."""
     with tempfile.TemporaryDirectory() as tmp:
-        measured_env(tmp, env=env)
+        out, _venv, _log = pytest_run(tmp, ["pytest"], env=env)
+        assert out.returncode == 0, out.stderr
         rc = (Path(tmp) / "run" / "coverage.rc").read_text()
         tree = (Path(tmp) / "tree").resolve()
         assert f"source = {tree}\n" in rc
@@ -180,12 +259,26 @@ def test_the_rc_file_names_the_run_and_the_root(env: support.Env) -> None:
         assert "branch = true\n" in rc
 
 
-def test_the_hook_is_added_once(env: support.Env) -> None:
-    """A measured command run inside another adds nothing twice."""
+def test_the_rc_file_is_written_once_per_run(env: support.Env) -> None:
+    """A second call in the run reads the first one's file, never rewrites it."""
     with tempfile.TemporaryDirectory() as tmp:
-        hook = Path(tmp) / "run" / "hook"
-        seen = measured_env(tmp, PYTHONPATH=f"{hook}:src", env=env)
-        assert f"{hook}:src" == seen["PYTHONPATH"]
+        first, _venv, _log = pytest_run(tmp, ["pytest"], env=env)
+        assert first.returncode == 0, first.stderr
+        rc = Path(tmp) / "run" / "coverage.rc"
+        rc.write_text(rc.read_text() + "# the first call's\n")
+        second, _venv, log = pytest_run(tmp, ["pytest"], env=env)
+        assert second.returncode == 0, second.stderr
+        assert rc.read_text().endswith("# the first call's\n")
+        assert len(log.read_text(encoding="utf-8").splitlines()) == 2
+
+
+def test_a_refused_venv_runs_nothing(env: support.Env) -> None:
+    """The venv's check refuses: measured exits 1 with its words, and no suite."""
+    with tempfile.TemporaryDirectory() as tmp:
+        refused = "coverage runs on 'no interpreter'"
+        out, _venv, _log = pytest_run(tmp, ["pytest"], TOOL_REFUSED=refused, env=env)
+        assert (out.returncode, out.stdout) == (1, "")
+        assert out.stderr == f"test: {refused}\n"
 
 
 def test_a_task_plpgsql_report_is_kept(env: support.Env) -> None:
@@ -221,8 +314,7 @@ def test_it_runs_under_sh(env: support.Env) -> None:
             check=False,
             timeout=60,
         )
-        assert out.returncode == 0, out.stderr
-        assert f"{Path(tmp) / 'run' / 'hook'}:src" == out.stdout
+        assert (out.returncode, out.stdout) == (0, "src"), out.stderr
 
 
 def dead_pid() -> int:
@@ -253,81 +345,6 @@ def test_a_dead_run_is_removed_and_a_live_one_kept(env: support.Env) -> None:
         assert not dead.exists(), "a dead run's directory was left"
         assert live.exists(), "a live run's directory was removed"
         assert this.is_dir(), "this run's directory was not made"
-
-
-# The venv's interpreter, beside the `coverage` entry point: it counts
-# its starts and runs the suite's python3 over a planted coverage
-# package, so the belt's one check (tool_python.py, #1788) passes and
-# names `{site}` as the directory coverage is imported from.
-STUB = """#!/bin/sh
-echo call >> "{counter}"
-PYTHONPATH="{site}" exec "{python}" "$@"
-"""
-
-
-# Where coverage lives is asked once per run, then read from the run.
-def test_two_calls_in_one_run_start_coverage_once(env: support.Env) -> None:
-    """A counting venv interpreter is started by the first call only."""
-    with tempfile.TemporaryDirectory() as tmp:
-        tree = plant(Path(tmp), floor=True, env=env)
-        bin_dir, counter = Path(tmp) / "bin", Path(tmp) / "calls"
-        bin_dir.mkdir()
-        python = support.tool("python3")
-        site = Path(tmp) / "site"
-        (site / "coverage").mkdir(parents=True)
-        (site / "coverage" / "__init__.py").write_text("")
-        entry = bin_dir / "coverage"
-        entry.write_text("#!/bin/sh\n")
-        entry.chmod(0o755)
-        stub = bin_dir / "python"
-        stub.write_text(STUB.format(counter=counter, python=python, site=site))
-        stub.chmod(0o755)
-        path = f"{bin_dir}{os.pathsep}{os.environ['PATH']}"
-        given = {"ORG_COVERAGE_RUN": str(Path(tmp) / "run"), "PATH": path}
-        first = run(tree, DUMP, **given, make_env=env)
-        second = run(tree, DUMP, **given, make_env=env)
-        assert first.returncode == 0, first.stderr
-        assert second.returncode == 0, second.stderr
-        assert counter.read_text() == "call\n"
-        hook = (Path(tmp) / "run" / "hook" / "sitecustomize.py").read_text()
-        # The work, through the belt's one writer: coverage's start-up
-        # from its own site directory, then the chain (#1542).
-        assert f"sys.path.append({str(site)!r})\n" in hook
-        assert "coverage.process_startup()\n" in hook
-        assert "_belt_chain(_belt_entries)" in hook
-        for out in (first, second):
-            assert (
-                str(Path(tmp) / "run" / "coverage.rc")
-                == environment(out.stdout)["COVERAGE_PROCESS_START"]
-            )
-
-
-# A coverage venv with no interpreter: refused in the one wording (#1788).
-def test_a_venv_with_no_interpreter_is_refused(env: support.Env) -> None:
-    """No `python` beside the entry point: red, the remedy named."""
-    with tempfile.TemporaryDirectory() as tmp:
-        tree = plant(Path(tmp), floor=True, env=env)
-        bin_dir = Path(tmp) / "bin"
-        bin_dir.mkdir()
-        entry = bin_dir / "coverage"
-        entry.write_text("#!/bin/sh\n")
-        entry.chmod(0o755)
-        path = f"{bin_dir}{os.pathsep}{os.environ['PATH']}"
-        done = run(
-            tree,
-            DUMP,
-            ORG_COVERAGE_RUN=str(Path(tmp) / "run"),
-            PATH=path,
-            MISE_TASK_NAME="test",
-            make_env=env,
-        )
-        assert done.returncode == 1
-        assert re.search(
-            r"\Atest: coverage runs on 'no interpreter' but the suite's"
-            r" python3 is '3\.[^']+' — the tool venv must be built on the"
-            r" belt's python pin \(reinstall: mise install -f pipx:coverage\)\n\Z",
-            done.stderr,
-        )
 
 
 GO_COVER = "-cover -coverpkg=./... -covermode=atomic -exec={belt}/go-test-exec"

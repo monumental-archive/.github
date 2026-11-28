@@ -1271,8 +1271,6 @@ def test_each_wrong_step_is_refused_by_name(
     debug_split: DebugSplit, name: object, shim: object
 ) -> None:
     """No debuglink; debug info left; symbol table left; functions lost."""
-    debug_split.tearDown()
-    debug_split.setUp()
     result = debug_split.split(shim)
     assert result.returncode == 1, result.stdout
     if name == "dynamic functions":

@@ -1038,21 +1038,28 @@ def test_a_missing_report_names_the_teardown(
 
 
 @pytest.mark.usefixtures("in_the_task")
-@pytest.mark.parametrize("argv", [[], ["measure", "leg"]])
-def test_a_usage_error_names_both_subcommands(
-    argv: list[str], capfd: pytest.CaptureFixture[str]
-) -> None:
-    """No subcommand, or an unknown one, is exit 2 with the usage."""
-    status = pc.main(list(argv))
-    out, err = capfd.readouterr()
-    assert (status, out, err) == (
-        2,
-        "",
-        (
-            f"{TASK}: usage: plpgsql-coverage collect <conninfo>"
-            " [-- <client> [<argument>...]] | totals <label> <report>\n"
+@pytest.mark.parametrize(
+    ("argv", "error"),
+    [
+        pytest.param([], "the following arguments are required: mode", id="none"),
+        pytest.param(
+            ["measure", "leg"],
+            "argument mode: invalid choice: 'measure'"
+            " (choose from 'collect', 'totals')",
+            id="unknown",
         ),
-    )
+    ],
+)
+def test_a_usage_error_names_both_subcommands(
+    argv: list[str], error: str, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """No subcommand, or an unknown one: argparse's exit 2, its usage and its error."""
+    with pytest.raises(SystemExit) as ended:
+        pc.main(argv)
+    out, err = capfd.readouterr()
+    assert (ended.value.code, out) == (2, "")
+    assert err.startswith("usage: belt plpgsql-coverage "), err
+    assert err.splitlines()[-1] == f"belt plpgsql-coverage: error: {error}"
 
 
 # The clause, whole, in three tracked files of three kinds.
@@ -1078,17 +1085,15 @@ PYTHON_HELD = (
 
 @dataclass(frozen=True)
 class Leg:
-    """coverage:check's body laid out in a planted tree, ready to run."""
+    """coverage:check's body run in a planted tree, and the floor it read."""
 
-    argv: list[str]
-    env: dict[str, str]
-    tree: Path
+    done: subprocess.CompletedProcess[str]
     floor: Path
     planted: str
 
 
-class LaysOutLeg(Protocol):
-    """Lay out one `coverage:check` run; `lay_out_leg` says how."""
+class RunsLeg(Protocol):
+    """Lay out and run one `coverage:check`; `run_leg` says how."""
 
     def __call__(  # ruff: ignore[too-many-arguments] -- one keyword per part of a run
         self,
@@ -1100,14 +1105,14 @@ class LaysOutLeg(Protocol):
         measured: dict[str, str] | None = None,
         databases: int = 1,
     ) -> Leg:
-        """Plant the tree, the floor and the run the suite left."""
+        """Plant the tree, the floor and the run the suite left, then check."""
         ...
 
 
 @fixture
-def lay_out_leg(
+def run_leg(
     tmp_path: Path, env: support.Env, monkeypatch: pytest.MonkeyPatch
-) -> LaysOutLeg:
+) -> RunsLeg:
     """Lay out `coverage:check` over the plpgsql leg, decided by the floor's record.
 
     Returns:
@@ -1134,7 +1139,7 @@ def lay_out_leg(
         measured by the stub coverage.py.
 
         Returns:
-            The leg, ready to run.
+            The finished check and the floor it read.
 
         """
         tmp = Path(tempfile.mkdtemp(dir=tmp_path))
@@ -1182,9 +1187,8 @@ def lay_out_leg(
         check = as_object(TASKS["coverage:check"], "coverage:check")
         script = as_str(check["run"], "coverage:check's run")
         as_mise = support.task_run("coverage:check", script)
-        return Leg(
-            as_mise.argv, environ | as_mise.env, tree, tree / ".coverage-floor", floor
-        )
+        done = run(as_mise.argv, environ | as_mise.env, tree)
+        return Leg(done, tree / ".coverage-floor", floor)
 
     return laying_out
 
@@ -1201,31 +1205,31 @@ def assert_held(held: str, stdout: str) -> None:
 
 
 def test_the_clause_in_files_switches_nothing_on(
-    lay_out_leg: LaysOutLeg,
+    run_leg: RunsLeg,
 ) -> None:
     """No search: a README, a .py and a .sql naming the clause (#1666)."""
-    leg = lay_out_leg(
+    leg = run_leg(
         TWO,
         legs="python python-branches",
         files=MENTIONS,
         collects=False,
     )
-    done = run(leg.argv, leg.env, leg.tree)
+    done = leg.done
     assert done.returncode == 0, done.stderr
     assert_held(PYTHON_HELD, done.stdout)
     assert "plpgsql" not in done.stdout + done.stderr
 
 
 def test_a_recorded_leg_is_held_with_no_sql_tracked(
-    lay_out_leg: LaysOutLeg,
+    run_leg: RunsLeg,
 ) -> None:
     """The report is the answer: no .sql file is needed to find it."""
-    leg = lay_out_leg(
+    leg = run_leg(
         HELD,
         legs="python python-branches plpgsql plpgsql-branches",
         files={"helper.py": "print('hi')\n"},
     )
-    done = run(leg.argv, leg.env, leg.tree)
+    done = leg.done
     assert done.returncode == 0, done.stderr
     assert_held(
         PYTHON_HELD + "coverage:check: plpgsql leg holds its floor 80.0 (95.00%)\n"
@@ -1234,12 +1238,12 @@ def test_a_recorded_leg_is_held_with_no_sql_tracked(
     )
 
 
-def test_below_the_floor_is_red_by_name(lay_out_leg: LaysOutLeg) -> None:
+def test_below_the_floor_is_red_by_name(run_leg: RunsLeg) -> None:
     """Statements at 60% red the plpgsql leg by its name."""
-    leg = lay_out_leg(
+    leg = run_leg(
         TWO, legs="plpgsql plpgsql-branches", files={"schema.sql": "-- sql\n"}
     )
-    done = run(leg.argv, leg.env, leg.tree)
+    done = leg.done
     assert done.returncode == 1
     assert (
         "coverage:check: plpgsql: 60.00% is below its derived floor 80.0%\n"
@@ -1248,7 +1252,7 @@ def test_below_the_floor_is_red_by_name(lay_out_leg: LaysOutLeg) -> None:
 
 
 def test_a_leg_below_its_own_floor_above_a_weaker_leg_is_red(
-    lay_out_leg: LaysOutLeg,
+    run_leg: RunsLeg,
 ) -> None:
     """plpgsql-branches at 88%: above python-branches, below its own 90.
 
@@ -1256,13 +1260,13 @@ def test_a_leg_below_its_own_floor_above_a_weaker_leg_is_red(
     weakest leg's floor, the shape this replaced, the branch figure
     stood eight points above it and the gate was green.
     """
-    leg = lay_out_leg(
+    leg = run_leg(
         STRONG,
         legs="python python-branches plpgsql plpgsql-branches",
         files={"helper.py": "print('hi')\n"},
         measured={"plpgsql": "95.0", "plpgsql-branches": "95.0"},
     )
-    done = run(leg.argv, leg.env, leg.tree)
+    done = leg.done
     assert done.returncode == 1, done.stderr
     assert (
         done.stderr.splitlines()[-1]
@@ -1275,16 +1279,16 @@ def test_a_leg_below_its_own_floor_above_a_weaker_leg_is_red(
 
 
 def test_a_record_whose_every_leg_reports_nothing_names_them(
-    lay_out_leg: LaysOutLeg,
+    run_leg: RunsLeg,
 ) -> None:
     """Every recorded leg lost: each named, never the generic refusal."""
-    leg = lay_out_leg(
+    leg = run_leg(
         TWO,
         legs="python python-branches",
         files={"README.md": "no python left\n"},
         collects=False,
     )
-    done = run(leg.argv, leg.env, leg.tree)
+    done = leg.done
     assert done.returncode == 1
     remedy = (
         "  the python leg needs tracked *.py and a `test` task whose test"
@@ -1304,16 +1308,16 @@ def test_a_record_whose_every_leg_reports_nothing_names_them(
 
 
 def test_a_recorded_leg_that_reports_nothing_is_red_by_name(
-    lay_out_leg: LaysOutLeg,
+    run_leg: RunsLeg,
 ) -> None:
     """The teardown stopped collecting: the leg is named, never dropped."""
-    leg = lay_out_leg(
+    leg = run_leg(
         TWO,
         legs="python python-branches plpgsql plpgsql-branches",
         files={"helper.py": "print('hi')\n"},
         collects=False,
     )
-    done = run(leg.argv, leg.env, leg.tree)
+    done = leg.done
     assert done.returncode == 1
     remedy = (
         "  the plpgsql leg needs a test command run through"
@@ -1333,16 +1337,16 @@ def test_a_recorded_leg_that_reports_nothing_is_red_by_name(
 
 
 def test_two_databases_leave_the_branch_floor_as_it_stands(
-    lay_out_leg: LaysOutLeg,
+    run_leg: RunsLeg,
 ) -> None:
     """Not held over two databases: named, and the floor file unchanged."""
-    leg = lay_out_leg(
+    leg = run_leg(
         HELD,
         legs="python python-branches plpgsql plpgsql-branches",
         files={"helper.py": "print('hi')\n"},
         databases=2,
     )
-    done = run(leg.argv, leg.env, leg.tree)
+    done = leg.done
     assert done.returncode == 0, done.stderr
     assert_held(
         PYTHON_HELD + "coverage:check: plpgsql leg holds its floor 80.0 (95.00%)\n"
@@ -1383,33 +1387,24 @@ def counter(tree: Path) -> int:
     return len((tree.parent / "counter").read_text("utf-8").splitlines())
 
 
-@dataclass(frozen=True)
-class Measuring:
-    """coverage-measure.sh laid out over a planted run, ready to run."""
-
-    argv: list[str]
-    env: dict[str, str]
-    tree: Path
-
-
-class LaysOutRun(Protocol):
-    """Lay out one coverage-measure.sh run; `lay_out_run` says how."""
+class RunsMeasure(Protocol):
+    """Lay out and run one coverage-measure.sh; `run_measure` says how."""
 
     def __call__(
         self, selector: str = "all", *, python: bool = True, no_xml: bool = False
-    ) -> Measuring:
-        """Plant the run, python and PL/pgSQL."""
+    ) -> subprocess.CompletedProcess[str]:
+        """Plant the run, python and PL/pgSQL, then measure."""
         ...
 
 
 @fixture
-def lay_out_run(
+def run_measure(
     tmp_path: Path, env: support.Env, monkeypatch: pytest.MonkeyPatch
-) -> LaysOutRun:
+) -> RunsMeasure:
     """Both legs read the one run `measured` left, and run no suite (#1667).
 
     Returns:
-        A function that plants one run and returns the script to read it.
+        A function that plants one run and returns the script that read it.
 
     """
 
@@ -1418,17 +1413,18 @@ def lay_out_run(
         *,
         python: bool = True,
         no_xml: bool = False,
-    ) -> Measuring:
+    ) -> subprocess.CompletedProcess[str]:
         """Lay out coverage-measure.sh over a planted run, python and PL/pgSQL.
 
-        Reports go to `reports` beside the tree (#1628); `no_xml` has the
-        python leg write none.
+        One run per row, in the row's own tmp_path: reports go to
+        `reports` there, beside the tree (#1628); `no_xml` has the python
+        leg write none.
 
         Returns:
-            The script's argv, its environment and the planted tree.
+            The finished script.
 
         """
-        tmp = Path(tempfile.mkdtemp(dir=tmp_path))
+        tmp = tmp_path
         stubs, answers = plant_stubs(tmp, TWO)
         for name, text in (("coverage", COVERAGE), ("mise", MISE_TASKS)):
             (stubs / name).write_text(text, encoding="utf-8")
@@ -1470,17 +1466,16 @@ def lay_out_run(
             monkeypatch=monkeypatch,
         )
         script = str(BELT / "coverage-measure.sh")
-        return Measuring([BASH, script, "leg", selector], environ, tree)
+        return run([BASH, script, "leg", selector], environ, tree)
 
     return laying_out
 
 
 def test_both_legs_read_one_run_under_all(
-    lay_out_run: LaysOutRun,
+    run_measure: RunsMeasure,
 ) -> None:
     """Python and PL/pgSQL print their figures, and no suite runs."""
-    measuring = lay_out_run()
-    done = run(measuring.argv, measuring.env, measuring.tree)
+    done = run_measure()
     assert done.returncode == 0, done.stderr
     assert done.stdout == (
         "python 90.0\npython-branches 85.0\nplpgsql 60.00\nplpgsql-branches 66.66\n"
@@ -1489,21 +1484,19 @@ def test_both_legs_read_one_run_under_all(
 
 
 def test_plpgsql_alone_reads_only_its_report(
-    lay_out_run: LaysOutRun,
+    run_measure: RunsMeasure,
 ) -> None:
     """The plpgsql selector prints its own figures and no python one."""
-    measuring = lay_out_run("plpgsql")
-    done = run(measuring.argv, measuring.env, measuring.tree)
+    done = run_measure("plpgsql")
     assert done.returncode == 0, done.stderr
     assert done.stdout == "plpgsql 60.00\nplpgsql-branches 66.66\n"
 
 
 def test_only_formatless_legs_pass_by_name(
-    lay_out_run: LaysOutRun,
+    run_measure: RunsMeasure,
 ) -> None:
     """No report is owed where no leg measured has a format."""
-    measuring = lay_out_run("reports", python=False)
-    done = run(measuring.argv, measuring.env, measuring.tree)
+    done = run_measure("reports", python=False)
     assert done.returncode == 0, done.stderr
     assert done.stdout == (
         "plpgsql 60.00\nplpgsql-branches 66.66\n"
@@ -1517,11 +1510,10 @@ def test_only_formatless_legs_pass_by_name(
 
 
 def test_a_leg_with_a_format_that_wrote_nothing_is_refused(
-    lay_out_run: LaysOutRun,
+    run_measure: RunsMeasure,
 ) -> None:
     """A formatless leg beside it does not excuse the missing report."""
-    measuring = lay_out_run("reports", no_xml=True)
-    done = run(measuring.argv, measuring.env, measuring.tree)
+    done = run_measure("reports", no_xml=True)
     assert done.returncode == 1
     assert done.stdout == ""
     assert (
@@ -1530,14 +1522,13 @@ def test_a_leg_with_a_format_that_wrote_nothing_is_refused(
 
 
 def test_a_formatless_leg_beside_a_written_report(
-    lay_out_run: LaysOutRun,
+    run_measure: RunsMeasure, tmp_path: Path
 ) -> None:
     """The written report uploads; the formatless legs are named."""
-    measuring = lay_out_run("reports")
-    done = run(measuring.argv, measuring.env, measuring.tree)
+    done = run_measure("reports")
     assert done.returncode == 0, done.stderr
     assert done.stdout.endswith(
-        f"leg: upload {measuring.tree.parent / 'reports' / 'coverage.xml'}\n"
+        f"leg: upload {tmp_path / 'reports' / 'coverage.xml'}\n"
     ), done.stdout
     assert (
         "leg: plpgsql, plpgsql-branches: no upload format,"
@@ -1824,7 +1815,16 @@ class Server:
 
     docker: str
     container: str
-    env: dict[str, str]
+    make_env: support.Env
+
+    def environment(self) -> dict[str, str]:
+        """Build the environment the container's clients run in.
+
+        Returns:
+            The `env` fixture's, with docker reachable.
+
+        """
+        return self.make_env(tools=("docker",), MISE_TASK_NAME=TASK)
 
     def client(self) -> list[str]:
         """Name the client a container-hosted suite's teardown names (#2114).
@@ -1853,7 +1853,7 @@ class Server:
                 *("-d", database),
             ],
             input=text,
-            env=self.env,
+            env=self.environment(),
             capture_output=True,
             text=True,
             check=False,
@@ -1892,7 +1892,7 @@ class Server:
                     "-q",
                     *("-h", "127.0.0.1", "-U", "postgres"),
                 ],
-                env=self.env,
+                env=self.environment(),
                 capture_output=True,
                 check=False,
             )
@@ -1906,7 +1906,7 @@ class Server:
         """Remove the container and its databases with it."""
         subprocess.run(
             [self.docker, "rm", "--force", self.container],
-            env=self.env,
+            env=self.environment(),
             capture_output=True,
             check=False,
         )
@@ -1948,7 +1948,7 @@ def server(env: support.Env) -> Iterator[Server]:
     if started.returncode != 0:
         msg = f"the database did not start: {started.stderr}"
         raise AssertionError(msg)
-    up = Server(docker, container, environ)
+    up = Server(docker, container, env)
     try:
         up.ready()
         yield up
@@ -1964,7 +1964,7 @@ def served(server: Server, monkeypatch: pytest.MonkeyPatch) -> Server:
         The server.
 
     """
-    as_the_child(monkeypatch, server.env, CANON)
+    as_the_child(monkeypatch, server.environment(), CANON)
     return server
 
 

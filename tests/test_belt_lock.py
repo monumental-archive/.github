@@ -93,7 +93,8 @@ class LockedFromTheLinkedLock:
         self.plant_belt = belt
         self.make_env = env
         self.tmp = tmp_path
-        tree = self.tmp / "cache" / "org-belt" / ("a" * 40) / "mise"
+        pinned = self.tmp / "cache" / "org-belt" / ("a" * 40)
+        tree = pinned / "mise"
         config = (BELT / "config.toml").read_text("utf-8")
         line = f'{UV_KEY} = "{pin(UV_KEY)}"\n'
         assert line in config
@@ -101,7 +102,7 @@ class LockedFromTheLinkedLock:
         # The whole belt; the config and the lock are the row's own, and
         # locks() rewrites the lock in place.
         self.plant_belt(
-            tree, stubs={"config.toml": config.replace(line, ""), "mise.lock": lock}
+            pinned, stubs={"config.toml": config.replace(line, ""), "mise.lock": lock}
         )
         uv = block(UV_KEY).search(lock)
         if uv is None:

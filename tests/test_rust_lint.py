@@ -6,16 +6,16 @@ only once the first was fixed, one crate per round trip. lint:rust now
 lints each member as its own package and reports every red crate by
 name, with cargo's own exit status.
 
-The row runs the task's own `run` body, read from mise/config.toml, in
-a planted git tree. The workspace is edtf's, from the `cargo metadata`
+The rows up to `Planted` call belt.rust_lint's `main` in this process,
+standing in a planted git tree. The workspace is edtf's, from the `cargo metadata`
 captured in release/testdata/edtf-cargo-metadata.json and read by the
-belt's real mise/gate_surface.py. cargo and rustup are stubs: clippy
+belt's real belt.gate_surface. cargo and rustup are stubs: clippy
 refuses the first member and passes the rest, and the stub records each
 crate it was asked to lint. clippy's verdict on a crate is clippy's to
 prove; the row is about which crates are asked.
 
-The task's body after its guard is mise/rust_lint.py (#1911). The
-rows from `Planted` on call its `main` in this process, one row per
+The task's body after its guard is `belt rust-lint` (#1911). The
+rows from `Planted` on call its `main` in this process too, one row per
 branch of lint:rust and of fix:rust with its message asserted, against
 a planted belt whose ladder and pgrx provisioning are stubs.
 """
@@ -27,10 +27,11 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from typing import NamedTuple, Protocol
 
 import pytest
 
-from belt import decoded, pgrx_postgres, rust_lint, rust_workspaces
+from belt import pgrx_postgres, rust_lint, rust_workspaces
 from belt.typed_pytest import fixture
 from tests import support
 
@@ -117,22 +118,25 @@ printf '%s\\n' "${STUB_LAST}"
 """
 
 
-def body() -> str:
-    """Read lint:rust's run body from the belt's config.
+class Linted(NamedTuple):
+    """What one in-process run of lint:rust returned and printed."""
 
-    Returns:
-        The bash the task runs.
-
-    """
-    config = decoded.load_toml((BELT / "config.toml").read_bytes())
-    tasks = decoded.as_object(config["tasks"], "the belt's [tasks]")
-    task = decoded.as_object(tasks["lint:rust"], "lint:rust")
-    return decoded.as_str(task["run"], "the task's run")
+    returncode: int
+    stdout: str
+    stderr: str
 
 
-def assert_every_member_linted(
-    done: subprocess.CompletedProcess[str], asked: list[str]
-) -> None:
+class Lint(Protocol):
+    """Run lint:rust over the planted workspace."""
+
+    def __call__(
+        self, rustup: str = ..., planted: dict[str, str] | None = ..., **stub: str
+    ) -> tuple[Linted, list[str]]:
+        """Plant the tree and stubs, then lint it in this process."""
+        ...
+
+
+def assert_every_member_linted(done: Linted, asked: list[str]) -> None:
     """Assert clippy reached every member and named the red one."""
     assert done.returncode == 101, done.stdout + done.stderr
     want = [f"{m}@1.3.3" for m in MEMBERS]
@@ -143,65 +147,73 @@ def assert_every_member_linted(
 
 
 # One red crate does not hide the rest (#726).
+@fixture
 def lint(
-    rustup: str = RUSTUP,
-    planted: dict[str, str] | None = None,
-    *,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
     env: support.Env,
-    **stub: str,
-) -> tuple[subprocess.CompletedProcess[str], list[str]]:
-    """Run lint:rust over the planted workspace.
+) -> Lint:
+    """Give each row lint:rust over a planted workspace, run in this process.
 
     `planted` maps a tracked path to its text, written over the
     default `Cargo.toml` and `src/lib.rs`.
 
     Returns:
-        The finished process and the crates clippy was asked.
+        The runner: it answers what lint:rust returned and printed, and
+        the crates clippy was asked.
 
     """
-    files = {"Cargo.toml": "[workspace]\n", "src/lib.rs": "\n"}
-    files |= planted or {}
-    with tempfile.TemporaryDirectory() as tmp:
-        root = Path(tmp)
-        tree = root / "repo"
+
+    def run(
+        rustup: str = RUSTUP, planted: dict[str, str] | None = None, **stub: str
+    ) -> tuple[Linted, list[str]]:
+        files = {"Cargo.toml": "[workspace]\n", "src/lib.rs": "\n"}
+        files |= planted or {}
+        tree = tmp_path / "repo"
         for name, text in files.items():
             (tree / name).parent.mkdir(parents=True, exist_ok=True)
             (tree / name).write_text(text, encoding="utf-8")
-        bindir = root / "bin"
+        bindir = tmp_path / "bin"
         bindir.mkdir()
         for name, text in (("cargo", CARGO), ("rustup", rustup)):
             (bindir / name).write_text(text, encoding="utf-8")
             (bindir / name).chmod(0o755)
-        log = root / "clippy.log"
-        environ = env(
-            root / "home",
-            ORG_BELT_DIR=str(BELT),
-        )
+        log = tmp_path / "clippy.log"
+        environ = env(tmp_path / "home", ORG_BELT_DIR=str(BELT))
         subprocess.run([GIT, "init", "-q"], cwd=tree, env=environ, check=True)
         subprocess.run([GIT, "add", "."], cwd=tree, env=environ, check=True)
         environ["PATH"] = f"{bindir}{os.pathsep}{environ['PATH']}"
-        environ["STUB_METADATA"] = str(METADATA)
-        environ["CLIPPY_LOG"] = str(log)
+        environ |= {
+            "STUB_METADATA": str(METADATA),
+            "CLIPPY_LOG": str(log),
+            "MISE_TASK_NAME": "lint:rust",
+            "ORG_FINDINGS": "",
+            "BASH_ENV": str(BELT / "findings.sh"),
+        }
         environ |= stub
-        as_mise = support.task_run("lint:rust", body())
-        done = subprocess.run(
-            as_mise.argv,
-            cwd=tree,
-            env=environ | as_mise.env,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        monkeypatch.chdir(tree)
+        for name in list(os.environ):
+            monkeypatch.delenv(name)
+        for name, value in environ.items():
+            monkeypatch.setenv(name, value)
+        # cargo as the helpers resolved it at import, before PATH had the stub.
+        monkeypatch.setattr(rust_workspaces, "CARGO", str(bindir / "cargo"))
+        capfd.readouterr()
+        status = rust_lint.main(["lint"])
+        out, err = capfd.readouterr()
         asked = log.read_text(encoding="utf-8").split() if log.exists() else []
-    return done, asked
+        return Linted(status, out, err), asked
+
+    return run
 
 
-def test_a_red_first_member_leaves_the_rest_linted(env: support.Env) -> None:
+def test_a_red_first_member_leaves_the_rest_linted(lint: Lint) -> None:
     """All six members are asked; the red one is named; cargo's 101 is kept."""
-    assert_every_member_linted(*lint(env=env))
+    assert_every_member_linted(*lint())
 
 
-def test_clippy_ahead_of_a_long_listing_is_found(env: support.Env) -> None:
+def test_clippy_ahead_of_a_long_listing_is_found(lint: Lint) -> None:
     """`clippy…` first, then 200 kB: the component is there (#1637).
 
     On main the clippy probe stopped at the first line and
@@ -211,13 +223,12 @@ def test_clippy_ahead_of_a_long_listing_is_found(env: support.Env) -> None:
         RUSTUP_LONG,
         STUB_FIRST="clippy-x86_64-unknown-linux-gnu",
         STUB_LAST="rustfmt-x86_64-unknown-linux-gnu",
-        env=env,
     )
     assert "component missing" not in done.stderr
     assert_every_member_linted(done, asked)
 
 
-def test_rustfmt_ahead_of_a_long_listing_is_found(env: support.Env) -> None:
+def test_rustfmt_ahead_of_a_long_listing_is_found(lint: Lint) -> None:
     """`rustfmt…` first, then 200 kB, then clippy: both are there (#1637).
 
     On main the rustfmt probe stopped at the first line and
@@ -227,7 +238,6 @@ def test_rustfmt_ahead_of_a_long_listing_is_found(env: support.Env) -> None:
         RUSTUP_LONG,
         STUB_FIRST="rustfmt-x86_64-unknown-linux-gnu",
         STUB_LAST="clippy-x86_64-unknown-linux-gnu",
-        env=env,
     )
     assert "component missing" not in done.stderr
     assert_every_member_linted(done, asked)
@@ -251,12 +261,9 @@ GROUP = "lint:rust: crate-level suppression of a whole clippy group: src/lib.rs\
 # on main the task let each of them through to clippy. Each green row
 # plants a form that stays legal and asserts clippy reached every
 # member, the unchanged verdict of `EveryMemberIsLinted`.
-EVERY_SUPPRESSION_IS_AN_EXPECT_lint = staticmethod(lint)
-
-
-def assert_refused(planted: dict[str, str], finding: str) -> None:
+def assert_refused(lint: Lint, planted: dict[str, str], finding: str) -> None:
     """Assert the task exits 1 naming `finding`, and clippy is never asked."""
-    done, asked = EVERY_SUPPRESSION_IS_AN_EXPECT_lint(planted=planted)
+    done, asked = lint(planted=planted)
     assert done.returncode == 1, done.stdout + done.stderr
     assert asked == NOT_ASKED
     assert UNSEEN in done.stderr
@@ -264,99 +271,102 @@ def assert_refused(planted: dict[str, str], finding: str) -> None:
     assert REMEDY in done.stderr
 
 
-def assert_passed(planted: dict[str, str]) -> None:
+def assert_passed(lint: Lint, planted: dict[str, str]) -> None:
     """Assert the check lets it through and clippy reaches every member."""
-    done, asked = EVERY_SUPPRESSION_IS_AN_EXPECT_lint(planted=planted)
+    done, asked = lint(planted=planted)
     assert UNSEEN not in done.stderr
     assert_every_member_linted(done, asked)
 
 
-def test_an_inner_clippy_allow_is_refused() -> None:
+def test_an_inner_clippy_allow_is_refused(lint: Lint) -> None:
     """`#![allow(clippy::unwrap_used, reason = "x")]`: red, by line."""
     attr = '#![allow(clippy::unwrap_used, reason = "x")]'
-    assert_refused({LIB: f"//! A crate.\n{attr}\n"}, f"{LIB}:2: {attr}")
+    assert_refused(lint, {LIB: f"//! A crate.\n{attr}\n"}, f"{LIB}:2: {attr}")
 
 
-def test_an_inner_cfg_attr_allow_is_refused() -> None:
+def test_an_inner_cfg_attr_allow_is_refused(lint: Lint) -> None:
     """`#![cfg_attr(test, allow(clippy::unwrap_used))]`: red."""
     attr = "#![cfg_attr(test, allow(clippy::unwrap_used))]"
-    assert_refused({LIB: f"{attr}\n"}, f"{LIB}:1: {attr}")
+    assert_refused(lint, {LIB: f"{attr}\n"}, f"{LIB}:1: {attr}")
 
 
-def test_an_inner_rustc_allow_is_refused() -> None:
+def test_an_inner_rustc_allow_is_refused(lint: Lint) -> None:
     """`#![allow(dead_code)]`, a rustc lint: red."""
-    assert_refused({LIB: "#![allow(dead_code)]\n"}, f"{LIB}:1: #![allow(dead_code)]")
-
-
-def test_a_cfg_attr_rustfmt_broke_across_lines_is_refused() -> None:
-    """The multi-line shape rustfmt writes for a long cfg_attr: red."""
-    text = "#![cfg_attr(\n    test,\n    allow(clippy::unwrap_used)\n)]\n"
     assert_refused(
-        {LIB: text}, f"{LIB}:1: #![cfg_attr( test, allow(clippy::unwrap_used) )]"
+        lint, {LIB: "#![allow(dead_code)]\n"}, f"{LIB}:1: #![allow(dead_code)]"
     )
 
 
-def test_an_inner_expect_passes() -> None:
+def test_a_cfg_attr_rustfmt_broke_across_lines_is_refused(lint: Lint) -> None:
+    """The multi-line shape rustfmt writes for a long cfg_attr: red."""
+    text = "#![cfg_attr(\n    test,\n    allow(clippy::unwrap_used)\n)]\n"
+    assert_refused(
+        lint, {LIB: text}, f"{LIB}:1: #![cfg_attr( test, allow(clippy::unwrap_used) )]"
+    )
+
+
+def test_an_inner_expect_passes(lint: Lint) -> None:
     """`#![expect(clippy::unwrap_used, reason = "x")]`: green."""
-    assert_passed({LIB: '#![expect(clippy::unwrap_used, reason = "x")]\n'})
+    assert_passed(lint, {LIB: '#![expect(clippy::unwrap_used, reason = "x")]\n'})
 
 
-def test_a_manifest_rustc_allow_is_refused() -> None:
+def test_a_manifest_rustc_allow_is_refused(lint: Lint) -> None:
     """`[lints.rust] dead_code = "allow"`, the form that works today: red."""
     text = f'{PACKAGE}\n[lints.rust]\ndead_code = "allow"\n'
-    assert_refused({MEMBER: text}, f'{MEMBER}: [lints.rust] dead_code = "allow"')
+    assert_refused(lint, {MEMBER: text}, f'{MEMBER}: [lints.rust] dead_code = "allow"')
 
 
-def test_a_manifest_clippy_allow_is_refused() -> None:
+def test_a_manifest_clippy_allow_is_refused(lint: Lint) -> None:
     """`[lints.clippy] unwrap_used = "allow"`: red."""
     text = f'{PACKAGE}\n[lints.clippy]\nunwrap_used = "allow"\n'
-    assert_refused({MEMBER: text}, f'{MEMBER}: [lints.clippy] unwrap_used = "allow"')
+    assert_refused(
+        lint, {MEMBER: text}, f'{MEMBER}: [lints.clippy] unwrap_used = "allow"'
+    )
 
 
-def test_a_workspace_table_form_allow_is_refused() -> None:
+def test_a_workspace_table_form_allow_is_refused(lint: Lint) -> None:
     """`[workspace.lints.clippy] x = { level = "allow", priority = 1 }`: red."""
     text = (
         "[workspace]\n\n[workspace.lints.clippy]\n"
         'unwrap_used = { level = "allow", priority = 1 }\n'
     )
     assert_refused(
+        lint,
         {"Cargo.toml": text},
         'Cargo.toml: [workspace.lints.clippy] unwrap_used = "allow"',
     )
 
 
-def test_a_manifest_warn_or_deny_passes() -> None:
+def test_a_manifest_warn_or_deny_passes(lint: Lint) -> None:
     """`x = "warn"`, `y = { level = "deny" }`, `workspace = true`: green."""
     text = (
         f"{PACKAGE}\n[lints]\nworkspace = true\n\n[lints.clippy]\n"
         'unwrap_used = "warn"\nexpect_used = { level = "deny", priority = 1 }\n'
     )
-    assert_passed({MEMBER: text})
+    assert_passed(lint, {MEMBER: text})
 
 
-def test_a_group_allow_is_refused_by_the_group_grep() -> None:
+def test_a_group_allow_is_refused_by_the_group_grep(lint: Lint) -> None:
     """`#![allow(clippy::pedantic)]`: red with the group message."""
-    done, asked = EVERY_SUPPRESSION_IS_AN_EXPECT_lint(
-        planted={LIB: "#![allow(clippy::pedantic)]\n"}
-    )
+    done, asked = lint(planted={LIB: "#![allow(clippy::pedantic)]\n"})
     assert done.returncode == 1, done.stdout + done.stderr
     assert asked == NOT_ASKED
     assert GROUP in done.stderr
 
 
-def test_a_group_expect_is_refused_by_the_group_grep() -> None:
+def test_a_group_expect_is_refused_by_the_group_grep(lint: Lint) -> None:
     """`#![expect(clippy::pedantic, reason = "x")]`: red, the same."""
     planted = {LIB: '#![expect(clippy::pedantic, reason = "x")]\n'}
-    done, asked = EVERY_SUPPRESSION_IS_AN_EXPECT_lint(planted=planted)
+    done, asked = lint(planted=planted)
     assert done.returncode == 1, done.stdout + done.stderr
     assert asked == NOT_ASKED
     assert GROUP in done.stderr
 
 
-def test_a_lint_named_after_a_group_passes_the_group_grep() -> None:
+def test_a_lint_named_after_a_group_passes_the_group_grep(lint: Lint) -> None:
     """`clippy::cargo_common_metadata` is one lint, not the cargo group."""
     planted = {LIB: '#![expect(clippy::cargo_common_metadata, reason = "x")]\n'}
-    assert_passed(planted)
+    assert_passed(lint, planted)
 
 
 # The ladder excludes single_call_fn and tests_outside_test_module (#1995).

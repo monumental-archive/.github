@@ -9,6 +9,7 @@ and never repeated (#2105), its coverage provider, and every leg
 printed beside Python's.
 """
 
+from tests import support
 from tests.test_coverage_tasks import (
     MEASURED_VITEST,
     run_in_tree,
@@ -30,9 +31,11 @@ LOST_TYPESCRIPT = "".join(
 
 
 # `coverage:check` over the TypeScript leg (#1357).
-def test_a_vitest_tree_measures_and_holds() -> None:
+def test_a_vitest_tree_measures_and_holds(env: support.Env) -> None:
     """The run's reports are read: both legs print, and no vitest runs."""
-    done, tree = run_in_tree("coverage:check", python=False, typescript="vitest")
+    done, tree = run_in_tree(
+        "coverage:check", python=False, typescript="vitest", env=env
+    )
     assert done.returncode == 0, done.stderr
     assert (
         "coverage:check: typescript leg holds its floor 80.0 (88.0%)\n"
@@ -42,7 +45,7 @@ def test_a_vitest_tree_measures_and_holds() -> None:
     assert vitest_runs(tree) == NO_RUNS
 
 
-def test_no_report_with_the_leg_recorded_reds_naming_measured() -> None:
+def test_no_report_with_the_leg_recorded_reds_naming_measured(env: support.Env) -> None:
     """A floor that records the leg and a run with no report: red (#2105)."""
     done, tree = run_in_tree(
         "coverage:check",
@@ -50,6 +53,7 @@ def test_no_report_with_the_leg_recorded_reds_naming_measured() -> None:
         typescript="vitest",
         measured=False,
         legs="typescript typescript-branches",
+        env=env,
     )
     assert done.returncode == 1, done.stderr
     assert (
@@ -60,7 +64,7 @@ def test_no_report_with_the_leg_recorded_reds_naming_measured() -> None:
     assert vitest_runs(tree) == NO_RUNS
 
 
-def test_test_then_check_runs_the_suite_once() -> None:
+def test_test_then_check_runs_the_suite_once(env: support.Env) -> None:
     """`test` through `measured`, then the check: one vitest run (#2105)."""
     done, tree = run_in_tree(
         "coverage:check",
@@ -68,6 +72,7 @@ def test_test_then_check_runs_the_suite_once() -> None:
         typescript="vitest",
         measured=False,
         run_test=True,
+        env=env,
     )
     assert done.returncode == 0, done.stderr
     assert (
@@ -78,10 +83,10 @@ def test_test_then_check_runs_the_suite_once() -> None:
     assert "--coverage.enabled=true" in runs[0]
 
 
-def test_branches_below_the_floor_red_by_name() -> None:
+def test_branches_below_the_floor_red_by_name(env: support.Env) -> None:
     """Lines holding does not carry the branch leg."""
     done, _ = run_in_tree(
-        "coverage:check", python=False, typescript="vitest", ts_branches="79.5"
+        "coverage:check", python=False, typescript="vitest", ts_branches="79.5", env=env
     )
     assert done.returncode == 1
     assert (
@@ -89,10 +94,10 @@ def test_branches_below_the_floor_red_by_name() -> None:
     ) in done.stderr
 
 
-def test_lines_below_the_floor_red_by_name() -> None:
+def test_lines_below_the_floor_red_by_name(env: support.Env) -> None:
     """The line leg reds before the branch leg is read."""
     done, _ = run_in_tree(
-        "coverage:check", python=False, typescript="vitest", ts="60.0"
+        "coverage:check", python=False, typescript="vitest", ts="60.0", env=env
     )
     assert done.returncode == 1
     assert (
@@ -101,7 +106,7 @@ def test_lines_below_the_floor_red_by_name() -> None:
     )
 
 
-def test_no_floor_skips_clean() -> None:
+def test_no_floor_skips_clean(env: support.Env) -> None:
     """A vitest tree with no floor owes nothing: `test` runs unmeasured."""
     done, tree = run_in_tree(
         "coverage:check",
@@ -110,6 +115,7 @@ def test_no_floor_skips_clean() -> None:
         floor=False,
         measured=False,
         run_test=True,
+        env=env,
     )
     assert done.returncode == 0, done.stderr
     assert done.stdout == "coverage:check: no .coverage-floor, skipped\n"
@@ -117,20 +123,22 @@ def test_no_floor_skips_clean() -> None:
     assert unmeasured == vitest_runs(tree)
 
 
-def test_an_unsupported_runner_reds_its_recorded_legs() -> None:
+def test_an_unsupported_runner_reds_its_recorded_legs(env: support.Env) -> None:
     """A jest tree's recorded typescript legs are red, never skipped.
 
     Every floor records its legs (#2143), so each is red by name with
     the remedy naming vitest; `coverage:adopt`'s probe names the
     runner itself.
     """
-    done, _ = run_in_tree("coverage:check", python=False, typescript="jest")
+    done, _ = run_in_tree("coverage:check", python=False, typescript="jest", env=env)
     assert (done.returncode, done.stdout, done.stderr) == (1, "", LOST_TYPESCRIPT)
 
 
-def test_vitest_without_a_provider_reds_with_the_remedy() -> None:
+def test_vitest_without_a_provider_reds_with_the_remedy(env: support.Env) -> None:
     """The belt pins no provider; the lockfile must."""
-    done, _ = run_in_tree("coverage:check", python=False, typescript="vitest-bare")
+    done, _ = run_in_tree(
+        "coverage:check", python=False, typescript="vitest-bare", env=env
+    )
     assert done.returncode == 1
     assert (
         "coverage:check: vitest runs the suite but the lockfile pins no"
@@ -139,9 +147,9 @@ def test_vitest_without_a_provider_reds_with_the_remedy() -> None:
     ) in done.stderr
 
 
-def test_mixed_python_and_typescript_prints_every_leg() -> None:
+def test_mixed_python_and_typescript_prints_every_leg(env: support.Env) -> None:
     """A mixed tree measures each language it tracks."""
-    done, tree = run_in_tree("coverage:check", typescript="vitest")
+    done, tree = run_in_tree("coverage:check", typescript="vitest", env=env)
     assert done.returncode == 0, done.stderr
     assert (
         "coverage:check: python leg holds its floor 80.0 (90.0%)\n"
@@ -152,7 +160,7 @@ def test_mixed_python_and_typescript_prints_every_leg() -> None:
     ) == done.stdout
 
 
-def test_the_test_task_selection_is_the_measured_selection() -> None:
+def test_the_test_task_selection_is_the_measured_selection(env: support.Env) -> None:
     """A `test` command narrower than vitest's config is measured as written.
 
     #1357 item 2: the run measured is the repository's own test
@@ -166,6 +174,7 @@ def test_the_test_task_selection_is_the_measured_selection() -> None:
         test_run=MEASURED_VITEST + " tests/unit",
         measured=False,
         run_test=True,
+        env=env,
     )
     assert done.returncode == 0, done.stderr
     runs = [run.split() for run in vitest_runs(tree)]
@@ -175,15 +184,15 @@ def test_the_test_task_selection_is_the_measured_selection() -> None:
     assert "--coverage.enabled=true" in runs[0]
 
 
-def test_a_vitest_tree_without_a_test_task_reds_its_legs() -> None:
+def test_a_vitest_tree_without_a_test_task_reds_its_legs(env: support.Env) -> None:
     """No test task, no suite the gate runs: each recorded leg named."""
     done, _ = run_in_tree(
-        "coverage:check", python=False, typescript="vitest", test_task=False
+        "coverage:check", python=False, typescript="vitest", test_task=False, env=env
     )
     assert (done.returncode, done.stderr) == (1, LOST_TYPESCRIPT)
 
 
-def test_a_coverage_flag_in_the_test_command_is_refused() -> None:
+def test_a_coverage_flag_in_the_test_command_is_refused(env: support.Env) -> None:
     """The leg owns the coverage flags: `test` reds before vitest runs."""
     done, tree = run_in_tree(
         "coverage:check",
@@ -192,15 +201,18 @@ def test_a_coverage_flag_in_the_test_command_is_refused() -> None:
         test_run=MEASURED_VITEST + " --coverage.enabled=false",
         measured=False,
         run_test=True,
+        env=env,
     )
     assert done.returncode == 1, done.stderr
     assert "measured: --coverage.enabled=false is on the vitest run" in done.stderr
     assert vitest_runs(tree) == NO_RUNS
 
 
-def test_check_writes_the_typescript_lcov() -> None:
+def test_check_writes_the_typescript_lcov(env: support.Env) -> None:
     """The upload is the measured run's own lcov, off lcov.info."""
-    done, tree = run_in_tree("coverage:check", python=False, typescript="vitest")
+    done, tree = run_in_tree(
+        "coverage:check", python=False, typescript="vitest", env=env
+    )
     assert done.returncode == 0, done.stderr
     assert done.stdout.endswith(upload_line(tree, "lcov-typescript.info")), done.stdout
     reports = tree.parent / "reports"

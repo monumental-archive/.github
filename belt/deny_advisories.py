@@ -27,8 +27,6 @@ from pathlib import Path
 from belt import findings
 from belt.decoded import UndecodableError, as_array, as_object, load_toml
 
-# The one argument.
-EXPECTED_ARGC = 1
 # The file is named as the task passed it: `deny.toml` for the top
 # workspace, `<dir>/deny.toml` for another (#2009).
 MESSAGE = "an advisory ignore in {config}"

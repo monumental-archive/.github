@@ -57,7 +57,7 @@ STRUCTURAL = ("applies", "report")
 # `adoption` job; rerouting it through the table was rejected (#1891).
 EXEMPT = ("repo-mutants",)
 TASK = re.compile(r"mise run (audit:[\w:-]+)")
-FLOOR_LEG = re.compile(r"coverage_floor\.py\"? read --leg ([\w-]+)")
+FLOOR_LEG = re.compile(r"belt\"? coverage-floor read --leg ([\w-]+)")
 
 Document = dict[str, object]
 Table = dict[str, dict[str, audit_legs.Row]]
@@ -274,8 +274,8 @@ def job_drift(
     runs = " ".join(
         decoded.as_str(s.get("run", ""), "run") for s in workflow_yaml.steps(applies)
     )
-    if f"audit_legs.py {stem} " not in runs:
-        out.append(f"{stem}.yml: applies runs no `audit_legs.py {stem}`")
+    if f"belt audit-legs {stem} " not in runs:
+        out.append(f"{stem}.yml: applies runs no `belt audit-legs {stem}`")
     report = jobs.get("report")
     if report is not None and "applies" not in needs_of(report):
         out.append(f"{stem}.yml: report does not need applies")
@@ -569,8 +569,9 @@ def test_a_step_without_the_export_is_named() -> None:
 
 
 # A workflow step runs the helper outside mise, so its findings carry the
-# script's own name (findings.task_name, #1934).
-STEP = "audit_legs.py"
+# command's own name, which the launcher makes argv[0]
+# (findings.task_name, #1934).
+STEP = "audit-legs"
 
 
 @fixture

@@ -1,12 +1,14 @@
 """Belt task bodies start their helpers under the belt's Python (#1582).
 
 Inside `mise run`, `python3` is whatever the REPOSITORY pins, so a belt
-task that starts `python3 "${ORG_BELT_DIR}/<helper>.py"` runs the belt's
-helper under the repository's interpreter. #1543 closed this for
-workflow steps and the belt's shell scripts; these rows hold the task
-bodies to the same law: a helper starts as
-`"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" <helper.py>`, the refusal riding
-the expansion so no body gains a line.
+task that starts `python3 -I "${ORG_CANON_DIR}/belt" <command>` runs the
+belt under the repository's interpreter. #1543 closed this for workflow
+steps and the belt's shell scripts; these rows hold the task bodies to
+the same law: belt Python starts one way, the launcher under the belt's
+interpreter, `"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I
+"${ORG_CANON_DIR}/belt" <command>` (#2177), the refusal riding the
+expansion so no body gains a line. A tracked `.py` started as a file is
+red under any interpreter.
 
 Then the behaviour, under a real mise: a scratch repository that pins a
 different Python (stub interpreters, each printing its own name) runs a
@@ -33,8 +35,12 @@ BELT = CANON / "mise" / "config.toml"
 # The one start: the interpreter, refusing an empty one by the belt's
 # own message.
 GUARDED = '"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}"'
+# The launcher, and the one way to start it (#2177).
+PACKAGE = "belt"
+LAUNCHER = f'{GUARDED} -I "${{ORG_CANON_DIR}}/{PACKAGE}"'
+LAUNCHED = re.compile(re.escape(GUARDED) + r"\s+-I\s+$")
 GUARDED_START = re.compile(re.escape(GUARDED) + r"\s+$")
-INTERPRETER = re.compile(r"(?<![\w./$-])(python[\d.]*)\s+$")
+INTERPRETER = re.compile(r"(?<![\w./$-])(python[\d.]*)(?:\s+-I)?\s+$")
 COMMAND_POSITION = re.compile(r"(?:^|[;&|(]|\$\()\s*$")
 # A shell word: a quoted string whole, or a run of anything that does
 # not end a word or a command.
@@ -97,15 +103,16 @@ def resolve(word: str, assigned: dict[str, str]) -> str:
 
 
 def helper_starts(rel: str, task: str, body: str, tracked: set[str]) -> list[str]:
-    """Name each start of a tracked helper that is not the guarded one.
+    """Name each start of belt Python that is not the launcher's one way.
 
-    A helper is started where it stands after an interpreter's name, or
-    in a command's place (a line's first word, or after `;`, `|`, `&`,
-    `(` or `$(`), where its own first line picks the interpreter.
-    Anywhere else it is an argument; `python3 -c` starts no file.
+    The launcher, or a tracked helper file, is started where it stands
+    after an interpreter's name, or in a command's place (a line's first
+    word, or after `;`, `|`, `&`, `(` or `$(`), where its own first line
+    picks the interpreter. Anywhere else it is an argument; `python3 -c`
+    starts no file.
 
     Returns:
-        One line per such start, naming the config, task and helper.
+        One line per such start, naming the config, task and command.
 
     """
     lines = [
@@ -121,22 +128,32 @@ def helper_starts(rel: str, task: str, body: str, tracked: set[str]) -> list[str
             assigned.setdefault(key, value.strip("\"'"))
     out: list[str] = []
     for line in lines:
-        for word in WORD.finditer(line):
+        words = list(WORD.finditer(line))
+        for at, word in enumerate(words):
             name = resolve(word.group(0), assigned)
-            if name not in tracked or re.match(r"\w+=", word.group(0)):
+            if name not in tracked | {PACKAGE} or re.match(r"\w+=", word.group(0)):
                 continue
             before = line[: word.start()]
-            if GUARDED_START.search(before):
+            launcher = name == PACKAGE
+            if launcher and LAUNCHED.search(before):
                 continue
+            command = (
+                (words[at + 1].group(0) if at + 1 < len(words) else "<command>")
+                if launcher
+                else name.removesuffix(".py").replace("_", "-")
+            )
             interpreter = INTERPRETER.search(before)
-            if interpreter:
+            if GUARDED_START.search(before):
+                how = "without -I" if launcher else "as a file"
+            elif interpreter:
                 how = f"with the repository's {interpreter.group(1)}"
             elif COMMAND_POSITION.search(before):
                 how = "by its own first line"
             else:
                 continue
             out.append(
-                f"{rel} {task}: starts {name} {how}; run it as {GUARDED} {name} (#1582)"
+                f"{rel} {task}: starts belt {command} {how};"
+                f" run it as {LAUNCHER} {command} (#1582)"
             )
     return out
 
@@ -155,7 +172,7 @@ def findings(texts: dict[str, str], tracked: set[str]) -> list[str]:
     return out
 
 
-# The law: every belt task body starts a helper the guarded way.
+# The law: every belt task body starts belt Python the launcher's way.
 def test_every_belt_task_starts_its_helpers_under_org_python() -> None:
     """The tree: no belt task starts a tracked helper any other way."""
     none: list[str] = []
@@ -165,14 +182,14 @@ def test_every_belt_task_starts_its_helpers_under_org_python() -> None:
 
 
 def test_the_scan_reaches_the_helper_starts() -> None:
-    """Not vacuous: the belt starts helpers the guarded way, many times."""
+    """Not vacuous: the belt starts the launcher its way, many times."""
     text = BELT.read_text("utf-8")
     assert {
         "gate_surface.py",
         "belt_shell.py",
         "coverage_floor.py",
     } <= tracked_helpers()
-    guarded = [b for b in bodies(text).values() if GUARDED in b]
+    guarded = [b for b in bodies(text).values() if LAUNCHER in b]
     assert len(guarded) >= 30
 
 
@@ -187,13 +204,11 @@ def test_a_python3_start_is_named() -> None:
     want: list[str] = [
         (
             "mise/config.toml lint:x: starts belt gate-surface with the"
-            f" repository's python3; run it as {GUARDED} gate_surface.py"
-            " (#1582)"
+            f" repository's python3; run it as {LAUNCHER} gate-surface (#1582)"
         ),
         (
             "mise/config.toml lint:x: starts belt msrv-plan with the"
-            f" repository's python3; run it as {GUARDED} msrv_plan.py"
-            " (#1582)"
+            f" repository's python3; run it as {LAUNCHER} msrv-plan (#1582)"
         ),
     ]
     assert want == findings(
@@ -212,8 +227,7 @@ def test_a_start_through_a_variable_is_named() -> None:
     want: list[str] = [
         (
             "mise/config.toml lint:deny: starts belt deny-skips with the"
-            f" repository's python3; run it as {GUARDED} deny_skips.py"
-            " (#1582)"
+            f" repository's python3; run it as {LAUNCHER} deny-skips (#1582)"
         )
     ]
     assert want == findings({"mise/config.toml": text}, {"deny_skips.py"})
@@ -228,17 +242,38 @@ def test_a_start_by_first_line_is_named() -> None:
     want: list[str] = [
         (
             "mise/config.toml lint:y: starts belt subject-budget by its own"
-            f" first line; run it as {GUARDED} subject_budget.py (#1582)"
+            f" first line; run it as {LAUNCHER} subject-budget (#1582)"
         )
     ]
     assert want == findings({"mise/config.toml": text}, {"subject_budget.py"})
 
 
-def test_the_guarded_start_inline_code_and_arguments_pass() -> None:
-    """Only an unguarded start of a tracked helper is red."""
+def test_a_file_or_a_launcher_without_isolation_is_named() -> None:
+    """Planted: the belt's interpreter, but not the launcher's one way."""
+    text = (
+        "[tasks.\"lint:w\"]\nrun = '''\n"
+        f'{GUARDED} "${{ORG_BELT_DIR}}/gate_surface.py" --exclude ""\n'
+        f'{GUARDED} "${{ORG_CANON_DIR}}/belt" msrv-plan\n'
+        "'''\n"
+    )
+    want: list[str] = [
+        (
+            "mise/config.toml lint:w: starts belt gate-surface as a file;"
+            f" run it as {LAUNCHER} gate-surface (#1582)"
+        ),
+        (
+            "mise/config.toml lint:w: starts belt msrv-plan without -I;"
+            f" run it as {LAUNCHER} msrv-plan (#1582)"
+        ),
+    ]
+    assert want == findings({"mise/config.toml": text}, {"gate_surface.py"})
+
+
+def test_the_launcher_inline_code_and_arguments_pass() -> None:
+    """Only a start of belt Python outside the launcher's way is red."""
     text = (
         "[tasks.\"lint:z\"]\nrun = '''\n"
-        f'{GUARDED} "${{ORG_BELT_DIR}}/gate_surface.py" --helper registry.py\n'
+        f"{LAUNCHER} gate-surface --helper registry.py\n"
         "actual=$(python3 -c 'import sys; print(sys.version)')\n"
         "python3 caller-build.py\n"
         "# python3 -I belt registry\n"
@@ -349,7 +384,7 @@ def test_a_belt_task_runs_its_helper_under_the_belts_python(
     """The belt's stub answers, never the repository's."""
     done = a_scratch_repository_pinning_its_own_python.run_task("lint:subject-budget")
     assert done.returncode == 0, done.stdout + done.stderr
-    assert f"belt {CANON / 'mise' / 'subject_budget.py'}\n" in done.stdout
+    assert f"belt -I {CANON / 'belt'} subject-budget\n" in done.stdout
     assert "repo " not in done.stdout
 
 
