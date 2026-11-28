@@ -29,9 +29,11 @@ tree adopts (MUTATED, the file each leg's guard reads), one row each
 (mutation_count, the one place that count is decided). A row runs
 `ci:mutants` with MUTANTS_LEG (its language, which ci.yml sets from
 the row), and a row of several shards MUTANTS_SHARD=k/n counted from
-0, as the weekly run counts them. A tree adopting none gets one
-`ci:mutants` row, which skips clean. Nothing is unioned: a mutation
-shard's verdict is its own.
+0, as the weekly run counts them. Python is no row: its plan reads the
+test rows' coverage, so it is a job of its own that needs them,
+`mutants-python`, which `plan` says to run (`python-mutants`). A tree
+adopting none gets one `ci:mutants` row, which skips clean. Nothing is
+unioned: a mutation shard's verdict is its own.
 
 A row runs `mise run <task>`, its own depends included: a dependency
 that is also a row of its own runs twice, and that is accepted (ruled
@@ -138,6 +140,9 @@ ADAPTED = {
     "mutants": ("rust", "go", "python", "typescript"),
     "deep-tests": ("python",),
 }
+# The mutation legs that are a job of their own, never a row (#1432):
+# Python plans from the test rows' coverage, so its job needs them.
+OWN_JOB = ("python",)
 # What adopts each mutation leg (#1432): a tracked file at the root
 # whose name matches, exactly the files each leg's guard reads
 # (mutants-<language>.sh). A StrykerJS config other than the JSON one is
@@ -535,9 +540,10 @@ def mutation_rows(costs: Costs, counts: Counts, files: list[str]) -> list[Row]:
         The leg's rows, each adopted language in LANGUAGES order.
 
     """
-    adopted = [n for n in LANGUAGES["mutants"] if mutated(n, files)]
-    if not adopted:
+    every = [n for n in LANGUAGES["mutants"] if mutated(n, files)]
+    if not every:
         return [{"leg": "mutants", "task": "ci:mutants", "shard": 1, "of": 1}]
+    adopted = [n for n in every if n not in OWN_JOB]
     return [
         {"leg": "mutants", "task": "ci:mutants", "language": n, "shard": k, "of": of}
         for n in adopted
@@ -1026,6 +1032,8 @@ def print_plan(leg: str) -> int:
     matrix: dict[str, object] = {"include": rows}
     print(f"legs={json.dumps(matrix, separators=(',', ':'))}")
     print(f"split={'true' if split else 'false'}")
+    python = mutated("python", tracked())
+    print(f"python-mutants={'true' if python else 'false'}")
     print(f"test-split={'true' if 'test' in split else 'false'}")
     return 0
 

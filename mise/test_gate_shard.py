@@ -383,11 +383,18 @@ class Mutation(Planted):
         ]
 
     def test_each_adopted_language_gets_one_row(self) -> None:
-        """Python and Rust adopted: one row each, whatever `[mutants]` says."""
-        files = [*self.plant(THREE, "[mutants]\npython = 2\n"), "cosmic-ray.toml"]
-        files.append(".cargo/mutants.toml")
-        want: list[tuple[object, ...]] = [("rust", 1, 1), ("python", 1, 1)]
+        """Rust adopted: one row, whatever `[mutants]` says."""
+        files = [*self.plant(THREE, "[mutants]\nrust = 2\n"), ".cargo/mutants.toml"]
+        want: list[tuple[object, ...]] = [("rust", 1, 1)]
         self.assertEqual(want, self.mutants(files))
+
+    def test_python_is_a_job_of_its_own_never_a_row(self) -> None:
+        """Python and Rust adopted: Rust's row only; Python alone: no row."""
+        files = [*self.plant(THREE), "cosmic-ray.toml", ".cargo/mutants.toml"]
+        want: list[tuple[object, ...]] = [("rust", 1, 1)]
+        self.assertEqual(want, self.mutants(files))
+        alone: list[tuple[object, ...]] = []
+        self.assertEqual(alone, self.mutants([*self.plant(THREE), "cosmic-ray.toml"]))
 
     def test_an_adoption_file_below_the_root_adopts_nothing(self) -> None:
         """Only a root file adopts, as each leg's guard reads it."""
@@ -402,11 +409,11 @@ class Mutation(Planted):
         self.assertEqual(want, self.mutants(files))
 
     def test_labels_name_the_language(self) -> None:
-        """`mutants python`; a tree adopting none, `mutants`."""
-        files = [*self.plant(THREE), "cosmic-ray.toml"]
+        """`mutants rust`; a tree adopting none, `mutants`."""
+        files = [*self.plant(THREE), ".cargo/mutants.toml"]
         rows = gate_shard.plan(COSTS, files, self.tree)
         labels = [str(r["label"]) for r in rows if r["leg"] == "mutants"]
-        want: list[str] = ["mutants python"]
+        want: list[str] = ["mutants rust"]
         self.assertEqual(want, labels)
         none = gate_shard.plan(COSTS, self.plant(THREE), self.tree)
         alone = [str(r["label"]) for r in none if r["leg"] == "mutants"]

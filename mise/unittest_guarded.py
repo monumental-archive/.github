@@ -45,10 +45,19 @@ root passes: its files ran elsewhere. Each shard reports the files it
 chose from and the ones it kept (`shard.report`), and the gate holds
 the union of every shard's to the whole discovery.
 
-Coverage needs nothing from here: a worker is `python3`, started with
+Coverage needs little from here: a worker is `python3`, started with
 this process's environment, so the measurement's start-up hook reaches
 it as it reaches any child, and its data file is its own (`parallel =
-true`, combined after). Stdlib only (#364). Discovery, arguments,
+true`, combined after). Fourth, for `ci:mutants`' Python plan (#1432):
+where a measurement runs (COVERAGE_PROCESS_START names its rc file),
+each worker gets a copy of that rc naming its test file as coverage's
+static `context`, so the file's lines, and every child script's it
+starts (the copy is in the environment they inherit), are recorded
+against the file; and after a root, each file's seconds are written
+beside the run's data (`python/test-times.<id>.json`). A context is
+metadata: the lines and branches measured, and so every figure, are
+the same. mutants_python.py's plan reads both, so the gate's mutation
+job never runs the suite again to plan. Stdlib only (#364). Discovery, arguments,
 output and exit status are otherwise unittest's own.
 """
 
@@ -370,6 +379,8 @@ class RecordingLoader(unittest.TestLoader):
         """Start with no modules recorded."""
         super().__init__()
         self.modules: dict[int, tuple[str, unittest.TestSuite]] = {}
+        # Each module's file, from the run's directory: its context.
+        self.files: dict[str, str] = {}
 
     @override
     def loadTestsFromModule(
@@ -383,6 +394,9 @@ class RecordingLoader(unittest.TestLoader):
         """
         suite = super().loadTestsFromModule(module, pattern=pattern)
         self.modules[id(suite)] = (module.__name__, suite)
+        file: object = getattr(module, "__file__", None)
+        if isinstance(file, str):
+            self.files[module.__name__] = os.path.relpath(file, START)
         return suite
 
 
@@ -447,7 +461,8 @@ class Parallel(unittest.TestSuite):
                 spec.write_text(
                     json.dumps(self.spec | {"module": module}), encoding="utf-8"
                 )
-                started.append(pool.submit(work, spec))
+                env = context_env(LOADER.files.get(module), Path(scratch), index)
+                started.append(pool.submit(work, spec, env))
             for index, ((module, item), future) in enumerate(
                 zip(self.units, started, strict=True)
             ):
@@ -456,6 +471,7 @@ class Parallel(unittest.TestSuite):
                     continue
                 outcome = Path(scratch) / f"{index}.out"
                 merge(result, module or "", future.result(), outcome)
+        write_times(result)
         return result
 
 
@@ -576,7 +592,9 @@ def report(result: GuardedResult, root: str) -> None:
             out.write("```text\n" + "\n".join(lines) + "\n```\n")
 
 
-def work(spec: Path) -> subprocess.CompletedProcess[str]:
+def work(
+    spec: Path, env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
     """Run one worker on a spec, capturing what it prints.
 
     Returns:
@@ -588,7 +606,62 @@ def work(spec: Path) -> subprocess.CompletedProcess[str]:
         capture_output=True,
         text=True,
         check=False,
+        env=env,
     )
+
+
+RC = "COVERAGE_PROCESS_START"
+
+
+def with_context(rc: str, context: str) -> str:
+    """Name a static context in a coverage rc file's `[run]` table.
+
+    Returns:
+        The rc text, any `context` line of `[run]` replaced.
+
+    """
+    out: list[str] = []
+    table = ""
+    for line in rc.splitlines():
+        if line.strip().startswith("["):
+            table = line.strip()
+        if table == "[run]" and line.split("=", 1)[0].strip() == "context":
+            continue
+        out.append(line)
+        if line.strip() == "[run]":
+            out.append(f"context = {context}")
+    return "\n".join(out) + "\n"
+
+
+def context_env(file: str | None, scratch: Path, index: int) -> dict[str, str] | None:
+    """Hand one worker an rc naming its test file as coverage's context.
+
+    Returns:
+        The worker's environment, or None (the parent's) where nothing
+        is measured or the module has no file.
+
+    """
+    rc = os.environ.get(RC, "")
+    if not rc or not file or not Path(rc).is_file():
+        return None
+    copy = scratch / f"{index}.rc"
+    copy.write_text(with_context(Path(rc).read_text(encoding="utf-8"), file), "utf-8")
+    return dict(os.environ) | {RC: str(copy)}
+
+
+def write_times(result: unittest.TestResult) -> None:
+    """Write each test file's seconds beside the measured run's data."""
+    rc = os.environ.get(RC, "")
+    if not rc or not isinstance(result, GuardedResult):
+        return
+    times = {
+        LOADER.files.get(module, module): seconds
+        for module, seconds in result.files.items()
+    }
+    data = Path(rc).parent / "python"
+    data.mkdir(parents=True, exist_ok=True)
+    name = f"test-times.{os.getpid()}.{os.urandom(4).hex()}.json"
+    (data / name).write_text(json.dumps(times, sort_keys=True), encoding="utf-8")
 
 
 def merge(

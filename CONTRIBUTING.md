@@ -242,6 +242,8 @@ change touched reds the gate, whether the change made it or it was
 already there, so editing a line makes its survivors yours, and the
 backlog is paid down where work happens. No base, a touched adoption
 file or a moved mutation tool judges the language's whole population.
+Python's plan reads the test rows' own coverage, recorded per test
+file by the belt's runner, so the suite is never run again to plan.
 The whole population runs weekly on its own mutation workflow, apart
 from the audit, for what a diff cannot see: a change that only weakens
 tests, a tool upgrade that adds mutators. Anything

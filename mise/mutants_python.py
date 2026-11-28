@@ -30,6 +30,16 @@ imports, nothing a child process must be handed (#1771).
   and exited 0 under a user's `diff.noprefix` (measured, #1432). When
   this shard's share of what is kept is empty, no test file is
   measured: a change that touches no Python costs its rows no suite run.
+- `plan ... --measured RUN`: the gate's mutation job (#1432, the
+  owner's ruling) plans from what the gate's test rows measured, never
+  running the suite again. RUN is the test rows' run directory, merged
+  (coverage_merge.py): their coverage data, where the belt's runner
+  (unittest_guarded.py) gave each test file's worker a static context
+  naming the file, child scripts included, and each file's seconds
+  (`python/test-times.*.json`). A test file is mapped to the lines
+  recorded under its context. No times at all is red by name: the test
+  leg did not run through the belt's runner, which is the only one that
+  records them; so is a test file `tests` names that no row ran.
 - `judge PLAN PRAGMAS SHARD OUT`: judges this shard's mutants, one at
   a time, and states the verdict. After each mutant, every tracked file
   under `module-path` that differs from git is restored and red by
@@ -689,8 +699,124 @@ def measure_all(
     return None if failed else runs
 
 
+def times_of(run: Path) -> dict[str, float]:
+    """Read each test file's seconds, as the test rows' runner wrote them.
+
+    Returns:
+        Each file's seconds, summed over every row that wrote one.
+
+    """
+    times: dict[str, float] = {}
+    for path in sorted((run / "python").glob("test-times.*.json")):
+        for name, seconds in decoded.as_object(
+            decoded.load_json(path.read_bytes()), path.name
+        ).items():
+            if isinstance(seconds, int | float) and not isinstance(seconds, bool):
+                times[name] = times.get(name, 0.0) + float(seconds)
+    return times
+
+
+def context_lines(run: Path, plan_dir: Path) -> dict[str, dict[str, list[str]]]:
+    """Read the test rows' data: which context executed which line.
+
+    Returns:
+        path -> line (as text) -> the contexts (test files) that ran it;
+        empty when the data cannot be combined or read.
+
+    """
+    data = plan_dir / "measured" / ".coverage"
+    data.parent.mkdir(parents=True, exist_ok=True)
+    rows = sorted(str(p) for p in (run / "python").glob(".coverage*"))
+    out = plan_dir / "measured" / "lines.json"
+    # The rows measured with relative paths and branches; read as they
+    # wrote, or the contexts do not come back (measured, #1432).
+    rc = plan_dir / "measured" / "combine.rc"
+    rc.write_text(
+        f"[run]\nbranch = true\nrelative_files = true\ndata_file = {data}\n",
+        encoding="utf-8",
+    )
+    combined = subprocess.run(
+        [which("coverage"), "combine", "--keep", "-q", f"--rcfile={rc}", *rows],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if combined.returncode != 0:
+        return {}
+    subprocess.run(
+        [
+            which("coverage"),
+            "json",
+            f"--rcfile={rc}",
+            "--show-contexts",
+            "-q",
+            "-o",
+            str(out),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    try:
+        report = decoded.as_object(decoded.load_json(out.read_bytes()), "report")
+        files = decoded.as_object(report.get("files"), "files")
+    except OSError, decoded.UndecodableError:
+        return {}
+    return {
+        path: {
+            line: [c for c in decoded.as_array(names, path) if isinstance(c, str)]
+            for line, names in decoded.as_object(
+                decoded.as_object(entry, path).get("contexts", {}), path
+            ).items()
+        }
+        for path, entry in files.items()
+    }
+
+
+def from_rows(
+    run: Path, tests: list[str], plan_dir: Path
+) -> tuple[list[Measured], dict[str, dict[str, list[int]]]] | None:
+    """Plan from the test rows: each file's time and the lines it ran.
+
+    Returns:
+        The test files as measured and the line map by test index, or
+        None with each refusal printed.
+
+    """
+    times = times_of(run)
+    if not times:
+        red(
+            f"{run}: the test rows wrote no per-file times — the gate plans"
+            " Python mutants from the belt's runner only:",
+            [
+                "run the test leg through mise/unittest_guarded.py, measured",
+                '("${ORG_BELT_DIR}/measured" python3 .../unittest_guarded.py)',
+            ],
+        )
+        return None
+    unran = [t for t in tests if t not in times]
+    for test in unran:
+        red(f"{test} is a mutation test file no test row ran — nothing judged")
+    if unran:
+        return None
+    index = {test: i for i, test in enumerate(tests)}
+    lines = {
+        path: {
+            line: sorted({index[c] for c in contexts if c in index})
+            for line, contexts in per_file.items()
+        }
+        for path, per_file in context_lines(run, plan_dir).items()
+    }
+    runs = [Measured(t, int(times[t] * 1000), 0, "") for t in tests]
+    return runs, lines
+
+
 def plan(
-    config: Path, plan_dir: Path, scope: Path | None = None, shard: str = "0/1"
+    config: Path,
+    plan_dir: Path,
+    scope: Path | None = None,
+    shard: str = "0/1",
+    measured: Path | None = None,
 ) -> int:
     """Write the plan: the mutants, each test file's time and lines.
 
@@ -716,6 +842,19 @@ def plan(
             " no suite run"
         )
         return 0
+    if measured is not None:
+        return plan_from_rows(measured, tests, (plan_dir, found, mutants))
+    return plan_alone(tests, (plan_dir, found, mutants))
+
+
+def plan_alone(tests: list[str], into: tuple[Path, Adoption, list[Mutant]]) -> int:
+    """Write the plan by running every test file alone under coverage.
+
+    Returns:
+        0 with the plan written, or EXIT_RED with each refusal printed.
+
+    """
+    plan_dir, found, mutants = into
     runs = measure_all(tests, found.command, plan_dir)
     if runs is None:
         return EXIT_RED
@@ -728,12 +867,38 @@ def plan(
     return 0
 
 
+def plan_from_rows(
+    measured: Path, tests: list[str], into: tuple[Path, Adoption, list[Mutant]]
+) -> int:
+    """Write the plan from the test rows' run, running no suite.
+
+    Returns:
+        0 with the plan written, or EXIT_RED with each refusal printed.
+
+    """
+    plan_dir, found, mutants = into
+    rows = from_rows(measured, tests, plan_dir)
+    if rows is None:
+        return EXIT_RED
+    measured_runs, lines = rows
+    write_plan(plan_dir, found, mutants, measured_runs, lines)
+    print(
+        f"{LABEL}: plan: {len(mutants)} mutants, {len(measured_runs)} test files,"
+        " from the test rows' coverage (no suite run)"
+    )
+    return 0
+
+
 def write_plan(
-    plan_dir: Path, found: Adoption, mutants: list[Mutant], runs: list[Measured]
+    plan_dir: Path,
+    found: Adoption,
+    mutants: list[Mutant],
+    runs: list[Measured],
+    given: dict[str, dict[str, list[int]]] | None = None,
 ) -> None:
     """Write plan.json: the commit, the mutants, the tests and the line map."""
     mutated = {m.path for m in mutants}
-    measured = executed(plan_dir) if runs else {}
+    measured = given if given is not None else executed(plan_dir) if runs else {}
     lines = {p: v for p, v in measured.items() if p in mutated}
     document = {
         "head": git("rev-parse", "HEAD").stdout.strip(),
@@ -1190,6 +1355,7 @@ class Args(argparse.Namespace):
     command: str
     config: Path
     scope: Path | None
+    measured: Path | None
     pragmas: Path
     plan: Path
     shard: str
@@ -1212,6 +1378,7 @@ def parse_args(argv: list[str]) -> Args:
     planned.add_argument("plan", type=Path)
     planned.add_argument("--scope", type=Path, default=None)
     planned.add_argument("--shard", default="0/1")
+    planned.add_argument("--measured", type=Path, default=None)
     judged = sub.add_parser("judge")
     judged.add_argument("plan", type=Path)
     judged.add_argument("pragmas", type=Path)
@@ -1233,7 +1400,7 @@ def main(argv: list[str]) -> int:
     if args.command == "pragmas":
         return pragmas(args.pragmas)
     if args.command == "plan":
-        return plan(args.config, args.plan, args.scope, args.shard)
+        return plan(args.config, args.plan, args.scope, args.shard, args.measured)
     return judge(args.plan, args.pragmas, args.shard, args.scratch)
 
 

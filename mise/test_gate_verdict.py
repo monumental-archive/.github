@@ -73,6 +73,7 @@ class EveryPartPassed(unittest.TestCase):
         majors: str = "[16, 17]",
         coverage: str = "skipped",
         split: str = "false",
+        python_mutants: str = "success",
     ) -> subprocess.CompletedProcess[str]:
         """Run the lifted step on one set of job results.
 
@@ -91,6 +92,7 @@ class EveryPartPassed(unittest.TestCase):
                 MAJORS=majors,
                 COVERAGE=coverage,
                 SPLIT=split,
+                MUTANTS=python_mutants,
             ),
             capture_output=True,
             text=True,
@@ -104,6 +106,16 @@ class EveryPartPassed(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(
             done.stdout, "ci: plan, gate and every pgrx leg (\\[16\\,\\ 17\\]) passed\n"
+        )
+
+    def test_a_red_python_mutation_job_is_red(self) -> None:
+        """The Python mutation job failed (#1432): red, by name."""
+        done = self.verdict("success", "success", "success", python_mutants="failure")
+        self.assertEqual(done.returncode, 1)
+        self.assertEqual(
+            done.stdout,
+            "::error::a job the gate needs did not succeed\n"
+            "  job mutants: failure\n",
         )
 
     def test_no_legs_planned_and_none_ran(self) -> None:

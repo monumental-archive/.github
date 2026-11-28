@@ -52,6 +52,9 @@
 # no mutant and exited 0 under `diff.noprefix` (measured), so the leg's
 # own code applies it to the belt's pinned diff. Every row plans for
 # itself, in scratch, and a row whose share is empty measures nothing.
+# In the gate (MUTANTS_MEASURED, the test rows' merged run) the plan
+# reads the test rows' coverage and per-file times instead of running
+# every test file alone again (mutants_python.py `--measured`).
 # No base, or a change to cosmic-ray.toml or to cosmic-ray in a tracked
 # lockfile, judges the whole population.
 #
@@ -142,6 +145,9 @@ if [[ -n ${MUTANTS_DIFF:-} ]]; then
   unset MUTANTS_PLAN
   "${ORG_PYTHON}" "${belt}/mutants_diff.py" scope python "${scratch}/scope"
   scoped=(--scope "${scratch}/scope" --shard "${shard}")
+  # The gate's mutation job hands the test rows' merged run (#1432):
+  # the plan reads it and runs no suite.
+  [[ -z ${MUTANTS_MEASURED:-} ]] || scoped+=(--measured "${MUTANTS_MEASURED}")
 fi
 if [[ ${shard} == plan ]]; then
   : "${MUTANTS_PLAN:?unset — MUTANTS_SHARD=plan writes the plan there}"

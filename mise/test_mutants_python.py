@@ -1589,5 +1589,233 @@ class RealDiff(unittest.TestCase):
         )
 
 
+# THE PLAN FROM THE TEST ROWS (#1432, the owner's ruling): the gate's
+# mutation job reads the test rows' coverage and per-file times instead
+# of running every test file alone again. These rows run the belt's
+# real `measured` and real runner (unittest_guarded.py, parallel, a
+# static context per test file) over a fixture whose test file starts a
+# child script, then plan from that run, and hold its map to the
+# per-file plan's for the same files, child script and module-level
+# lines included; and hold the contexts to leaving every coverage figure
+# as it was.
+ROWS_MODULE = """LIMIT = 3
+
+
+def add(a, b):
+    return a + b
+
+
+def scale(x):
+    return x * LIMIT
+"""
+ROWS_HELPER = """import sys
+
+import m
+
+print(m.scale(int(sys.argv[1])))
+"""
+ROWS_TEST_A = """import subprocess
+import sys
+import unittest
+from pathlib import Path
+
+import m
+
+
+class A(unittest.TestCase):
+    def test_add(self):
+        self.assertEqual(m.add(2, 3), 5)
+
+    def test_child(self):
+        here = Path(__file__).parent
+        done = subprocess.run(
+            [sys.executable, str(here / "helper.py"), "2"],
+            capture_output=True, text=True, check=True,
+        )
+        self.assertEqual(done.stdout.strip(), "6")
+"""
+ROWS_TEST_B = """import unittest
+
+import m
+
+
+class B(unittest.TestCase):
+    def test_scale(self):
+        self.assertEqual(m.scale(1), 3)
+"""
+
+
+class FromRows(unittest.TestCase):
+    """The plan read from the test rows equals the per-file plan (#1432)."""
+
+    @override
+    def setUp(self) -> None:
+        """Plant and commit the fixture."""
+        scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(scratch.cleanup)
+        self.root = Path(scratch.name)
+        self.tree = self.root / "tree"
+        init_tree(self.tree)
+        git_in(self.tree, "config", "commit.gpgsign", "false")
+        for path, text in (
+            ("cosmic-ray.toml", CONFIG),
+            (".coverage-floor", ""),
+            ("pkg/m.py", ROWS_MODULE),
+            ("pkg/helper.py", ROWS_HELPER),
+            ("pkg/test_a.py", ROWS_TEST_A),
+            ("pkg/test_b.py", ROWS_TEST_B),
+        ):
+            (self.tree / path).parent.mkdir(parents=True, exist_ok=True)
+            (self.tree / path).write_text(text, encoding="utf-8")
+        git_in(self.tree, "add", ".")
+        git_in(self.tree, "commit", "-q", "-m", "fixture")
+        self.env = hermetic.env(MISE_TASK_NAME=TASK) | {
+            "PATH": os.environ["PATH"],
+            "ORG_BELT_DIR": str(BELT),
+            "ORG_PYTHON": sys.executable,
+            **{k: os.environ[k] for k in MISE_VARS if k in os.environ},
+        }
+
+    def run_in(self, argv: list[str], **env: str) -> subprocess.CompletedProcess[str]:
+        """Run a command in the fixture, red with its output if it fails.
+
+        Returns:
+            The finished command.
+
+        """
+        done = subprocess.run(
+            argv,
+            cwd=self.tree,
+            env=self.env | env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(0, done.returncode, done.stdout + done.stderr)
+        return done
+
+    def rows(self, name: str, workers: str) -> Path:
+        """Run the suite as a test row does: measured, the belt's runner.
+
+        Returns:
+            The run directory it measured into.
+
+        """
+        run = self.root / name
+        self.run_in(
+            [
+                BASH,
+                str(BELT / "measured"),
+                sys.executable,
+                str(BELT / "unittest_guarded.py"),
+                "discover",
+                "-s",
+                "pkg",
+                "-p",
+                "test_*.py",
+            ],
+            ORG_COVERAGE_RUN=str(run),
+            ORG_TEST_WORKERS=workers,
+        )
+        return run
+
+    def planned(self, name: str, *extra: str) -> dict[str, object]:
+        """Plan the fixture with the real cosmic-ray.
+
+        Returns:
+            The plan's line map, for the mutated module paths.
+
+        """
+        out = self.root / name
+        self.run_in([
+            hermetic.tool("mise"),
+            "-C",
+            str(BELT.parent),
+            "exec",
+            *TOOLS,
+            "--",
+            BASH,
+            "-c",
+            'cd "$0" && exec "$@"',
+            str(self.tree),
+            sys.executable,
+            str(BELT / "mutants_python.py"),
+            "plan",
+            "cosmic-ray.toml",
+            str(out),
+            *extra,
+        ])
+        document = decoded.as_object(
+            decoded.load_json((out / "plan.json").read_bytes()), "plan"
+        )
+        return decoded.as_object(document.get("lines"), "lines")
+
+    def total(self, run: Path) -> str:
+        """Combine a run's data and read its total, lines and branches.
+
+        Returns:
+            coverage's total percentage.
+
+        """
+        data = run / "combined"
+        files = sorted(str(p) for p in (run / "python").glob(".coverage*"))
+        coverage = hermetic.tool("coverage")
+        combine = [coverage, "combine", "--keep", "-q", f"--data-file={data}"]
+        self.run_in([*combine, *files])
+        report = [coverage, "report", f"--data-file={data}", "--format=total"]
+        done = self.run_in(report)
+        return done.stdout.strip()
+
+    def test_the_map_from_the_rows_is_the_per_file_plans(self) -> None:
+        """Same lines, same test files, the child script's and imports' too."""
+        run = self.rows("rows", "2")
+        times = sorted(p.name for p in (run / "python").glob("test-times.*.json"))
+        self.assertEqual(1, len(times))
+        alone = self.planned("alone")
+        from_rows = self.planned("from-rows", "--measured", str(run))
+        self.assertIn("pkg/helper.py", alone)
+        self.assertEqual(alone, from_rows)
+
+    def test_the_contexts_leave_every_figure_as_it_was(self) -> None:
+        """Parallel with a context per file, or serial with none: one total."""
+        with_contexts = self.total(self.rows("contexts", "2"))
+        without = self.total(self.rows("serial", "1"))
+        self.assertEqual(without, with_contexts)
+
+    def test_no_times_is_red_by_name(self) -> None:
+        """A run the belt's runner did not write: red, naming the runner."""
+        run = self.root / "bare"
+        (run / "python").mkdir(parents=True)
+        done = subprocess.run(
+            [
+                hermetic.tool("mise"),
+                "-C",
+                str(BELT.parent),
+                "exec",
+                *TOOLS,
+                "--",
+                BASH,
+                "-c",
+                'cd "$0" && exec "$@"',
+                str(self.tree),
+                sys.executable,
+                str(BELT / "mutants_python.py"),
+                "plan",
+                "cosmic-ray.toml",
+                str(self.root / "plan"),
+                "--measured",
+                str(run),
+            ],
+            cwd=self.tree,
+            env=self.env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(1, done.returncode)
+        self.assertIn("the test rows wrote no per-file times", done.stderr)
+        self.assertIn("mise/unittest_guarded.py", done.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

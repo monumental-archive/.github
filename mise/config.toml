@@ -799,7 +799,10 @@ dir = "{{cwd}}"
 # it cannot (gomu). audit:mutants stays the weekly whole run, for what a
 # diff cannot see: a change that only weakens tests, or a tool upgrade
 # that adds mutators. Its rows are one per adopted language
-# (mise/gate_shard.py); MUTANTS_LEG names a row's language.
+# (mise/gate_shard.py); MUTANTS_LEG names a row's language. Python is a
+# job of its own, `mutants-python`, which needs the test rows: its plan
+# reads their coverage, recorded per test file by the belt's runner
+# (MUTANTS_MEASURED), and never runs the suite again.
 env = { MUTANTS_DIFF = "1" }
 run = '"${ORG_BELT_DIR}/mutants.sh"'
 

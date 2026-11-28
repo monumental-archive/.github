@@ -158,6 +158,10 @@ GATE_WHOLE = {
         "it runs every lint, so it needs the whole belt and every tool the"
         " caller's config pins"
     ),
+    ("ci.yml", "mutants-python"): (
+        "it runs ci:mutants' Python leg, which plans from the test rows'"
+        " coverage with the gate's coverage tool and cosmic-ray (#1432)"
+    ),
 }
 
 # The gate's jobs that install no tool and run none (#1528), with why.
