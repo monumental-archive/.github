@@ -61,7 +61,10 @@ class TestEnv:
             for name, value in environ.items():
                 patched.setenv(name, value)
             got = he.env(home, **overrides)
-        allowed = set(he.INHERITED) | {"HOME"} | set(IDENTITY) | set(overrides)
+        # ORG_CANON_DIR is the package's canon, set for every fixture.
+        allowed = (
+            set(he.INHERITED) | {"HOME", "ORG_CANON_DIR"} | set(IDENTITY) | set(overrides)
+        )
         assert set(got) <= allowed
         for name, value in overrides.items():
             assert got[name] == value

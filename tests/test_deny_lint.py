@@ -173,7 +173,9 @@ class TestPlanted:
         self.tmp = tmp_path
         self.root = self.tmp / "tree"
         self.root.mkdir()
-        self.canon = self.tmp / "canon"
+        # The canon the tasks read: the belt package the launcher runs,
+        # and an empty security/vex/ of the row's own.
+        self.canon = support.canon(self.tmp / "canon")
         (self.canon / "security" / "vex").mkdir(parents=True)
         self.bin = self.tmp / "bin"
         self.bin.mkdir()

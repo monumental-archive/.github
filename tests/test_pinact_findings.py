@@ -31,7 +31,6 @@ pinact in its human mode and recorded nothing.
 
 import json
 import os
-import shutil
 import subprocess
 import sys
 from typing import TYPE_CHECKING
@@ -243,7 +242,7 @@ class TestStubbed:
             Its status and what it wrote, as a finished process's.
 
         """
-        found = shutil.which("pinact", path=env["PATH"]) or "pinact"
+        found = support.optional_tool("pinact", path=env["PATH"]) or "pinact"
         with pytest.MonkeyPatch.context() as patched:
             for name, value in env.items():
                 patched.setenv(name, value)

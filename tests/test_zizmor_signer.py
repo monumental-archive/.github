@@ -716,9 +716,9 @@ class TestTask:
         root = tmp / "tree"
         (root / ".github" / "workflows").mkdir(parents=True)
         (root / ".github" / "workflows" / "a.yml").write_text("on: push\n")
-        (root / "security").mkdir()
         # The task runs the command from the tree it names the canon.
-        (root / "belt").symlink_to(support.PACKAGE)
+        support.canon(root)
+        (root / "security").mkdir()
         (root / "security" / "identity.toml").write_text(
             f'signer-workflow = "{SIGNER_WORKFLOW}"\n', encoding="utf-8"
         )

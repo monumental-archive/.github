@@ -31,7 +31,8 @@ HERE = support.MISE
 
 CANON = HERE.parent
 GIT = support.tool("git")
-ROOTS = ("mise", "release", ".github/rekor-monitor", "settings")
+# The suite's one discovery root (#2177).
+ROOTS = ("tests",)
 
 # The release job's step inputs, the runner's ambient, and the
 # provisioning the gate exports: each has reached, or could reach, a
@@ -535,6 +536,17 @@ PATH_PLANTERS = frozenset({"symlink_to", "hardlink_to"})
 FIXTURES = "testdata"
 
 
+# What names the canon's own tree in a test: `__file__`, and support's
+# paths into it.
+TREE_ROOTS = frozenset({
+    "__file__",
+    "support.CANON",
+    "support.MISE",
+    "support.RELEASE",
+    "support.PACKAGE",
+})
+
+
 def from_tree(value: ast.AST, rooted: set[str]) -> bool:
     """Say whether an expression is a path in the canon's own tree.
 
@@ -544,10 +556,17 @@ def from_tree(value: ast.AST, rooted: set[str]) -> bool:
 
     """
     names = {n.id for n in ast.walk(value) if isinstance(n, ast.Name)}
+    names |= {
+        f"support.{n.attr}"
+        for n in ast.walk(value)
+        if isinstance(n, ast.Attribute)
+        and isinstance(n.value, ast.Name)
+        and n.value.id == "support"
+    }
     fixture = any(
         isinstance(n, ast.Constant) and n.value == FIXTURES for n in ast.walk(value)
     )
-    return bool(names & (rooted | {"__file__"})) and not fixture
+    return bool(names & (rooted | TREE_ROOTS)) and not fixture
 
 
 def bindings(scope: ast.AST) -> list[tuple[str, ast.AST]]:
@@ -659,7 +678,7 @@ def plants_from_tree(source: str) -> list[int]:
 
 # Excepted by name: the helper itself, and this file, which plants and
 # names the spellings it looks for.
-EXCEPTED = frozenset({"mise/support.py", "mise/test_support.py"})
+EXCEPTED = frozenset({"tests/support.py", "tests/test_support.py"})
 
 
 class TestEnv:
@@ -677,6 +696,7 @@ class TestEnv:
         """Every inherited name is INHERITED's, or one the helper sets."""
         set_here = {
             "HOME",
+            "ORG_CANON_DIR",
             "GIT_EDITOR",
             "GIT_AUTHOR_NAME",
             "GIT_AUTHOR_EMAIL",
@@ -912,11 +932,11 @@ class TestBelt:
         real = CANON / "mise" / "config.toml"
         before = real.read_bytes()
         dest = support.plant(
-            self.tmp / "belt", ["mise/config.toml"], "mise/", {"config.toml": "stub\n"}
+            self.tmp / "belt", ["mise/config.toml"], {"mise/config.toml": "stub\n"}
         )
         assert dest != CANON
-        assert not (dest / "config.toml").is_symlink()
-        assert (dest / "config.toml").read_text(encoding="utf-8") == "stub\n"
+        assert not (dest / "mise" / "config.toml").is_symlink()
+        assert (dest / "mise" / "config.toml").read_text(encoding="utf-8") == "stub\n"
         assert before == real.read_bytes()
 
     def test_a_file_added_to_the_belt_appears_unasked(self) -> None:
@@ -951,8 +971,8 @@ class TestBelt:
             stubs={"release/planted.py": "x\n"},
         )
         for name in (
-            "mise/support.py",
-            "release/caller_pins.py",
+            "belt/findings.py",
+            "release/derive-coverage-floor.sh",
             "security/identity.toml",
         ):
             assert CANON / name == (tree / name).readlink()

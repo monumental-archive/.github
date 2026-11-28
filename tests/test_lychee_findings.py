@@ -15,7 +15,6 @@ its human mode and recorded nothing.
 
 import json
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -138,7 +137,7 @@ class TestAdapter:
             Its status and what it wrote, as a finished process's.
 
         """
-        found = shutil.which("lychee", path=env["PATH"]) or "lychee"
+        found = support.optional_tool("lychee", path=env["PATH"]) or "lychee"
         with pytest.MonkeyPatch.context() as patched:
             for name, value in env.items():
                 patched.setenv(name, value)

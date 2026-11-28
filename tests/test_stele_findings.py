@@ -10,7 +10,6 @@ PURL: the row that meets the real tool.
 
 import json
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -143,7 +142,7 @@ class TestAdapter:
             Its status and what it wrote, as a finished process's.
 
         """
-        found = shutil.which("stele", path=env["PATH"]) or "stele"
+        found = support.optional_tool("stele", path=env["PATH"]) or "stele"
         with pytest.MonkeyPatch.context() as patched:
             for name, value in env.items():
                 patched.setenv(name, value)
