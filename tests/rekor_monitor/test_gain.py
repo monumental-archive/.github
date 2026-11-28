@@ -24,6 +24,7 @@ import pytest
 
 from belt import decoded
 from belt.rekor_monitor import gain
+from belt.typed_pytest import fixture
 from tests import support
 
 COMMAND = "gain"
@@ -110,7 +111,7 @@ def expect(*text: str) -> list[str]:
 class TestRows:
     """The run's two checkpoints, the legs' reports, and the helper run."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_rows(self, tmp_path: Path) -> None:
         """Lay out a run that did not advance, every leg stopped by its budget."""
         self.dir = Path(str(tmp_path))

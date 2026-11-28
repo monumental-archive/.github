@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import decoded, template_pins
+from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
@@ -34,7 +35,7 @@ if TYPE_CHECKING:
 TASK = "lint:template-pins"
 
 
-@pytest.fixture
+@fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)
@@ -105,7 +106,7 @@ def red(*violations: str) -> list[str]:
 class TestPins:
     """Planted templates in a tree with a released commit."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_pins(self, tmp_path: Path) -> None:
         """Plant a tree whose first commit is released as v1.0.0."""
         self.tree = tmp_path

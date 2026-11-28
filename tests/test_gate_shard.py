@@ -16,6 +16,7 @@ import pytest
 
 from belt import decoded, gate_shard
 from belt.tracked import tracked
+from belt.typed_pytest import fixture
 from tests import support
 
 HERE = support.MISE
@@ -165,7 +166,7 @@ PROPERTIES_ROW: tuple[object, ...] = ("properties", "ci:properties", 1, 1)
 class TestPlanted:
     """A scratch tree, its root mise config and its shards.toml."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_planted(self, tmp_path: Path) -> None:
         """Make a scratch tree for the planted config."""
         self.tree = Path(str(tmp_path))

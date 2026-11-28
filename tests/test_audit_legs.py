@@ -44,6 +44,7 @@ from pathlib import Path
 import pytest
 
 from belt import audit_legs, coverage_floor, decoded, gate_tools, workflow_yaml
+from belt.typed_pytest import fixture
 from tests import support
 from tests import test_gate_tools as reading
 
@@ -1012,7 +1013,7 @@ class TestFuzzTargets:
 class TestRefusals:
     """A table of the wrong shape, or a workflow it lacks, is refused by name."""
 
-    @pytest.fixture
+    @fixture
     def _tmp(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path

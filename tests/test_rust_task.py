@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import gate_surface, pgrx_postgres, rust_task
+from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
@@ -104,7 +105,7 @@ SHOW = 'echo "major=${PLANT_MAJOR-unset} sdk=${PLANT_SDK-unset}"; exit "${1:-0}"
 class TestPlanted:
     """A planted belt, the stubs, and the row's environment."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_planted(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

@@ -29,6 +29,7 @@ from typing import ClassVar, override
 import pytest
 
 from belt import decoded
+from belt.typed_pytest import fixture
 from tests import support
 
 HERE = support.CANON / "settings"
@@ -271,7 +272,7 @@ class Forge:
 class TestForgeCase:
     """A row with a fresh clean org."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_forge_case(self, tmp_path: Path) -> None:
         """Build the clean org in a temporary directory."""
         self.forge = Forge(Path(str(tmp_path)))

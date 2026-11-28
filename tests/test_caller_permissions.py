@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import caller_permissions, decoded
+from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
@@ -33,7 +34,7 @@ if TYPE_CHECKING:
 TASK = "lint:caller-permissions"
 
 
-@pytest.fixture
+@fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)
@@ -103,7 +104,7 @@ def body() -> str:
 class TestPlanted:
     """A planted git tree, and a stub stele first on PATH."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_planted(
         self, tmp_path: Path, request: pytest.FixtureRequest
     ) -> None:

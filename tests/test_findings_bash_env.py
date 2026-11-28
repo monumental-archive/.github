@@ -31,6 +31,7 @@ from pathlib import Path
 import pytest
 
 from belt import decoded
+from belt.typed_pytest import fixture
 from tests import support
 
 MISE = support.MISE
@@ -102,12 +103,12 @@ def bashes() -> list[tuple[str, str]]:
 class TestBashEnvRows:
     """A body under the belt's shell and BASH_ENV has the writer."""
 
-    @pytest.fixture
+    @fixture
     def _tmp(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_bash_env_rows(self, tmp_path: Path) -> None:
         """Give each row a directory of its own."""
         self.root = Path(str(tmp_path))

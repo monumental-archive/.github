@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import decoded, python_roots, python_types_seams
+from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
@@ -32,7 +33,7 @@ if TYPE_CHECKING:
 TASK = "lint:python-types"
 
 
-@pytest.fixture
+@fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)
@@ -489,7 +490,7 @@ class TestTheHelpers:
 class TestTheConfig:
     """What the delivered config makes the pinned mypy refuse."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_the_config(self) -> None:
         """Skip the row where the belt's pinned mypy is not installed."""
         if not MYPY:
@@ -598,7 +599,7 @@ class Holds:
 class TestTheTypedGiven:
     """The belt's `given` under the unmodified config (#1604)."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_the_typed_given(self) -> None:
         """Skip the row where the pinned mypy or the belt's Hypothesis is absent."""
         if not MYPY:
@@ -626,7 +627,121 @@ class TestTheTypedGiven:
         done = run({"prop_a.py": text})
         assert done.returncode == 1
         assert (
-            "error: Argument 1 has incompatible type"
+            'error: Argument 1 to "__call__" of "Given2" has incompatible type'
             ' "Callable[[Holds, str, DataObject], None]";'
             ' expected "Callable[[Holds, int, DataObject], None]"  [arg-type]'
         ) in done.stdout
+
+
+@fixture
+def _real_mypy() -> None:
+    """Skip the row where the pinned mypy or the belt's pytest venv is absent."""
+    if not MYPY:
+        pytest.skip("the belt's pinned mypy is not installed here")
+    if not HYPOTHESIS:
+        pytest.skip("the belt's pytest venv is not installed here")
+
+
+MODULE_PROPERTY = """\
+\"\"\"A property on a module function.\"\"\"
+
+from hypothesis import strategies as st
+from belt.typed_hypothesis import given
+
+
+@given(st.integers(), st.text())
+def test_pair(n: int, s: str) -> None:
+    \"\"\"Both kept.\"\"\"
+    assert (n, s) == (n, s)
+"""
+
+
+@pytest.mark.usefixtures("_real_mypy")
+def test_given_on_a_module_function_is_clean() -> None:
+    """`given` types a module function's strategies too, no `self` (#2177)."""
+    done = run({"prop_a.py": MODULE_PROPERTY})
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert f"{LABEL}: 1 file(s) clean under mypy" in done.stdout
+
+
+@pytest.mark.usefixtures("_real_mypy")
+def test_a_module_strategy_that_does_not_match_is_red() -> None:
+    """An `int` strategy feeding a module function's `str` is red."""
+    text = MODULE_PROPERTY.replace("n: int,", "n: str,")
+    assert text != MODULE_PROPERTY
+    done = run({"prop_a.py": text})
+    assert done.returncode == 1
+    assert (
+        'prop_a.py:7: error: Argument 1 to "__call__" of "Given2" has incompatible type'
+    ) in done.stdout
+
+
+FIXTURES = """\
+\"\"\"Fixtures.\"\"\"
+
+from collections.abc import Iterator
+
+from belt.typed_pytest import fixture
+
+
+@fixture
+def word() -> str:
+    \"\"\"A word.\"\"\"
+    return "a"
+
+
+@fixture
+def words() -> Iterator[list[str]]:
+    \"\"\"Words, torn down after.\"\"\"
+    yield ["a"]
+
+
+class TestShared:
+    \"\"\"A class's rows.\"\"\"
+
+    @fixture(scope="class")
+    def shared(self) -> int:
+        \"\"\"Shared by the class.\"\"\"
+        return 1
+
+    def test_word(self, word: str) -> None:
+        \"\"\"Holds.\"\"\"
+        assert word
+"""
+
+
+@pytest.mark.usefixtures("_real_mypy")
+def test_the_typed_fixture_is_clean() -> None:
+    """Bare, generator and class-scoped fixtures, no finding (#2177)."""
+    done = run({"test_a.py": FIXTURES})
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert f"{LABEL}: 1 file(s) clean under mypy" in done.stdout
+
+
+@pytest.mark.usefixtures("_real_mypy")
+def test_pytests_own_fixture_is_red() -> None:
+    """`pytest.fixture` carries `Any` under the belt's config: the reason."""
+    text = FIXTURES.replace(
+        "from belt.typed_pytest import fixture", "from pytest import fixture"
+    )
+    done = run({"test_a.py": text})
+    assert done.returncode == 1
+    assert 'test_a.py:8: error: Expression type contains "Any"' in done.stdout
+
+
+@pytest.mark.usefixtures("_real_mypy")
+def test_a_fixture_called_directly_is_red() -> None:
+    """A fixture called directly is red by type, as pytest fails it at run time."""
+    text = FIXTURES + '\n\ndef test_call() -> None:\n    """Called."""\n    word()\n'
+    done = run({"test_a.py": text})
+    assert done.returncode == 1
+    assert 'error: "object" not callable  [operator]' in done.stdout
+
+
+@pytest.mark.usefixtures("_real_mypy")
+def test_a_form_the_belt_does_not_type_is_red() -> None:
+    """A scope no overload names is no overload variant, not `Any`."""
+    text = FIXTURES.replace('scope="class"', 'scope="session"')
+    done = run({"test_a.py": text})
+    assert done.returncode == 1
+    assert 'error: No overload variant of "fixture" matches' in done.stdout

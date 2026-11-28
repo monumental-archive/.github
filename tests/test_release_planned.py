@@ -19,6 +19,7 @@ from pathlib import Path
 import pytest
 
 from belt import decoded
+from belt.typed_pytest import fixture
 from tests import support
 
 CANON = support.CANON
@@ -120,7 +121,7 @@ class History:
 class TestReleasePlanned:
     """Green where planned, red with both commits and the count, else skip."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_release_planned(self, tmp_path: Path) -> None:
         """Build a history with one commit on the default branch."""
         if GIT is None or BASH is None:

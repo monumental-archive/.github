@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import decoded, lock_platforms
+from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
@@ -43,7 +44,7 @@ STUB_PATH = ".github/workflows/publish.yml"
 REMOTE = "monumental-archive/.github/.github/workflows/publish.yml@" + "a" * 40
 
 
-@pytest.fixture
+@fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding (#1934)."""
     as_task(NAME)

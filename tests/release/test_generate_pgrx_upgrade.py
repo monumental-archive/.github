@@ -55,6 +55,7 @@ from typing import ClassVar, NamedTuple
 import pytest
 
 from belt import decoded
+from belt.typed_pytest import fixture
 from tests import support
 
 CANON = support.CANON
@@ -358,7 +359,7 @@ def releases(name: str) -> list[Release]:
 class TestNeedsJq:
     """Rows that drive the gh stub, which jq answers; no rows of its own."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_needs_jq(self) -> None:
         """Skip the row where jq is missing."""
         if not JQ:
@@ -1168,7 +1169,7 @@ class TestLiveServer:
     num: ClassVar[int]
     version: ClassVar[str]
 
-    @pytest.fixture(scope="class")
+    @fixture(scope="class")
     @classmethod
     def _live_server(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
         """Start a throwaway server on a private socket, no TCP; stop it after.
@@ -1219,7 +1220,7 @@ class TestLiveServer:
         )
         cls.running = False
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_live_server(self) -> None:
         """Skip the row where this machine has no Postgres to start."""
         if not self.running:

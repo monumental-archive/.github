@@ -27,6 +27,7 @@ import pytest
 from belt import decoded, typed_std
 from belt import findings as writer
 from belt import standing_issue as standing
+from belt.typed_pytest import fixture
 from tests import support
 
 REPO = "example-owner/example-repo"
@@ -187,7 +188,7 @@ def logged(*lines: str) -> str:
 class TestStubbed:
     """A stub gh, a stub forge for logs, the run's job list, the report run."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_stubbed(
         self, tmp_path: Path, request: pytest.FixtureRequest
     ) -> None:
@@ -958,7 +959,7 @@ LOOSE = standing.Finding("audit:deny", "", "a pin is loose")
 class TestFindingsBody:
     """The body written from the run's findings files (#1890)."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_findings_body(self, tmp_path: Path) -> None:
         """Give each row a findings directory."""
         self.dir = Path(str(tmp_path)) / "findings"

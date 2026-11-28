@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import decoded
+from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
@@ -167,7 +168,7 @@ def top_only() -> list[str]:
 class TestPlanted:
     """A two-root tree, the stubs and the tools, per row."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_planted(self, tmp_path: Path) -> None:
         """Plant the stubs and the tools; the tree is planted per row."""
         self.tmp = tmp_path

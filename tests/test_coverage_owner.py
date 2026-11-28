@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 
 from belt import coverage_owner
+from belt.typed_pytest import fixture
 from tests import support
 
 SH = support.tool("sh")
@@ -64,7 +65,7 @@ def dead_pid() -> int:
 type Claim = Callable[[Path, Path], subprocess.CompletedProcess[str]]
 
 
-@pytest.fixture
+@fixture
 def claim(capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> Claim:
     """Run the helper's `claim` as the belt does, in process.
 
@@ -97,7 +98,7 @@ def owner(target: Path) -> str:
 class TestClaim:
     """A row per branch of `claim`."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_claim(self, tmp_path: Path) -> None:
         """Make a temporary directory for the build directory and the runs."""
         self.tmp = Path(str(tmp_path)).resolve()
@@ -181,7 +182,7 @@ class TestClaim:
 class TestTag:
     """Cargo refuses to clean a directory with no tag: the claim leaves one."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_tag(self, tmp_path: Path) -> None:
         """Make a temporary directory for the build directory and the run."""
         self.tmp = Path(str(tmp_path)).resolve()
@@ -244,7 +245,7 @@ class TestTag:
 type Clean = Callable[[str], tuple[subprocess.CompletedProcess[str], list[str]]]
 
 
-@pytest.fixture
+@fixture
 def clean(
     tmp_path: Path, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> Clean:

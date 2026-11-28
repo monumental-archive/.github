@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from belt import decoded, shard, shard_runner
+from belt.typed_pytest import fixture
 from tests import support
 
 
@@ -139,7 +140,7 @@ PYTEST = support.tool("pytest")
 class TestGuarded:
     """A pytest run takes a share, run for real at 1/2 and 2/2."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_guarded(
         self, tmp_path: Path, capfd: pytest.CaptureFixture[str]
     ) -> None:

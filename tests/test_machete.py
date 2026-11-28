@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import decoded
+from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
@@ -55,7 +56,7 @@ def body() -> str:
 class TestMachete:
     """A planted tree; lint:machete's verdict on it."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_machete(self, tmp_path: Path) -> None:
         """Make an empty git repository and a scrubbed environment."""
         support.tool("cargo-machete")

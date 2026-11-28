@@ -26,6 +26,7 @@ from pathlib import Path
 import pytest
 
 from belt.release import matrix
+from belt.typed_pytest import fixture
 from tests import support
 
 TESTDATA = Path(__file__).resolve().parent / "testdata" / "matrix"
@@ -37,7 +38,7 @@ NO_IMAGE = "has no digest-pinned base image in docker/pgrx-base-images.toml"
 GO_HINT = "canon targets only (<goos>-<goarch>)"
 
 
-@pytest.fixture
+@fixture
 def _outside_mise(monkeypatch: pytest.MonkeyPatch) -> None:
     """Name the helper by its command, as a run outside mise does (#1934).
 
@@ -84,7 +85,7 @@ def recorded(name: str) -> tuple[str, str]:
 class TestRows:
     """Shared assertions and fixtures."""
 
-    @pytest.fixture
+    @fixture
     def _tmp(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path

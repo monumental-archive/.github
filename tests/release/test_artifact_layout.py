@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, NamedTuple
 import pytest
 
 from belt import workflow_yaml
+from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
@@ -255,7 +256,7 @@ def plant(base: Path, *, directory: bool) -> tuple[Path, list[str]]:
 class TestStaged:
     """Each staging step's own body makes the layout the consumer reads."""
 
-    @pytest.fixture
+    @fixture
     def _tmp(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path

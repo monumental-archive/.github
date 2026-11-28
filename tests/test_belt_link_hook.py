@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
@@ -104,7 +105,7 @@ class TestHookFixture:
     # is the commit's number. Empty: the rows read the file's text.
     belt_tasks = ""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_hook_fixture(self, tmp_path: Path) -> None:
         """Plant the canon with two commits, a consumer, HOME and cache."""
         self.tmp = tmp_path
@@ -508,7 +509,7 @@ class TestEveryHookLinksFirst(TestHookFixture):
 
     belt_tasks = HOOK_TASKS
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_every_hook_links_first(self) -> None:
         """Plant the cache of A and B, the consumer on A, and the worktree."""
         if LEFTHOOK is None:

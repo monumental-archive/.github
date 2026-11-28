@@ -27,6 +27,7 @@ from pathlib import Path
 import pytest
 
 from belt import gate_cache_key
+from belt.typed_pytest import fixture
 from tests import support
 
 LOGGED = (
@@ -555,7 +556,7 @@ class TestCompiler:
 class TestCargoInputs:
     """The cargo key names every declared input of its builds (#2045)."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_cargo_inputs(self, tmp_path: Path) -> None:
         """Put a `rustc` on PATH for every row."""
         self.tmp = tmp_path
@@ -666,7 +667,7 @@ LDD = "ldd (Ubuntu GLIBC 2.43-2ubuntu2.7) 2.43"
 class TestToolchain:
     """The cargo key names the toolchain the build takes from the image."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_toolchain(self, tmp_path: Path) -> None:
         """Put `rustc`, the toolchain and an `xcrun` on PATH for every row.
 
@@ -816,7 +817,7 @@ def digest_main(path: str) -> tuple[int, str, str]:
 class TestDirectory:
     """Every coverage directory names its compiler (#1877)."""
 
-    @pytest.fixture
+    @fixture
     def _tmp(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path

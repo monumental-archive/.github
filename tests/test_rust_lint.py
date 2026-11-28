@@ -31,6 +31,7 @@ from pathlib import Path
 import pytest
 
 from belt import decoded, pgrx_postgres, rust_lint, rust_workspaces
+from belt.typed_pytest import fixture
 from tests import support
 
 BELT = support.MISE
@@ -584,7 +585,7 @@ class TestPlanted:
     task = "lint:rust"
     cargo = STUB_CARGO
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_planted(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -1233,7 +1234,7 @@ class TestEveryWorkspace(TestPlanted):
     formatted or linted.
     """
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_every_workspace(self) -> None:
         """Plant the fuzz crate as the tree's second root."""
         self.plant(TWO_ROOTS)

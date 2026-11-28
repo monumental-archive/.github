@@ -22,6 +22,7 @@ import pytest
 
 from belt import decoded, plan_producers, workflow_yaml
 from belt.release.pgrx import inventory_plan
+from belt.typed_pytest import fixture
 from tests import support
 
 CANON = support.CANON
@@ -49,7 +50,7 @@ MANIFEST_REFUSAL = "::error::inventory-plan: crate/Cargo.toml: "
 CRATE = '[package]\nname = "pg_edtf"\nversion = "0.4.2"\n\n[features]\npg16 = []\n'
 
 
-@pytest.fixture
+@fixture
 def _outside_mise(monkeypatch: pytest.MonkeyPatch) -> None:
     """Name the helper by its command, as a run outside mise does (#1934).
 
@@ -88,7 +89,7 @@ class Helper(Protocol):
         ...
 
 
-@pytest.fixture
+@fixture
 def run_helper(tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> Helper:
     """Call the helper's `main` in process, over a crate it plants.
 

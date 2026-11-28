@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt.release import repro_issue
+from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
@@ -62,7 +63,7 @@ for arg in "$@"; do printf '%s\\0' "${arg}"; done > "${GH_ARGS}"
 class TestFileAnIssue:
     """Each row: the compare outcome, and the exact issue filed."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_file_an_issue(self, tmp_path: Path) -> None:
         """Give each row its own directory and stub `gh`."""
         self.tmp = tmp_path

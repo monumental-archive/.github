@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import once
+from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
@@ -24,7 +25,7 @@ SH = support.tool("sh")
 TASK = "test"
 
 
-@pytest.fixture
+@fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)
@@ -47,7 +48,7 @@ def lines(*logged: str) -> list[str]:
 class TestOnce:
     """One branch per row: run, skip, fail and retry, race."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_once(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

@@ -33,6 +33,7 @@ from typing import override
 
 import pytest
 
+from belt.typed_pytest import fixture
 from tests import support
 
 ENV_SH = support.MISE / "pgrx-env.sh"
@@ -90,7 +91,7 @@ class TestPostgresCase:
     and `cp` are the machine's own, so the clone is the one a task makes.
     """
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_postgres_case(self, tmp_path: Path) -> None:
         """Plant the install, its listing and the stand-ins."""
         self.root = Path(str(tmp_path)).resolve()
@@ -627,7 +628,7 @@ def entry(version: str, where: Path) -> dict[str, object]:
 class TestIcuCase:
     """A Mac with planted Postgres and ICU pins, and nothing else."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_icu_case(self, tmp_path: Path) -> None:
         """Lay out the stand-ins; each row plants its own pins."""
         self.root = Path(str(tmp_path)).resolve()
@@ -760,7 +761,7 @@ class TestIcuCase:
 class TestMixedIcuSet(TestIcuCase):
     """Two Postgres majors built against two ICU majors (#1774)."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_mixed_icu_set(self) -> None:
         """Pin pg17 built against ICU 78 and pg18 built against ICU 79."""
         self.postgres({"17.6.0": homebrew(78), "18.1.0": homebrew(79)})
@@ -830,7 +831,7 @@ class TestMixedIcuSet(TestIcuCase):
 class TestOneIcuMajor(TestIcuCase):
     """One Postgres major, one ICU pin: the case before #1774, unchanged."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_one_icu_major(self) -> None:
         """Pin pg18 built against ICU 78."""
         self.postgres({"18.1.0": homebrew(78)})
@@ -937,7 +938,7 @@ class TestNoIcuNamed(TestIcuCase):
 class TestWithIcu(TestIcuCase):
     """org_pgrx_major: one command, its major's headers, then gone."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_with_icu(self) -> None:
         """Pin pg17 and pg18 against ICU 78 and 79, both pinned."""
         self.postgres({"17.6.0": homebrew(78), "18.1.0": homebrew(79)})

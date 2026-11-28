@@ -17,6 +17,7 @@ import pytest
 
 from belt import decoded
 from belt import deny_skips as ds
+from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
@@ -26,7 +27,7 @@ if TYPE_CHECKING:
 TASK = "lint:deny"
 
 
-@pytest.fixture
+@fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)

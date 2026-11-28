@@ -27,6 +27,7 @@ from pathlib import Path
 import pytest
 
 from belt import decoded, shard, workflow_yaml
+from belt.typed_pytest import fixture
 from tests import support
 
 CANON = support.CANON
@@ -499,7 +500,7 @@ def pids(meet: dict[str, str]) -> set[str]:
 class TestFanOut:
     """No shard named: the runner fans out over its own shards (#1741)."""
 
-    @pytest.fixture
+    @fixture
     def _tmp(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path

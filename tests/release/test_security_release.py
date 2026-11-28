@@ -38,6 +38,7 @@ from pathlib import Path
 import pytest
 
 from belt import decoded
+from belt.typed_pytest import fixture
 from tests import support
 
 
@@ -293,7 +294,7 @@ ISSUE_TITLE = "the supported release carries an advisory and main does not remed
 class TestDecisionCase:
     """A fresh passing case per row; each row breaks exactly one input."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_decision_case(self, tmp_path: Path) -> None:
         """Build the passing case."""
         self.repo = Repo(Path(str(tmp_path)))

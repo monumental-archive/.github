@@ -21,6 +21,7 @@ from pathlib import Path
 import pytest
 
 from belt import coverage_merge, decoded
+from belt.typed_pytest import fixture
 from tests import support
 
 # coverage.py from the pytest tool venv, as `measured` runs it (#2177).
@@ -72,7 +73,7 @@ TASKS = {
 class TestMeasured:
     """Two tasks on two shards each merge to one runner's figure."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_measured(self, tmp_path: Path) -> None:
         """Plant the code, the two tasks' suites, and the run's rc file."""
         self.base = Path(str(tmp_path))

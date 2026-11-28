@@ -48,6 +48,7 @@ from pathlib import Path
 import pytest
 
 from belt import decoded, gate_tools, python_runs, typed_std
+from belt.typed_pytest import fixture
 from tests import support
 
 CANON = support.CANON
@@ -1087,7 +1088,7 @@ class TestHelper:
 class TestRefusals:
     """A table or belt config of the wrong shape is refused by name."""
 
-    @pytest.fixture
+    @fixture
     def _tmp(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path

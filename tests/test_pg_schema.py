@@ -50,6 +50,7 @@ from pathlib import Path
 import pytest
 
 from belt import decoded, pg_schema
+from belt.typed_pytest import fixture
 from tests import support
 
 normalise = pg_schema.normalise
@@ -284,7 +285,7 @@ def git(root: Path, *args: str) -> None:
 class TestInRepo:
     """A fresh git repository as the working directory for each row."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_in_repo(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -542,7 +543,7 @@ class TestSqlSkipsOwnedSnapshots:
     reds 1; a root crate's path left as `./schema.snapshot.sql` reds 1.
     """
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_sql_skips_owned_snapshots(
         self, tmp_path: Path, request: pytest.FixtureRequest
     ) -> None:

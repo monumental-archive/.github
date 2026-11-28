@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import mutants_typescript
+from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
@@ -37,7 +38,7 @@ if TYPE_CHECKING:
 TASK = "audit:mutants"
 
 
-@pytest.fixture
+@fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)
@@ -143,7 +144,7 @@ KILLED = (mutant("Killed", 1), mutant("Timeout", 2, mutator="BlockStatement"))
 class TestPlanted:
     """A planted tree and a stub StrykerJS; the rows are in the classes below."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_planted(self, tmp_path: Path) -> None:
         """Plant a git tree, the stub and its answers."""
         self.tmp = tmp_path
@@ -392,7 +393,7 @@ class TestShareOut:
         "README.md",
     )
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_share_out(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

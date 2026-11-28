@@ -36,6 +36,7 @@ import pytest
 from belt import coverage_floor as cf
 from belt import plpgsql_coverage as pc
 from belt.decoded import as_array, as_object, as_str, load_json, load_toml
+from belt.typed_pytest import fixture
 from tests import support, test_coverage_tasks
 
 if TYPE_CHECKING:
@@ -45,7 +46,7 @@ if TYPE_CHECKING:
 TASK = "leg"
 
 
-@pytest.fixture
+@fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)
@@ -338,7 +339,7 @@ def measured_run(  # ruff: ignore[too-many-arguments] -- one keyword per part of
 class TestCollecting:
     """Collects from a planted database and reads the report."""
 
-    @pytest.fixture
+    @fixture
     def _tmp(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path
@@ -391,7 +392,7 @@ class TestCollecting:
 class TestHelperRows(TestCollecting):
     """`collect` against a stub psql, then `totals` over its report."""
 
-    @pytest.fixture
+    @fixture
     def _tmp(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path
@@ -577,7 +578,7 @@ LINT_RED = (
 class TestLintRows(TestCollecting):
     """plpgsql_check's static check, in the same report (#1605)."""
 
-    @pytest.fixture
+    @fixture
     def _tmp(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path
@@ -788,7 +789,7 @@ REMEDY = (
 class TestClientRows(TestCollecting):
     """The client is psql on PATH unless the call names another."""
 
-    @pytest.fixture
+    @fixture
     def _tmp(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path
@@ -854,7 +855,7 @@ class TestClientRows(TestCollecting):
 class TestRefusalRows(TestCollecting):
     """Every way a collection or a report file is refused, by name."""
 
-    @pytest.fixture
+    @fixture
     def _tmp(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path
@@ -1059,7 +1060,7 @@ STRONG = {"101": ("public.guard()", "0.95\t0.88\t20\t19\t1")}
 class TestLegRows:
     """`coverage:check` over the plpgsql leg, decided by the floor's record."""
 
-    @pytest.fixture
+    @fixture
     def _tmp(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path
@@ -1314,7 +1315,7 @@ def counter(tree: Path) -> int:
 class TestReadsTheRunRows:
     """Both legs read the one run `measured` left, and run no suite (#1667)."""
 
-    @pytest.fixture
+    @fixture
     def _tmp(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path
@@ -1432,7 +1433,7 @@ NOT_HELD_LINE = (
 class TestMergeRows:
     """Several databases' reports, merged by signature (#2163), on the stub."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_merge_rows(self, tmp_path: Path) -> None:
         """Plant the stub database and an empty reports directory."""
         self.tmp = tmp_path
@@ -1673,7 +1674,7 @@ class TestRealDatabaseRows:
     profile (plpgsql_check keys its profile by database).
     """
 
-    @pytest.fixture
+    @fixture
     def _tmp(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path
@@ -1682,7 +1683,7 @@ class TestRealDatabaseRows:
     docker = ""
     env: ClassVar[dict[str, str]]
 
-    @pytest.fixture(scope="class")
+    @fixture(scope="class")
     @classmethod
     def _database(cls) -> Iterator[None]:
         """Start the database, wait until it takes connections, remove it after.

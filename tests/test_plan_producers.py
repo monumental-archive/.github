@@ -27,6 +27,7 @@ import pytest
 
 from belt import decoded
 from belt import plan_producers as pp
+from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
@@ -36,7 +37,7 @@ if TYPE_CHECKING:
 TASK = "lint:plan-producers"
 
 
-@pytest.fixture
+@fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)
@@ -151,7 +152,7 @@ WHOLE = crate(CRATE_LEG)
 class TestDeliveredTreeTest:
     """The canon's own policy and workflows, exactly as they ship."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_delivered_tree_test(self) -> None:
         """Skip where the canon's documents are not in the tree."""
         if not POLICY.exists() or not WORKFLOWS.is_dir():

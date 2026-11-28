@@ -32,6 +32,8 @@ import subprocess
 import sys
 from typing import TYPE_CHECKING
 
+from belt.typed_pytest import fixture
+
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
@@ -147,7 +149,7 @@ def bare_curls(source: str) -> list[str]:
 class TestPlanted:
     """A planted canon and org, alpha then beta, each wearing one shield."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_planted(self, tmp_path: Path) -> None:
         """Plant the canon tree, the floors and the stub tools."""
         tmp = tmp_path
@@ -307,7 +309,7 @@ def entry(repo: str, **fields: object) -> str:
 class TestBestPracticesRead(TestPlanted):
     """The Best Practices badge leg, asked through `ask` (#1633)."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_best_practices_read(self) -> None:
         """Wear the passing badge, whose id the stub reads as the repo."""
         self.env["SHIELD"] = "https://www.bestpractices.dev/projects/@REPO@/badge"
@@ -369,7 +371,7 @@ class TestBestPracticesRead(TestPlanted):
 class TestBaselineRead(TestPlanted):
     """The OSPS Baseline leg, asked through `ask` (#1633)."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_baseline_read(self) -> None:
         """Wear the Baseline shield on the same entry."""
         self.env["SHIELD"] = "https://www.bestpractices.dev/projects/@REPO@/baseline"
@@ -413,7 +415,7 @@ class TestBaselineRead(TestPlanted):
 class TestLevelShieldRead(TestPlanted):
     """The level shield's published document, asked through `ask` (#1633)."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_level_shield_read(self) -> None:
         """Wear a shields endpoint over a document named for the repo."""
         self.env["SHIELD"] = (
@@ -714,7 +716,7 @@ class TestCodecovRead(TestPlanted):
     at `abc1234`, committed at HEAD_AT (now, unless a row says).
     """
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_codecov_read(self) -> None:
         """Wear the Codecov shield."""
         self.env["SHIELD"] = CODECOV

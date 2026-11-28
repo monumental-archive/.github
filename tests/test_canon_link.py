@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
@@ -56,7 +57,7 @@ def excluded(gitdir: pathlib.Path) -> str:
 class TestLinkTheCanonTree:
     """Each row: where the tree resolved, and what the step did."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_link_the_canon_tree(self, tmp_path: Path) -> None:
         """Give each row a scratch root and a workspace."""
         self.tmp = tmp_path

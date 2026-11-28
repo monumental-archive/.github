@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import decoded, msrv_plan
+from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
@@ -39,7 +40,7 @@ Pinned = dict[Version, str]
 TASK = "lint:msrv"
 
 
-@pytest.fixture
+@fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)

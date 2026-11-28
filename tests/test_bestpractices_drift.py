@@ -29,6 +29,7 @@ import pytest
 
 from belt import bestpractices_drift as drift
 from belt import decoded
+from belt.typed_pytest import fixture
 from tests import support
 
 CANON = support.CANON
@@ -399,7 +400,7 @@ class TestRed:
 class TestHelper:
     """The helper's pieces, in process."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_helper(self, as_task: Callable[[str], None]) -> None:
         """Run as the task does, recording no finding (#1934)."""
         as_task("audit:bestpractices")

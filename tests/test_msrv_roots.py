@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import decoded
+from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
@@ -111,7 +112,7 @@ def body() -> str:
 class TestTwoRoots:
     """A tree of two workspaces: the root's and a fuzz crate's."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_two_roots(self, tmp_path: Path) -> None:
         """Plant the tree, its metadata, the stubs and the log."""
         tmp = tmp_path

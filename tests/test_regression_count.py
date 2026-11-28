@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, ClassVar
 import pytest
 
 from belt import regression_count as rc
+from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
@@ -32,7 +33,7 @@ if TYPE_CHECKING:
 TASK = "audit:regression-tests"
 
 
-@pytest.fixture
+@fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)
@@ -127,7 +128,7 @@ class Repo:
 class TestRepoCase:
     """A row with a fresh repository and an isolated git."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_repo_case(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

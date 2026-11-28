@@ -37,6 +37,7 @@ from pathlib import Path
 import pytest
 
 from belt import decoded, typed_std
+from belt.typed_pytest import fixture
 from tests import support
 
 BELT = support.MISE
@@ -431,7 +432,7 @@ class TestMutants:
 class TestSelection:
     """MUTANTS_LEG selects one leg; unset, every leg runs."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_selection(self, tmp_path: Path) -> None:
         """Plant a belt of the real body and stub legs that only say they ran."""
         tmp = tmp_path

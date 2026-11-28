@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
@@ -91,7 +92,7 @@ pytest_runtest_setup = pytest.hookimpl(_setup, tryfirst=True)
 pytest_runtest_teardown = pytest.hookimpl(_teardown, trylast=True)
 
 
-@pytest.fixture
+@fixture
 def env() -> Callable[..., dict[str, str]]:
     """Give a row the environment a process it starts is given.
 
@@ -102,7 +103,7 @@ def env() -> Callable[..., dict[str, str]]:
     return support.env
 
 
-@pytest.fixture
+@fixture
 def as_task(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], None]:
     """Name the task a helper runs under, recording nothing (#1934).
 

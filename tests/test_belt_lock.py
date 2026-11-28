@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import decoded
+from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
@@ -85,7 +86,7 @@ def pin(key: str) -> str:
 class TestLockedFromTheLinkedLock:
     """Each row: which locks hold which tool, and what a locked install says."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_locked_from_the_linked_lock(self, tmp_path: Path) -> None:
         """Plant the cache tree, the linked clone and its root lock.
 

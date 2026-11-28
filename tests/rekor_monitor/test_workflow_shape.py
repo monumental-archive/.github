@@ -22,6 +22,7 @@ from pathlib import Path
 import pytest
 
 from belt import decoded, workflow_yaml
+from belt.typed_pytest import fixture
 from tests import support
 
 WORKFLOW = support.CANON / ".github" / "workflows" / "rekor-monitor.yml"
@@ -324,7 +325,7 @@ ROWS = [
 class TestShape:
     """The workflow as built, and one planted copy per rule."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_shape(self) -> None:
         """Read the workflow."""
         self.text = WORKFLOW.read_text(encoding="utf-8")

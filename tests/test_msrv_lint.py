@@ -37,6 +37,7 @@ from belt import (
     rust_task,
     rust_workspaces,
 )
+from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
@@ -160,7 +161,7 @@ def body() -> str:
 class TestPlanted:
     """The planted belt, stubs and log every in-process row runs in."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_planted(
         self, tmp_path: Path, capfd: pytest.CaptureFixture[str]
     ) -> None:
@@ -581,7 +582,7 @@ class TestHelpers:
 class TestTask:
     """The task's own body: its guard, and the call that starts the helper."""
 
-    @pytest.fixture
+    @fixture
     def _tmp(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path

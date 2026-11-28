@@ -35,6 +35,7 @@ from hypothesis import strategies as st
 from belt import decoded
 from belt.rekor_monitor import certificate_issues
 from belt.typed_hypothesis import given
+from belt.typed_pytest import fixture
 
 INDEX = st.integers(0, 10**12)
 CONDITIONS = st.lists(st.text(max_size=20), max_size=4)
@@ -178,7 +179,7 @@ class TestTitleRoundTrip:
 class TestReportReading:
     """Whatever the report file holds: a grouping, or the refusal."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_report_reading(self, tmp_path: Path) -> None:
         """Hold one scratch report file for the test's examples."""
         self.path = Path(str(tmp_path)) / "report.json"

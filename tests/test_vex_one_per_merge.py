@@ -20,13 +20,14 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import decoded, vex_one_per_merge
+from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
 
-@pytest.fixture
+@fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)
@@ -296,7 +297,7 @@ class TestNoneTracked:
 class TestListing:
     """vex-attest.yml's signing list is the lint's own reader (#1615)."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_listing(self, tmp_path: Path) -> None:
         """Plant a tree whose default branch holds two decisions."""
         self.tree = Tree(Path(str(tmp_path)))

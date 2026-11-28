@@ -36,6 +36,7 @@ from pathlib import Path
 import pytest
 
 from belt import decoded, workflow_yaml
+from belt.typed_pytest import fixture
 from tests import support
 
 BELT = support.MISE
@@ -276,7 +277,7 @@ NO_CALLS: list[str] = []
 class TestSearchCase:
     """A planted repository, the stand-in tools and a stage, per row."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_search_case(self, tmp_path: Path) -> None:
         """Plant an empty repository and the stubs beside it."""
         self.tmp = tmp_path
@@ -779,7 +780,7 @@ class TestQuietSteps(TestSearchCase):
 class TestFailureLines:
     """What a crash's finding quotes from the log (#2120)."""
 
-    @pytest.fixture
+    @fixture
     def _tmp(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path
@@ -954,7 +955,7 @@ class TestSelection(TestSearchCase):
 class TestRunLength:
     """The summary says when a run was still finding new code (item 5)."""
 
-    @pytest.fixture
+    @fixture
     def _tmp(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path
@@ -1037,7 +1038,7 @@ def step(name: str) -> dict[str, object]:
 class TestHandover:
     """What a fuzz runner hands the propose job, and when (items 3, 4; #1899)."""
 
-    @pytest.fixture
+    @fixture
     def _tmp(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path

@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
@@ -73,7 +74,7 @@ def plant_canon(tree: Path, version: str) -> Path:
 class TestTheMiseIsCurrent:
     """Each row: this machine's mise version, and the verdict."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_the_mise_is_current(self, tmp_path: Path) -> None:
         """Plant a canon tree pinning CI's mise and an empty repository."""
         self.tmp = tmp_path

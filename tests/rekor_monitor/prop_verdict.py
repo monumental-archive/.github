@@ -32,6 +32,7 @@ from hypothesis import strategies as st
 
 from belt.rekor_monitor import verdict
 from belt.typed_hypothesis import given
+from belt.typed_pytest import fixture
 
 # Past the JSON parser's depth: a RecursionError, not a ValueError.
 DEEP = b"[" * 100_000
@@ -209,7 +210,7 @@ CLEAN_EXIT: Reported = {
 class TestScratch:
     """One scratch report file for a test's examples."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_scratch(self, tmp_path: Path) -> None:
         """Hold the scratch file."""
         self.path = Path(str(tmp_path)) / "report.json"

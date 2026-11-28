@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import tool_python
+from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
@@ -48,7 +49,7 @@ def refusal(have: str, want: str) -> str:
 class TestToolPython:
     """One row per branch of the check."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_tool_python(self, tmp_path: Path) -> None:
         """Plant a venv with its entry point, and a PATH linking to it."""
         self.tmp = tmp_path

@@ -15,6 +15,7 @@ import pytest
 
 from belt import coverage_js_runner as cj
 from belt import decoded
+from belt.typed_pytest import fixture
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -23,7 +24,7 @@ if TYPE_CHECKING:
 TASK = "coverage:check"
 
 
-@pytest.fixture
+@fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)
@@ -134,7 +135,7 @@ class TestLocked:
 class TestMain:
     """The runner line for a planted tree's package.json (#1659)."""
 
-    @pytest.fixture
+    @fixture
     def _tmp(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path
@@ -206,7 +207,7 @@ FLAGS = [
 class TestMeasuredRun:
     """`--measured-run`: the vitest run on `measured`'s line (#2105)."""
 
-    @pytest.fixture
+    @fixture
     def _tmp(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path

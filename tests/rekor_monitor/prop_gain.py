@@ -30,6 +30,7 @@ from hypothesis import strategies as st
 
 from belt.rekor_monitor import gain, verdict
 from belt.typed_hypothesis import given
+from belt.typed_pytest import fixture
 
 # Past the JSON parser's depth: a RecursionError, not a ValueError.
 DEEP = b"[" * 100_000
@@ -143,7 +144,7 @@ def doc(point: tuple[int, int, int]) -> bytes:
 class TestScratch:
     """Two scratch checkpoint files for a test's examples."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_scratch(self, tmp_path: Path) -> None:
         """Hold the scratch files."""
         self.start = Path(str(tmp_path)) / "run-start.json"

@@ -24,6 +24,7 @@ from tempfile import TemporaryDirectory
 import pytest
 
 from belt.release import publish_npm
+from belt.typed_pytest import fixture
 
 PACKAGE = "@acme/widget@1.2.3"
 # ruff: ignore[hardcoded-password-string] - a planted fake, to prove it is redacted
@@ -60,7 +61,7 @@ DEBUG_LOG = f"""0 verbose cli /usr/bin/node /usr/bin/npm
 """
 
 
-@pytest.fixture
+@fixture
 def _outside_mise(monkeypatch: pytest.MonkeyPatch) -> None:
     """Name the helper by its command, as a run outside mise does (#1934).
 

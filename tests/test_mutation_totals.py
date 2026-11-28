@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
@@ -28,7 +29,7 @@ LABEL = "audit:mutants: rust"
 class TestTotals:
     """Plant per-shard summaries and total them."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_totals(self, tmp_path: Path) -> None:
         """Make an empty download directory."""
         self.dir = tmp_path

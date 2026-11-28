@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import decoded
+from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
@@ -130,7 +131,7 @@ def body(task: str) -> str:
 class TestTwoExtensions:
     """A workspace of two extensions at different highest majors."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_two_extensions(self, tmp_path: Path) -> None:
         """Plant the stubs, the surface, the plan and the belt."""
         self.tmp = tmp_path

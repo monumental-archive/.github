@@ -44,6 +44,7 @@ from tempfile import TemporaryDirectory
 import pytest
 
 from belt import decoded
+from belt.typed_pytest import fixture
 from tests import support
 
 CANON = support.CANON
@@ -667,7 +668,7 @@ class TestRustBuildInputs:
 class TestOpenReleasePrInputs:
     """`open-release-pr.sh` is plumbing, and refuses to plumb blind."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_open_release_pr_inputs(self) -> None:
         """Skip unless jq is installed."""
         if not JQ:
@@ -892,7 +893,7 @@ class ReleaseForge:
     PLANNED = "a" * 40
     MOVED = "b" * 40
 
-    @pytest.fixture
+    @fixture
     def _forge(self, tmp_path: Path) -> None:
         """Lay out a fixture with a stub on PATH and an empty call log."""
         self.root = tmp_path
@@ -968,7 +969,7 @@ class TestOpenReleasePrHead(
         f"DELETE repos/{FORGE_REPO}/git/refs/heads/release-staging/next",
     )
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_open_release_pr_head(self) -> None:
         """Lay out the stubbed forge and a plan with something to release."""
         if not JQ:
@@ -1504,7 +1505,7 @@ class TestTagReleaseRefusals:
             RUNNER_TEMP=str(repo / ".rt"),
         )
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_tag_release_refusals(self) -> None:
         """Nothing shared; each row builds the history it is about."""
         if not STELE:
@@ -1600,12 +1601,12 @@ class TestTagReleasePush:
     the way GitHub answered edtf's v1.3.5 push.
     """
 
-    @pytest.fixture
+    @fixture
     def _tmp(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_tag_release_push(self) -> None:
         """Skip unless stele is installed."""
         if not STELE:
@@ -1764,12 +1765,12 @@ class TestTagReleaseUpgradePath:
     newest. Each row reaches the push or stops before signing.
     """
 
-    @pytest.fixture
+    @fixture
     def _tmp(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_tag_release_upgrade_path(self) -> None:
         """Skip unless stele and jq is installed."""
         if not STELE:
@@ -1896,7 +1897,7 @@ class TestInventoryStepWiring:
     prints a list, and GNU `date -d` is not the Mac's.
     """
 
-    @pytest.fixture
+    @fixture
     def _tmp(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path

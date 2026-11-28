@@ -27,6 +27,7 @@ from pathlib import Path
 import pytest
 
 from belt import decoded, tracked
+from belt.typed_pytest import fixture
 from tests import support
 from tests import test_derive_badges as derive
 
@@ -159,7 +160,7 @@ def run_task(
 class TestProducers:
     """org_tracked and tracked.tracked list exactly what git tracks."""
 
-    @pytest.fixture
+    @fixture
     def _tmp(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path
@@ -443,7 +444,7 @@ def has_status(
 class TestHas:
     """org_tracked_has and tracked.has answer from the index (#2013)."""
 
-    @pytest.fixture
+    @fixture
     def _tmp(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path

@@ -27,6 +27,7 @@ import pytest
 
 from belt import decoded
 from belt.release import pgrx_images
+from belt.typed_pytest import fixture
 from tests import support
 
 RELEASE = support.RELEASE
@@ -46,7 +47,7 @@ VERSION = "1.2.3"
 CRATE = "crates/edtf-postgres"
 
 
-@pytest.fixture
+@fixture
 def _outside_mise(monkeypatch: pytest.MonkeyPatch) -> None:
     """Name the helper by its command, as a run outside mise does (#1934).
 
@@ -116,7 +117,7 @@ def run(
 type Images = Callable[..., subprocess.CompletedProcess[str]]
 
 
-@pytest.fixture
+@fixture
 def images(capfd: pytest.CaptureFixture[str]) -> Images:
     """Call pgrx_images.py's `main` in process, as the workflow step runs it.
 
@@ -140,7 +141,7 @@ def images(capfd: pytest.CaptureFixture[str]) -> Images:
 class TestStage:
     """`pgrx_images.py stage`: every branch, messages asserted."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_stage(self, tmp_path: Path, images: Images) -> None:
         """Make a workspace with a tarballs/ directory, removed after."""
         self.root = tmp_path
@@ -335,7 +336,7 @@ PINNED = IMAGE + "@sha256:" + "a" * 64
 type Render = Callable[[str, str, str, str], subprocess.CompletedProcess[str]]
 
 
-@pytest.fixture
+@fixture
 def render(images: Images) -> Render:
     """Run the consumer-dockerfile verb.
 
@@ -432,7 +433,7 @@ done
 class TestProof:
     """`pgrx-image-proof.sh`: the recipes it runs, per Postgres major."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_proof(self, tmp_path: Path) -> None:
         """Put a recording docker first on PATH, beside a digest record."""
         self.root = tmp_path
@@ -574,7 +575,7 @@ class TestProof:
 class TestExtensionName:
     """`pgrx_images.py extension-name`: the one shipped extension (#1439)."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_extension_name(self, tmp_path: Path, images: Images) -> None:
         """Make an empty staged share/extension tree, removed after."""
         self.tree = tmp_path
@@ -635,7 +636,7 @@ printf '%s\\n' "$*" >> "${PSQL_LOG}"
 class TestCopyProof:
     """docker/pgrx-copy-proof.sh, run for real against a planted root."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_copy_proof(self, tmp_path: Path) -> None:
         """Plant a stock postgres's directories and stub su and psql."""
         self.root = tmp_path

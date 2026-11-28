@@ -21,6 +21,7 @@ import pytest
 
 from belt import coverage_exclusions as ce
 from belt import decoded
+from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
@@ -30,7 +31,7 @@ if TYPE_CHECKING:
 TASK = "lint:coverage-exclusions"
 
 
-@pytest.fixture
+@fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)
@@ -102,7 +103,7 @@ def helper(
 class TestMarkers:
     """The helper over one planted file at a time."""
 
-    @pytest.fixture
+    @fixture
     def _tmp(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path
@@ -176,7 +177,7 @@ def task_body() -> str:
 class TestTask:
     """The task body, in a scratch repository."""
 
-    @pytest.fixture
+    @fixture
     def _tmp(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path

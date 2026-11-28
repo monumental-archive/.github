@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import decoded
+from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
@@ -115,7 +116,7 @@ def same(want: list[str], got: list[str]) -> None:
 class TestForge:
     """A scratch directory with the stubbed gh first on PATH."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_forge(self, tmp_path: Path) -> None:
         """Lay out the stub, its state and an empty artifact."""
         self.tmp = tmp_path

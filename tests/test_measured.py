@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from belt import gate_cache_key
+from belt.typed_pytest import fixture
 from tests import support
 
 BELT = support.MISE
@@ -767,7 +768,7 @@ LOCK = (
 class TestVitestMeasured:
     """In a vitest tree the run itself carries the coverage flags (#2105)."""
 
-    @pytest.fixture
+    @fixture
     def _tmp(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path

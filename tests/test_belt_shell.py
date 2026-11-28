@@ -29,6 +29,7 @@ import pytest
 
 from belt import belt_shell as bs
 from belt import decoded
+from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
@@ -39,7 +40,7 @@ LINT = "lint:belt-shell"
 FIX = "fix:belt-shell"
 
 
-@pytest.fixture
+@fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the lint task does, recording no finding."""
     as_task(LINT)

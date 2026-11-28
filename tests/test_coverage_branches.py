@@ -27,6 +27,7 @@ import pytest
 
 from belt import coverage_floor as cf
 from belt import decoded, gate_cache_key
+from belt.typed_pytest import fixture
 from tests import support
 
 CANON = support.CANON
@@ -255,7 +256,7 @@ class Plant(TypedDict, total=False):
 class TestBranchCase:
     """Runs a task and removes the planted tree afterwards."""
 
-    @pytest.fixture
+    @fixture
     def _tmp(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path

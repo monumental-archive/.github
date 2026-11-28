@@ -28,6 +28,7 @@ from tempfile import TemporaryDirectory
 import pytest
 
 from belt.release.pgrx import previous_release
+from belt.typed_pytest import fixture
 from tests import support
 
 CANON = support.CANON
@@ -38,7 +39,7 @@ ON_RUNNER = os.environ.get("GITHUB_ACTIONS") == "true"
 type Done = tuple[int, str, str]
 
 
-@pytest.fixture
+@fixture
 def _outside_mise(monkeypatch: pytest.MonkeyPatch) -> None:
     """Name the helper by its command, as a run outside mise does (#1934).
 
@@ -120,7 +121,7 @@ def filled(ext: str, version: str, xy: str, num: str) -> str:
 class TestFloorBlock:
     """floor.sh against an extension directory as the package lays it out."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_floor_block(self, tmp_path: Path) -> None:
         """Lay out a control, the install script and the upgrade scripts."""
         self.extdir = Path(str(tmp_path))
@@ -280,7 +281,7 @@ class TestPreviousRelease:
 
     CRATE = "crates/demo-ext"
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_previous_release(self, tmp_path: Path) -> None:
         """Put a stub gh first on PATH and a crate at CRATE."""
         if not JQ:
@@ -686,7 +687,7 @@ class TestOlderLine(TestPreviousRelease):
     A release on the newer line, 1.3.1, upgrades from 1.3.0.
     """
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_older_line(self) -> None:
         """Publish 1.2.4 and 1.3.0, each on its own `v` release."""
         self.forge(
@@ -813,7 +814,7 @@ CONTAINER_STUBS = {
 class TestContainerScripts:
     """The rows share the stub functions and a call log."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_container_scripts(self, tmp_path: Path) -> None:
         """Stub functions; PG 18, demo_ext, 1.1.0 to 1.2.0."""
         self.calls = Path(str(tmp_path)) / "calls"
@@ -1050,7 +1051,7 @@ class TestDebugSplit:
 
     REL = "usr/lib/postgresql/18/lib/demo_ext.so"
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_debug_split(self, tmp_path: Path) -> None:
         """Build a package root holding one real library with .dep-v0."""
         if not elf_tools_present():
@@ -1158,7 +1159,7 @@ class TestDebugSplit:
 class TestGlibcFloor:
     """glibc-floor.sh over a real library, against floors either side."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_glibc_floor(self, tmp_path: Path) -> None:
         """Make an empty package root."""
         if not elf_tools_present():

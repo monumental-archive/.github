@@ -22,6 +22,7 @@ from pathlib import Path
 import pytest
 
 from belt import decoded, lychee_findings
+from belt.typed_pytest import fixture
 from tests import support
 
 HERE = support.MISE
@@ -109,7 +110,7 @@ def refused(file: Path, stderr: str) -> None:
 class TestAdapter:
     """The adapter over a stub lychee."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_adapter(
         self, tmp_path: Path, capfd: pytest.CaptureFixture[str]
     ) -> None:
@@ -277,7 +278,7 @@ class TestAdapter:
 class TestTask:
     """audit:links' body under the belt's pinned lychee, offline by planting."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_task(self, tmp_path: Path) -> None:
         """Plant a tracked tree with one markdown file linking `other.md`."""
         if support.optional_tool("lychee") is None:

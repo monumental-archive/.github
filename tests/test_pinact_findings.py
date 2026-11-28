@@ -38,6 +38,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import decoded, pinact_findings
+from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
@@ -212,7 +213,7 @@ def refused(file: Path, stderr: str) -> None:
 class TestStubbed:
     """A stub pinact on PATH, its log, the findings file."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_stubbed(
         self, tmp_path: Path, capfd: pytest.CaptureFixture[str]
     ) -> None:

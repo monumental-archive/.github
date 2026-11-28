@@ -23,6 +23,7 @@ from pathlib import Path
 import pytest
 
 from belt import decoded
+from belt.typed_pytest import fixture
 from tests import support
 
 BELT = support.MISE
@@ -64,7 +65,7 @@ class TestTasksFailOnError:
 class TestALinkedCloneThatPinsItsShell:
     """A real mise, the belt as a clone's link, no global config (#1745)."""
 
-    @pytest.fixture
+    @fixture
     def _tmp(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path

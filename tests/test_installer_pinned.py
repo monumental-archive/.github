@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import decoded, installer_pinned
+from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
@@ -29,7 +30,7 @@ if TYPE_CHECKING:
 TASK = "lint:installer-pinned"
 
 
-@pytest.fixture
+@fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)
@@ -82,7 +83,7 @@ def red(*short: str) -> list[str]:
 class TestPinned:
     """Planted workflows; the installer pin's verdict on them."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_pinned(self, tmp_path: Path) -> None:
         """Plant an empty workflows directory."""
         self.tree = tmp_path

@@ -25,6 +25,7 @@ from pathlib import Path
 import pytest
 
 from belt import declared_break, workflow_yaml
+from belt.typed_pytest import fixture
 from tests import support
 
 BELT = support.MISE
@@ -131,7 +132,7 @@ def measured(crate: str) -> str:
 class TestPlanted:
     """A planted repository, stub PATH and belt; the rows are below."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_planted(self, tmp_path: Path) -> None:
         """Plant an empty repository, the stubs and a belt."""
         self.tmp = tmp_path
@@ -554,7 +555,7 @@ DECLARATIONS: dict[str, tuple[str, str, bool]] = {
 class TestTheReaderAgrees:
     """#1906: "declared breaking" is what stele files under "Breaking"."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_the_reader_agrees(self, tmp_path: Path) -> None:
         """Skip unless the belt's stele is installed; plant a repository."""
         if not STELE:

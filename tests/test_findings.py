@@ -34,6 +34,7 @@ from pathlib import Path
 import pytest
 
 from belt import decoded, findings
+from belt.typed_pytest import fixture
 from tests import support
 
 MISE = support.MISE
@@ -172,7 +173,7 @@ def writers() -> list[Writer]:
 class TestFindingRows:
     """What each writer prints and records."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_finding_rows(self, tmp_path: Path) -> None:
         """Give each row a directory of its own."""
         self.root = Path(str(tmp_path))
@@ -513,7 +514,7 @@ def records(file: Path) -> list[dict[str, object]]:
 class TestRunnerRows:
     """Where each writer records on a runner, ORG_FINDINGS unset (#1976)."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_runner_rows(self, tmp_path: Path) -> None:
         """Give each row a directory of its own."""
         self.root = Path(str(tmp_path))
@@ -638,7 +639,7 @@ NO_RECORDS: list[dict[str, object]] = []
 class TestLinesRows:
     """org_finding_lines: one finding per stdin line, unit-separated (#1934)."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_lines_rows(self, tmp_path: Path) -> None:
         """Give each row a directory of its own."""
         self.file = Path(str(tmp_path)) / "out" / "job.jsonl"

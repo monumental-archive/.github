@@ -31,6 +31,7 @@ import pytest
 
 from belt import decoded
 from belt import deny_advisories as da
+from belt.typed_pytest import fixture
 from tests import support
 
 BELT = support.MISE
@@ -270,7 +271,7 @@ UNDECIDED = {
 class TestAuditDeny:
     """stele's status is the verdict; cargo-deny's is not read."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_audit_deny(self, tmp_path: Path) -> None:
         """Plant a checkout, a canon with security/vex/, the stubs and tools."""
         self.tmp = tmp_path

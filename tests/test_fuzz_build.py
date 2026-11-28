@@ -51,6 +51,7 @@ from pathlib import Path
 import pytest
 
 from belt import decoded
+from belt.typed_pytest import fixture
 from tests import support
 
 BELT = support.MISE
@@ -222,7 +223,7 @@ NESTED_SEEDED: list[tuple[str, str]] = [
 class TestFuzzBuild:
     """lint:fuzz-build says "stale" only when cargo says the lock is."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_fuzz_build(
         self, tmp_path: Path, request: pytest.FixtureRequest
     ) -> None:

@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import audit_scheduled, decoded
+from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
@@ -27,7 +28,7 @@ if TYPE_CHECKING:
 TASK = "lint:audit-scheduled"
 
 
-@pytest.fixture
+@fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)
@@ -91,7 +92,7 @@ def unscheduled(names: str) -> list[str]:
 class TestHelper:
     """A planted tree; the helper's verdict on it."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_helper(self, tmp_path: Path) -> None:
         """Plant an empty repository with a workflows directory.
 

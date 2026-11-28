@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import actions_lint
+from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
@@ -29,7 +30,7 @@ if TYPE_CHECKING:
 TASK = "lint:actions"
 
 
-@pytest.fixture
+@fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)
@@ -66,7 +67,7 @@ def names(tree: Path) -> list[str]:
 class TestActionsLint:
     """One planted workflow; actionlint's verdict through the helper."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_actions_lint(
         self, tmp_path: Path, capfd: pytest.CaptureFixture[str]
     ) -> None:

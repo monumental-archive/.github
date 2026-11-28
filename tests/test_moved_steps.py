@@ -19,6 +19,7 @@ from pathlib import Path
 
 import pytest
 
+from belt.typed_pytest import fixture
 from tests import support
 
 HERE = support.MISE
@@ -53,14 +54,14 @@ def run(
 class TestVexDecisions:
     """mise/vex-decisions.sh, in a planted git tree."""
 
-    @pytest.fixture
+    @fixture
     def _tmp(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path
 
     SCRIPT = HERE / "vex-decisions.sh"
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_vex_decisions(self, tmp_path: Path) -> None:
         """Make a repository with no decisions yet."""
         self.tree = Path(str(tmp_path))
@@ -191,7 +192,7 @@ def plant(root: Path, *, policy: bool = True) -> Path:
 class TestSourceAttestResolve:
     """.github/actions/source-attest/resolve.sh, in a planted canon tree."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_source_attest_resolve(self, tmp_path: Path) -> None:
         """Make a scratch directory, a runner temp and a GITHUB_ENV."""
         self.tmp = Path(os.path.realpath(str(tmp_path)))
@@ -283,7 +284,7 @@ NO_STELE = "::error::{}: stele is not on the runner — it is a belt tool\n"
 class TestStubbed:
     """A scratch work directory, a stub bin, and a script run in it."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_stubbed(self, tmp_path: Path) -> None:
         """Make the work directory, the stub bin and the log."""
         self.tmp = Path(os.path.realpath(str(tmp_path)))

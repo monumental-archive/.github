@@ -20,6 +20,7 @@ from unittest import mock
 import pytest
 
 from belt import call_names
+from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
@@ -762,7 +763,7 @@ class TestEnv:
 class TestTracked:
     """support.tracked, in a checkout (#1618)."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_tracked(self, tmp_path: Path) -> None:
         """Plant a repository with tracked files in and out of `vendor/`."""
         self.root = tmp_path
@@ -806,12 +807,12 @@ def on_path(path: str) -> AbstractContextManager[object]:
 class TestTool:
     """support.tool and support.optional_tool (#1684)."""
 
-    @pytest.fixture
+    @fixture
     def _tmp(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_tool(self, tmp_path: Path) -> None:
         """Plant a directory holding one executable, `planted-tool`."""
         self.bin = tmp_path
@@ -875,7 +876,7 @@ class TestTool:
 class TestRustc:
     """support.rustc prints support.rustc_verbose (#1877)."""
 
-    @pytest.fixture
+    @fixture
     def _tmp(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path
@@ -900,7 +901,7 @@ class TestRustc:
 class TestBelt:
     """support.belt and support.canon (#1714)."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_belt(self, tmp_path: Path) -> None:
         """Give each row a scratch directory."""
         self.tmp = tmp_path

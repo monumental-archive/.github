@@ -24,6 +24,7 @@ import pytest
 
 from belt import decoded
 from belt.rekor_monitor import certificate_issues
+from belt.typed_pytest import fixture
 from tests import support
 
 COMMAND = "certificate-issues"
@@ -80,7 +81,7 @@ def search(index: int) -> list[str]:
 class TestHarness:
     """A stub gh, its call log and the real report, for each row."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_harness(self, tmp_path: Path) -> None:
         """Lay out a stub gh, its call log, and the real report."""
         self.dir = Path(str(tmp_path))

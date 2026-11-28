@@ -32,6 +32,7 @@ from hypothesis import strategies as st
 
 from belt import findings, property_profiles, python_properties
 from belt.typed_hypothesis import given
+from belt.typed_pytest import fixture
 
 GATE = "test:python-properties"
 AUDIT = "audit:python-properties"
@@ -125,7 +126,7 @@ class Ran(Protocol):
         ...
 
 
-@pytest.fixture
+@fixture
 def ran(monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]) -> Ran:
     """Call `run` with a stand-in pytest, restoring what a run sets.
 

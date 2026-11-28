@@ -27,6 +27,7 @@ import pytest
 
 from belt import decoded, typed_std
 from belt import subject_budget as sb
+from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
@@ -39,7 +40,7 @@ if TYPE_CHECKING:
 TASK = "lint:subject-budget"
 
 
-@pytest.fixture
+@fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)

@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import mutants_python
+from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
@@ -87,7 +88,7 @@ def plant(root: Path, module: str, source: str, tests: str, setup: str = SETUP) 
     return root
 
 
-@pytest.fixture
+@fixture
 def leg(
     as_task: Callable[[str], None],
     capfd: pytest.CaptureFixture[str],

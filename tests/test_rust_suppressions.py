@@ -19,6 +19,7 @@ import pytest
 
 from belt import decoded
 from belt import rust_suppressions as rsup
+from belt.typed_pytest import fixture
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -27,7 +28,7 @@ if TYPE_CHECKING:
 TASK = "lint:rust"
 
 
-@pytest.fixture
+@fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)

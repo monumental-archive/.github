@@ -34,6 +34,7 @@ from typing import ClassVar
 import pytest
 
 from belt import coverage_floor, gate_cache_key
+from belt.typed_pytest import fixture
 from tests import support
 
 BELT = support.MISE
@@ -187,7 +188,7 @@ class TestPlanted:
     # The majors the planted extension declares.
     declares: ClassVar[tuple[int, ...]] = tuple(MAJORS)
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_planted(self, tmp_path: Path) -> None:
         """Plant a tracked workspace with one extension and one plain crate."""
         self.tmp = Path(str(tmp_path)).resolve()

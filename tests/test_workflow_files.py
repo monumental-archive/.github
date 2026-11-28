@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import decoded
+from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
@@ -125,7 +126,7 @@ def task_env(task: str) -> dict[str, str]:
 class TestPlanted:
     """A planted git repository and the belt's tasks run in it."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_planted(self, tmp_path: Path) -> None:
         """Plant an empty repository."""
         self.tmp = tmp_path

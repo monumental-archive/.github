@@ -23,6 +23,7 @@ import pytest
 
 from belt import workflow_yaml
 from belt.release import check_go_stamps
+from belt.typed_pytest import fixture
 from tests import support
 
 CANON = support.CANON
@@ -40,7 +41,7 @@ esac
 """
 
 
-@pytest.fixture
+@fixture
 def _outside_mise(monkeypatch: pytest.MonkeyPatch) -> None:
     """Name the helper by its command, as a run outside mise does (#1934).
 

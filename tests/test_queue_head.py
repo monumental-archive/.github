@@ -29,6 +29,7 @@ from pathlib import Path
 import pytest
 
 from belt import decoded, queue_head, workflow_yaml
+from belt.typed_pytest import fixture
 from tests import support
 
 HERE = support.MISE
@@ -211,7 +212,7 @@ def run_helper(
 class TestQueueHead:
     """Each row: a merge group, and the pull request it was queued from."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_queue_head(self, tmp_path: Path) -> None:
         """Give each row its own scratch directory."""
         self.tmp = tmp_path

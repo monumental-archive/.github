@@ -36,6 +36,7 @@ from typing import TYPE_CHECKING, ClassVar, Self
 import pytest
 
 from belt import coverage_floor as cf
+from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
@@ -173,7 +174,7 @@ class Tree:
 TASK = "coverage:check"
 
 
-@pytest.fixture
+@fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)
@@ -1660,7 +1661,7 @@ class TestThePlanFeedsTheHelper:
     canon's own gate cannot reach it: the canon has no pgrx crate.
     """
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_the_plan_feeds_the_helper(self, tmp_path: Path) -> None:
         """Plant a workspace with one extension declaring pg15 to pg18."""
         self.tmp = Path(str(tmp_path)).resolve()

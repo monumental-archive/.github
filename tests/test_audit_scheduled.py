@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import decoded
+from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
@@ -62,7 +63,7 @@ def body() -> str:
 class TestScheduled:
     """A planted belt config and workflows; the lint's verdict on them."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_scheduled(self, tmp_path: Path) -> None:
         """Plant a tree with two belt audit tasks and a stub belt."""
         self.tmp = tmp_path
@@ -156,7 +157,7 @@ class TestScheduled:
 class TestOwnTasks:
     """The repository half: its own audit tasks need a collecting caller."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_own_tasks(self, tmp_path: Path) -> None:
         """Plant a consumer tree (no belt config) defining one audit task."""
         self.tmp = tmp_path

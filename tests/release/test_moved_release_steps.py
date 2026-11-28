@@ -26,6 +26,7 @@ from pathlib import Path
 import pytest
 
 from belt import decoded
+from belt.typed_pytest import fixture
 from tests import support
 
 HERE = support.RELEASE
@@ -57,7 +58,7 @@ def strings(*items: str) -> list[str]:
 class TestScript:
     """A scratch directory, stub tools, and the script run in it."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_script(self, tmp_path: Path) -> None:
         """Make the scratch directory and its stub bin."""
         self.root = Path(str(tmp_path))

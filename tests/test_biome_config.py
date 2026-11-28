@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, ClassVar
 import pytest
 
 from belt import biome_config, decoded
+from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
@@ -35,7 +36,7 @@ if TYPE_CHECKING:
 TASK = "lint:biome"
 
 
-@pytest.fixture
+@fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)
@@ -268,7 +269,7 @@ class TestOmissionsTest:
 class TestDeclaredPackagesTest:
     """Where a dependency may be declared, and what is not a manifest."""
 
-    @pytest.fixture
+    @fixture
     def _tmp(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path
@@ -310,7 +311,7 @@ class TestDeclaredPackagesTest:
 class TestGenerateTest:
     """The arithmetic the repository is not allowed to do for itself."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_generate_test(self) -> None:
         """Generate against the real org config and the real tables."""
         self.org = org_config()
@@ -456,7 +457,7 @@ class TestFileOverrideTest:
         ("style", "noMagicNumbers"),
     }
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_file_override_test(self) -> None:
         """Read the delivered config, not a copy of it."""
         self.org = org_config()
@@ -649,7 +650,7 @@ class TestConditionalExpectTest:
 
     RULE = "noConditionalExpect"
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_conditional_expect_test(self) -> None:
         """Read the delivered config, not a copy of it."""
         self.org = org_config()

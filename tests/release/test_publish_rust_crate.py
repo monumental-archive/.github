@@ -66,6 +66,7 @@ import pytest
 
 from belt import decoded, findings
 from belt.release import publish_crates
+from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
@@ -114,7 +115,7 @@ esac
 """
 
 
-@pytest.fixture
+@fixture
 def _outside_mise(monkeypatch: pytest.MonkeyPatch) -> None:
     """Name the helper by its command, as a run outside mise does (#1934).
 

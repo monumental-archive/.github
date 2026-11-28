@@ -34,6 +34,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import decoded, shard, shard_runner
+from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
@@ -167,7 +168,7 @@ def vitest_key(path: str) -> str:
 class TestRunner:
     """A stand-in on PATH, the adapter run against it shard by shard."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_runner(
         self, tmp_path: Path, capfd: pytest.CaptureFixture[str]
     ) -> None:

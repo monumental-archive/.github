@@ -15,11 +15,12 @@ from pathlib import Path
 import pytest
 
 from belt.release import caller_pins
+from belt.typed_pytest import fixture
 
 INPUT_OF = "every class that ships a Rust binary"
 
 
-@pytest.fixture
+@fixture
 def _outside_mise(monkeypatch: pytest.MonkeyPatch) -> None:
     """Name the helper by its command, as a run outside mise does (#1934).
 

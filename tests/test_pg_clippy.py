@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import pg_clippy, pgrx_postgres, rust_workspaces
+from belt.typed_pytest import fixture
 from tests import support
 from tests import test_rust_lint as planted
 
@@ -93,7 +94,7 @@ def clippy(spec: str, belt: Path, root: str = "Cargo.toml") -> str:
 class TestPlanted:
     """A planted tree, a planted belt and the stubs."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_planted(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

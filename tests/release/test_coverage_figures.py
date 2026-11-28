@@ -28,6 +28,7 @@ import pytest
 
 from belt import coverage_floor
 from belt.release import coverage_figures as figures
+from belt.typed_pytest import fixture
 from tests import support
 
 HERE = support.RELEASE
@@ -444,7 +445,7 @@ MEASURED_PGRX: list[str] = ["pgrx"]
 class TestDerive:
     """derive-coverage-floor.sh, read or measured, in a planted tree."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_derive(
         self, tmp_path: Path, capfd: pytest.CaptureFixture[str]
     ) -> None:

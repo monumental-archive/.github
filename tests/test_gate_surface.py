@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import decoded, gate_surface
+from belt.typed_pytest import fixture
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -32,7 +33,7 @@ if TYPE_CHECKING:
 TASK = "lint:gate-surface"
 
 
-@pytest.fixture
+@fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)
@@ -352,7 +353,7 @@ class TestPublishedTest:
 class TestInvariantTest:
     """The check itself. Mutation: report a finding only when built is empty."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_invariant_test(self) -> None:
         """Build the stub every row here shares."""
         self.surface = TestPublishedTest.surface()

@@ -18,13 +18,14 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt.release import repro_resolve
+from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 
-@pytest.fixture
+@fixture
 def _outside_mise(monkeypatch: pytest.MonkeyPatch) -> None:
     """Name the helper by its command, as a run outside mise does (#1934).
 
@@ -82,7 +83,7 @@ TYPED = {"schema": 5, "entries": [{"name": "tool-1.2.3-linux.tar.gz"}]}
 class TestReadTheLatestRelease:
     """Each row: the latest release, and what the step handed on."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_read_the_latest_release(self, tmp_path: Path) -> None:
         """Give each row a working directory, fixtures and a stub `gh`."""
         self.tmp = tmp_path

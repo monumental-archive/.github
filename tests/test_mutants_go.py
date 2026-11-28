@@ -35,6 +35,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import decoded, mutants_go
+from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
@@ -44,7 +45,7 @@ if TYPE_CHECKING:
 TASK = "audit:mutants"
 
 
-@pytest.fixture
+@fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)
@@ -194,7 +195,7 @@ def measuring(count: int = 2) -> str:
 class TestPlanted:
     """A planted module, a real GOROOT, a shim first on PATH, stub gomu."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_planted(self, tmp_path: Path) -> None:
         """Plant the module, the stubs and the default answers."""
         self.tmp = tmp_path
@@ -863,7 +864,7 @@ class TestMain:
     package `a` holds `a.go`, lines 3-5 covered and 9 not.
     """
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_main(self, tmp_path: Path) -> None:
         """Plant the scratch tables for one package and an empty report."""
         self.root = Path(str(tmp_path), "tree")

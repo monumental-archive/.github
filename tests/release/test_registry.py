@@ -54,10 +54,11 @@ import pytest
 
 from belt import decoded
 from belt.release import registry
+from belt.typed_pytest import fixture
 from tests import support
 
 
-@pytest.fixture
+@fixture
 def _outside_mise(monkeypatch: pytest.MonkeyPatch) -> None:
     """Name the helper by its command, as a run outside mise does (#1934).
 
@@ -258,7 +259,7 @@ class Fake(BaseHTTPRequestHandler):
 class TestHarness:
     """A fresh fake, a stub docker on PATH, and the step's environment."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_harness(
         self, request: pytest.FixtureRequest, tmp_path: Path
     ) -> None:
@@ -627,7 +628,7 @@ class TestPush(TestHarness):
 class TestAssemble(TestHarness):
     """assemble-oci-index.yml: the index, by digest, proven by the registry."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_assemble(self) -> None:
         """Lay out both per-architecture digests, as the download leaves them."""
         self.digests = self.tmp / "digests"

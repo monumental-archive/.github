@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import cold_attested, decoded
+from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
@@ -36,7 +37,7 @@ if TYPE_CHECKING:
 TASK = "lint:cold-attested"
 
 
-@pytest.fixture
+@fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)
@@ -221,7 +222,7 @@ def body() -> str:
 class TestColdAttested:
     """Planted workflows; the lint's verdict on them."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_cold_attested(self, tmp_path: Path) -> None:
         """Plant an empty workflows directory."""
         self.tree = tmp_path

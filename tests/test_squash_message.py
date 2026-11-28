@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import squash_message
+from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
@@ -140,7 +141,7 @@ def refusal(number: int, line: str) -> str:
 class TestStepHarness:
     """Run the helper as the step does, with a stub `mise`."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_step_harness(self, tmp_path: Path) -> None:
         """Give each row its own runner temp and stub `mise`."""
         self.tmp = tmp_path
@@ -443,7 +444,7 @@ def entry_after_blank(body: str, entry: list[str]) -> bool:
 class TestTheReaderAgrees:
     """#1924: the rule refuses exactly what stele would publish in the break."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_the_reader_agrees(self, tmp_path: Path) -> None:
         """Skip unless the belt's stele is installed; make the scratch repo."""
         if not STELE or not GIT:

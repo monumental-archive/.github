@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import decoded
+from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
@@ -95,7 +96,7 @@ def plant_belt(tree: Path) -> Path:
 class TestPlanted:
     """A repository and one tree for each carrier; the rows are below."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_planted(self, tmp_path: Path) -> None:
         """Plant a repository and one tree for each carrier."""
         self.tmp = tmp_path

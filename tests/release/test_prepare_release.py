@@ -60,6 +60,7 @@ from tempfile import TemporaryDirectory
 import pytest
 
 from belt import decoded
+from belt.typed_pytest import fixture
 from tests import support
 
 CANON = support.CANON
@@ -313,7 +314,7 @@ class TestTheChangelogContract:
     version at all.
     """
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_the_changelog_contract(self) -> None:
         """Skip unless stele and cargo are installed."""
         require_engine()
@@ -375,7 +376,7 @@ class TestTheChangelogContract:
 class TestTheTreeDecisions:
     """The decisions phase 1 step 1 still owns after stele took the rest."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_the_tree_decisions(self) -> None:
         """Skip unless stele and cargo are installed."""
         require_engine()

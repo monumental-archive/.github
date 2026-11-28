@@ -111,6 +111,7 @@ import pytest
 
 from belt import decoded
 from belt.release import mint_doi
+from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
@@ -159,7 +160,7 @@ esac
 """
 
 
-@pytest.fixture
+@fixture
 def _outside_mise(monkeypatch: pytest.MonkeyPatch) -> None:
     """Name the helper by its command, as a run outside mise does (#1934).
 
@@ -707,7 +708,7 @@ class TestOneId:
 
     run_: Run
 
-    @pytest.fixture
+    @fixture
     def _run(self, capfd: pytest.CaptureFixture[str]) -> None:
         """Run the helper for the row."""
         self.run_ = run_helper("0BSD", capfd=capfd)
@@ -742,7 +743,7 @@ class TestTwoIds:
 
     run_: Run
 
-    @pytest.fixture
+    @fixture
     def _run(self, capfd: pytest.CaptureFixture[str]) -> None:
         """Run the helper for the row."""
         self.run_ = run_helper("MIT OR Apache-2.0", capfd=capfd)
@@ -1240,7 +1241,7 @@ class TestALaterMint:
 
     run_: Run
 
-    @pytest.fixture
+    @fixture
     def _run(self, capfd: pytest.CaptureFixture[str]) -> None:
         """Run the helper for the row."""
         self.run_ = canon_run(canon_zenodo(), capfd=capfd)

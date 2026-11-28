@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import rust_workspaces
+from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
@@ -310,7 +311,7 @@ BUILT_AS_HOLDS_THE_FLAGS_AND_PUTS_THEM_BACK_ROWS: list[tuple[dict[str, str], str
 class TestFuzzing:
     """A cargo-fuzz root is built with `--cfg fuzzing`, by its marker (#2093)."""
 
-    @pytest.fixture
+    @fixture
     def _tmp(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path

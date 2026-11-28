@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import exit_trap as et
+from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
@@ -34,7 +35,7 @@ if TYPE_CHECKING:
 TASK = "lint:bash-portability"
 
 
-@pytest.fixture
+@fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)
@@ -307,7 +308,7 @@ def run_bash(*body: str, shell: str = str(BASH), shebang: str = "") -> int:
 class TestPattern:
     """The defect, then the guard, on the shell that has the defect."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_pattern(self) -> None:
         """Skip every row unless /bin/bash is the shell with the defect."""
         if not IS_32:

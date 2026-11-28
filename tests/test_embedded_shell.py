@@ -25,6 +25,7 @@ import pytest
 
 from belt import decoded
 from belt import embedded_shell as es
+from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
@@ -34,7 +35,7 @@ if TYPE_CHECKING:
 TASK = "lint:shell-embedded"
 
 
-@pytest.fixture
+@fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)
@@ -123,7 +124,7 @@ class Tree:
 class TestCeiling:
     """The Done-when rows of #1352, one guard branch each."""
 
-    @pytest.fixture
+    @fixture
     def _tmp(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path
@@ -292,7 +293,7 @@ WHAT_SHELLCHECK_READS_AND_HOW_ROWS = [
 class TestHeaders:
     """Every block-scalar header is counted; shellcheck reads `|` and `|-`."""
 
-    @pytest.fixture
+    @fixture
     def _tmp(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path
@@ -383,7 +384,7 @@ A_FOLDED_BLOCK_IS_WEIGHED_BY_ITS_LINES_ROWS = [
 class TestFolded:
     """#1396: shellcheck reads a folded block as bash receives it."""
 
-    @pytest.fixture
+    @fixture
     def _tmp(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path
@@ -482,7 +483,7 @@ class TestParser:
     value, a flow mapping and a quoted key each gave no block at all.
     """
 
-    @pytest.fixture
+    @fixture
     def _tmp(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path
@@ -635,7 +636,7 @@ class TestParser:
 class TestOrgConfig:
     """The org's shellcheck settings are the ones applied (#696, #733)."""
 
-    @pytest.fixture
+    @fixture
     def _tmp(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path
@@ -754,7 +755,7 @@ def blank_after(first: str) -> str:
 class TestTrailingBlank:
     """#1431: blank lines after a block are YAML layout, not shell."""
 
-    @pytest.fixture
+    @fixture
     def _tmp(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path
@@ -985,7 +986,7 @@ def run_task(root: Path, name: str) -> subprocess.CompletedProcess[str]:
 class TestTask:
     """The task bodies, run as mise runs them, in a scratch repository."""
 
-    @pytest.fixture
+    @fixture
     def _tmp(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path
@@ -1072,7 +1073,7 @@ def config(**tasks: int | list[int]) -> str:
 class TestTasks:
     """The Done-when rows of #1544: task bodies under the same ceiling."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_tasks(self, tmp_path: Path) -> None:
         """Give each row a scratch directory for the config and the debt."""
         self.root = Path(str(tmp_path))
@@ -1282,7 +1283,7 @@ class TestTaskShellTask:
     task, so decoding the body raises KeyError.
     """
 
-    @pytest.fixture
+    @fixture
     def _tmp(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path

@@ -31,6 +31,7 @@ import pytest
 
 from belt import decoded, shard, typed_std
 from belt import typescript_properties as tp
+from belt.typed_pytest import fixture
 from tests import support
 
 CANON = support.CANON
@@ -865,7 +866,7 @@ class TestShares:
 
     FILES = ("c.prop.test.ts", "a.prop.test.ts", "b.prop.test.mts")
 
-    @pytest.fixture
+    @fixture
     def _capfd(self, capfd: pytest.CaptureFixture[str]) -> None:
         """Hold the descriptors' capture for `share`."""
         self.capfd = capfd

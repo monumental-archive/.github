@@ -20,6 +20,7 @@ import pytest
 
 from belt import decoded
 from belt.rekor_monitor import verdict
+from belt.typed_pytest import fixture
 from tests import support
 
 COMMAND = "verdict"
@@ -98,7 +99,7 @@ def call(argv: list[str], *, capfd: pytest.CaptureFixture[str]) -> tuple[int, st
 class TestVerdict:
     """One row per branch of verdict.judge()."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_verdict(self, tmp_path: Path) -> None:
         """Lay out a report file."""
         self.report = Path(str(tmp_path)) / "report.json"

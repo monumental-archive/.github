@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import citation_check, decoded
+from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
@@ -33,7 +34,7 @@ if TYPE_CHECKING:
 TASK = "lint:citation"
 
 
-@pytest.fixture
+@fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)
@@ -81,7 +82,7 @@ def source(name: str) -> str:
 class TestCitation:
     """Planted trees; the citation's verdict on them."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_citation(self, tmp_path: Path) -> None:
         """Plant an empty repository: the helper asks git (#2013)."""
         self.tree = tmp_path

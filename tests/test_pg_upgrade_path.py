@@ -52,6 +52,7 @@ from tempfile import TemporaryDirectory
 
 import pytest
 
+from belt.typed_pytest import fixture
 from tests import support
 
 CANON = support.CANON
@@ -189,7 +190,7 @@ class Tree:
 class TestNeedsCargo:
     """Rows the guard answers by resolving the crate version with cargo."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_needs_cargo(self) -> None:
         """Skip the row where cargo is not on PATH."""
         if not CARGO:

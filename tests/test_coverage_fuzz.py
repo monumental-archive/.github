@@ -25,6 +25,7 @@ import pytest
 
 from belt import coverage_floor as cf
 from belt import decoded
+from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
@@ -188,7 +189,7 @@ def task_body(name: str) -> str:
 class TestFuzzCase:
     """A planted repository and the stand-in tools, one per row."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_fuzz_case(self, tmp_path: Path) -> None:
         """Plant an empty repository and the stubs beside it."""
         self.tmp = tmp_path

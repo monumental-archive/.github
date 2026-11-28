@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import decoded
+from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
@@ -67,7 +68,7 @@ def body() -> str:
 class TestTheBeltClaimsItsDirectory:
     """Each row: what the repository tracks under .config/mise/."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_the_belt_claims_its_directory(self, tmp_path: Path) -> None:
         """Plant an empty repository."""
         self.tmp = tmp_path

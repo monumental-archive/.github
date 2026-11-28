@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from belt import decoded, workflow_yaml
+from belt.typed_pytest import fixture
 
 FIXTURE = """\
 name: every shape
@@ -84,7 +85,7 @@ runs:
 class TestFixture:
     """The fixture, read once per row from a file of its own."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_fixture(self, tmp_path: Path) -> None:
         """Write the fixture and the action to a scratch directory."""
         self.dir = Path(str(tmp_path))

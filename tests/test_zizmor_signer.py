@@ -42,12 +42,13 @@ import pytest
 
 from belt import decoded
 from belt import zizmor_signer as signer
+from belt.typed_pytest import fixture
 from tests import support
 
 HERE = support.MISE
 
 
-def fixture(name: str) -> list[dict[str, object]]:
+def recorded(name: str) -> list[dict[str, object]]:
     """Read a recorded zizmor run: its finding array, each an object.
 
     Returns:
@@ -90,8 +91,8 @@ def concrete(location: dict[str, object]) -> dict[str, object]:
     return decoded.as_object(location["concrete"], "concrete")
 
 
-REAL = fixture("zizmor-1.32.0-canon.json")
-MISMATCH = fixture("zizmor-1.32.0-ref-version-mismatch.json")
+REAL = recorded("zizmor-1.32.0-canon.json")
+MISMATCH = recorded("zizmor-1.32.0-ref-version-mismatch.json")
 SIGNER_WORKFLOW = "monumental-archive/signer/.github/workflows/sign.yml"
 SIGNER_REF = SIGNER_WORKFLOW + "@cffec9441210d46f237099d8785098aacf5b8273"
 MISMATCH_REF = SIGNER_WORKFLOW + "@0d6c6e297684c8ba401fb9c212532628fe552148"
@@ -422,7 +423,7 @@ class TestRefusals:
 class TestRecords:
     """What remains is recorded; zizmor runs once, its status the exit."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_records(self, tmp_path: Path) -> None:
         """Lay out the findings file and the environment a task gives."""
         self.file = Path(str(tmp_path)) / "findings" / "job.jsonl"
@@ -605,7 +606,7 @@ jobs:
 class TestPinnedZizmor:
     """The belt's pinned zizmor, `--offline`, on a planted workflow."""
 
-    @pytest.fixture
+    @fixture
     def _tmp(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path
@@ -698,7 +699,7 @@ sys.exit(int(os.environ["STUB_RC"]))
 class TestTask:
     """audit:actions' own body over a stub zizmor, in a planted tree."""
 
-    @pytest.fixture
+    @fixture
     def _tmp(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path

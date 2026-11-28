@@ -34,6 +34,7 @@ from pathlib import Path
 
 import pytest
 
+from belt.typed_pytest import fixture
 from tests import support
 
 BELT = support.MISE
@@ -179,7 +180,7 @@ def at(crate: str, major: int) -> str:
 class TestPlanted:
     """A planted tree, stub PATH and belt; the rows are in the classes below."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_planted(self, tmp_path: Path) -> None:
         """Plant a tracked tree, a stub PATH and a belt with stub provisioning."""
         self.tmp = tmp_path

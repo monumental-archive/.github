@@ -25,6 +25,7 @@ import pytest
 
 from belt import decoded
 from belt import git_decoy as gd
+from belt.typed_pytest import fixture
 from tests import support
 
 _HERE = support.MISE
@@ -119,7 +120,7 @@ def snapshot(repo: pathlib.Path) -> tuple[bytes, str]:
 class TestTask:
     """The `test` task's body, run over a planted tree."""
 
-    @pytest.fixture
+    @fixture
     def _tmp(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path
@@ -190,7 +191,7 @@ class TestTask:
 class TestHelper:
     """`run` names each kind of change a leak can make."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_helper(self, tmp_path: Path) -> None:
         """Plant a decoy in a scratch directory."""
         self.decoy = pathlib.Path(str(tmp_path)) / "decoy"

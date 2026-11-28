@@ -11,14 +11,13 @@ by name; and the law that no other tracked file opens a URL itself.
 import ast
 import io
 import re
-import subprocess
-import sys
 import urllib.request
 from typing import TYPE_CHECKING, Self, override
 
 import pytest
 
 from belt import call_names, typed_std
+from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
@@ -40,7 +39,7 @@ VERSION = re.compile(r"v(?P<major>\d+)\.(\d+)(-(?P<pre>\w+))?")
 class TestGroup:
     """The group's text by its span, or None, never Any."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_group(self) -> None:
         """Match one version with no pre-release part."""
         found = VERSION.fullmatch("v1.70")

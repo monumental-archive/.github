@@ -26,6 +26,7 @@ from pathlib import Path
 import pytest
 
 from belt import decoded, typed_std
+from belt.typed_pytest import fixture
 from tests import support
 
 CANON = support.CANON
@@ -279,7 +280,7 @@ STUB = '#!/bin/sh\ncat > /dev/null\necho "{who} $*"\n'
 class TestAScratchRepositoryPinningItsOwnPython:
     """The real belt under a real mise, in a repository that pins Python."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_a_scratch_repository_pinning_its_own_python(
         self, tmp_path: Path
     ) -> None:

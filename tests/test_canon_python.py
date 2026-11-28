@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
@@ -68,7 +69,7 @@ def bash() -> str:
 class TestInstallTheBeltsPython:
     """Each row: the planted tree and stub, and what the step did."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_install_the_belts_python(self, tmp_path: Path) -> None:
         """Give each row a canon tree, a stub mise and a runner's files."""
         self.tmp = tmp_path

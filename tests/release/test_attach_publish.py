@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt.release import attach_publish
+from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
@@ -93,7 +94,7 @@ def subcommands(calls: list[list[str]]) -> list[str]:
 class TestAttachAndPublish:
     """Each row: the release as published, and what the step did."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_attach_and_publish(self, tmp_path: Path) -> None:
         """Give each row a working directory, fixtures and a stub `gh`."""
         self.tmp = tmp_path

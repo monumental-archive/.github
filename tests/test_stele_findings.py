@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 
 from belt import decoded, stele_findings
+from belt.typed_pytest import fixture
 from tests import support
 
 HERE = support.MISE
@@ -114,7 +115,7 @@ def same[T](got: T, want: T, msg: str = "") -> None:
 class TestAdapter:
     """The adapter over a stub stele."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_adapter(
         self, tmp_path: Path, capfd: pytest.CaptureFixture[str]
     ) -> None:

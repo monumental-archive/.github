@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import decoded, gate_tools
+from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
@@ -137,7 +138,7 @@ CEILING = (
 class TestPlanted:
     """A planted, tracked tree; a lint's verdict on it."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_planted(self, tmp_path: Path) -> None:
         """Make an empty git repository and a scrubbed environment."""
         tmp = tmp_path
@@ -289,7 +290,7 @@ class TestActionPins(TestPlanted):
 class TestZizmor(TestPlanted):
     """lint:zizmor, with zizmor stubbed to record its arguments."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_zizmor(self) -> None:
         """Put a recording zizmor first on PATH."""
         self.args = self.bin / "args"

@@ -64,6 +64,7 @@ import pytest
 
 from belt import decoded, workflow_yaml
 from belt.release import package_crates
+from belt.typed_pytest import fixture
 from tests import support
 
 CANON = support.CANON
@@ -115,7 +116,7 @@ done
 """
 
 
-@pytest.fixture
+@fixture
 def _outside_mise(monkeypatch: pytest.MonkeyPatch) -> None:
     """Name the helper by its command, as a run outside mise does (#1934).
 

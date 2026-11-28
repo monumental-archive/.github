@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import decoded
+from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
@@ -125,7 +126,7 @@ def stub(tree: Path, sha: str, name: str = "gate.yml") -> None:
 class TestPlanted:
     """The cache trees of A and B, and a consumer with no pin yet."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_planted(self, tmp_path: Path) -> None:
         """Plant both cache trees and an empty consumer repository."""
         self.tmp = tmp_path
@@ -328,7 +329,7 @@ class TestTheBeltAnswersOnlyForItsPin(TestPlanted):
 class TestOnlyTasksRefuse(TestPlanted):
     """A refused tree: mise's own commands still work, so the remedy can run."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_only_tasks_refuse(self) -> None:
         """Plant the refused tree: pin B, link A."""
         self.pin(self.repo, B)

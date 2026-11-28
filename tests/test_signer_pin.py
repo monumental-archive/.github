@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import decoded, signer_pin
+from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
@@ -39,7 +40,7 @@ TASK = "lint:signer-pin"
 CANON_NAME = "monumental-archive/.github"
 
 
-@pytest.fixture
+@fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)
@@ -178,7 +179,7 @@ def literal_message(*found: str) -> list[str]:
 class TestBranches:
     """Each branch of the helper, its whole message asserted."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_branches(self, tmp_path: Path) -> None:
         """Plant an empty repository: the pin is asked of git (#2013)."""
         self.tree = tmp_path

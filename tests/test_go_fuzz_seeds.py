@@ -31,6 +31,7 @@ from pathlib import Path
 import pytest
 
 from belt import decoded
+from belt.typed_pytest import fixture
 from tests import support
 
 BELT = support.MISE
@@ -126,7 +127,7 @@ def task_body(name: str) -> str:
 class TestGoFuzzSeeds:
     """lint:go-fuzz-seeds runs exactly the packages the listing names."""
 
-    @pytest.fixture
+    @fixture
     def _set_up_test_go_fuzz_seeds(
         self, tmp_path: Path, request: pytest.FixtureRequest
     ) -> None:

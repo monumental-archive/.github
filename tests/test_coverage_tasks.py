@@ -30,6 +30,7 @@ from typing import TypedDict, Unpack
 import pytest
 
 from belt import coverage_floor, decoded, workflow_yaml
+from belt.typed_pytest import fixture
 from tests import support
 
 CANON = support.CANON
@@ -489,7 +490,7 @@ class Plant(TypedDict, total=False):
 class TestCoverageTaskCase:
     """Runs a task and removes the planted tree afterwards."""
 
-    @pytest.fixture
+    @fixture
     def _tmp(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path
@@ -996,7 +997,7 @@ class TestChildFromAnotherDirectory:
     since #1528, where it rendered only the JSON before.
     """
 
-    @pytest.fixture(scope="class")
+    @fixture(scope="class")
     @classmethod
     def _pytest_tool(cls) -> None:
         """Assert the tool first, as the belt's tasks assert theirs.
