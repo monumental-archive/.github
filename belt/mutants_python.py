@@ -9,10 +9,9 @@ it proves redundant, kill it with an assertion, or (the code must stay
 and no input can tell) exclude its line with a reason at the site.
 
 ADOPTION IS MUTMUT'S OWN CONFIGURATION, tracked at the repository's
-root: a `[mutmut]` section in `setup.cfg`, or `[tool.mutmut]` in
-`pyproject.toml` (mutmut reads the second when it is there). Without
-one the leg skips clean, by name; with both it is red, since mutmut
-would silently read one. A repository's section holds only what is
+root: a `[mutmut]` section in `setup.cfg`, the one file
+`lint:test-adoption` names. Without one the leg skips clean, by name.
+A repository's section holds only what is
 mutated (`source_paths`) and the tests that judge it
 (`pytest_add_cli_args_test_selection`); mutmut 3.8.1's defaults are
 its maximum (`mutate_only_covered_lines` false, `max_stack_depth` -1,
@@ -55,14 +54,13 @@ import subprocess
 from collections import defaultdict
 from pathlib import Path
 
-from belt import decoded, findings, mutation_pragmas, shard, tool_python, typed_std
+from belt import findings, mutation_pragmas, shard, tool_python, typed_std
 from belt.tracked import has, tracked
 from belt.tree import MISE
 
 LABEL = "audit:mutants: python"
 SHARD = "MUTANTS_SHARD"
 SETUP = "setup.cfg"
-PYPROJECT = "pyproject.toml"
 COPY = "mutants"
 KILLED = "killed"
 EXIT_RED = 1
@@ -100,43 +98,27 @@ class AdoptionError(ValueError):
 
 
 def configuration(root: Path) -> tuple[str, dict[str, str]] | None:
-    """Read the repository's tracked mutmut configuration.
+    """Read the repository's tracked `setup.cfg` [mutmut] section.
 
     Returns:
         The file and its keys (each value as text), or None when the
-        repository tracks none.
+        repository tracks no section.
 
     Raises:
-        AdoptionError: both files hold one, or one does not parse.
+        AdoptionError: the file does not parse.
 
     """
-    found: list[tuple[str, dict[str, str]]] = []
-    if has(PYPROJECT, root=root):
-        try:
-            data = decoded.load_toml((root / PYPROJECT).read_bytes())
-        except (OSError, decoded.UndecodableError) as bad:
-            msg = f"{PYPROJECT} does not parse: {bad}"
-            raise AdoptionError(msg) from bad
-        table = data.get("tool")
-        section = table.get("mutmut") if decoded.is_object(table) else None
-        if decoded.is_object(section):
-            found.append((PYPROJECT, {k: str(v) for k, v in section.items()}))
-    if has(SETUP, root=root):
-        parser = configparser.ConfigParser()
-        try:
-            parser.read_string((root / SETUP).read_text(encoding="utf-8"))
-        except (OSError, configparser.Error) as bad:
-            msg = f"{SETUP} does not parse: {bad}"
-            raise AdoptionError(msg) from bad
-        if parser.has_section("mutmut"):
-            found.append((SETUP, dict(parser.items("mutmut"))))
-    if len(found) > 1:
-        msg = (
-            f"both {PYPROJECT} [tool.mutmut] and {SETUP} [mutmut] are tracked;"
-            " mutmut reads only the first, so keep one"
-        )
-        raise AdoptionError(msg)
-    return found[0] if found else None
+    if not has(SETUP, root=root):
+        return None
+    parser = configparser.ConfigParser()
+    try:
+        parser.read_string((root / SETUP).read_text(encoding="utf-8"))
+    except (OSError, configparser.Error) as bad:
+        msg = f"{SETUP} does not parse: {bad}"
+        raise AdoptionError(msg) from bad
+    if not parser.has_section("mutmut"):
+        return None
+    return SETUP, dict(parser.items("mutmut"))
 
 
 def source_paths(keys: dict[str, str]) -> list[str]:

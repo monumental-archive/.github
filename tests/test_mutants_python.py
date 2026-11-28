@@ -201,23 +201,6 @@ def test_no_configuration_skips_clean_by_name(
     assert not summary.exists()
 
 
-def test_both_configurations_are_red(
-    tmp_path: Path, leg: Callable[..., Called]
-) -> None:
-    """pyproject.toml [tool.mutmut] beside setup.cfg [mutmut]: mutmut reads one."""
-    root = tmp_path
-    (root / "pyproject.toml").write_text(
-        '[tool.mutmut]\nsource_paths = ["pkg/"]\n', encoding="utf-8"
-    )
-    plant(root, "calc", CALC, CALC_TESTS)
-    done = leg(root)
-    assert done.returncode == RED
-    assert done.stderr == (
-        "audit:mutants: python: both pyproject.toml [tool.mutmut] and setup.cfg"
-        " [mutmut] are tracked; mutmut reads only the first, so keep one\n"
-    )
-
-
 @pytest.mark.parametrize(
     ("setup", "said"),
     [
