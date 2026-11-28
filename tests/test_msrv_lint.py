@@ -18,7 +18,6 @@ GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom.
 
 from __future__ import annotations
 
-import contextlib
 import os
 import re
 import subprocess
@@ -29,11 +28,19 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from belt import decoded, msrv_lint, rust_task, rust_workspaces
+from belt import (
+    decoded,
+    gate_surface,
+    msrv_lint,
+    msrv_plan,
+    pgrx_postgres,
+    rust_task,
+    rust_workspaces,
+)
 from tests import support
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
+    from collections.abc import Callable
 
 BELT = support.MISE
 TASK = "lint:msrv"
@@ -54,23 +61,47 @@ printf 'mise %s\n' "$*" >> "${PLANT_LOG}"
 [[ ${PLANT_FAIL:-} != "mise-$2" ]] || exit 3
 echo '[]'
 """
-# Reads its stdin to the end before it logs, so a pipeline's stages log
-# in the order the pipeline runs them; logs what it was given on stdin.
-PYTHON_STUB = r"""#!/usr/bin/env bash
-script=$(basename "$1")
-shift
-given=""
-[[ $1 == --failed ]] || given=$(cat)
-printf '%s %s <%s>\n' "${script}" "$*" "${given}" >> "${PLANT_LOG}"
-[[ $1 != --failed ]] || { echo "lint:msrv: remedy for $2" >&2; exit 1; }
-[[ ${PLANT_FAIL:-} != "${script}" ]] || exit 5
-case ${script} in
-  gate_surface.py) cat "${PLANT_SURFACE}" ;;
-  pgrx_postgres.py) echo 'pg\t17\t/pg17/pg_config' ;;
-  msrv_plan.py) cat "${PLANT_PLAN}" ;;
-  *) exit 99 ;;
-esac
-"""
+# What the in-process commands answer, by command: each stand-in logs
+# `belt <command> <arguments> <its stdin>` and fails with 5 when
+# PLANT_FAIL names it; `msrv-plan --failed` says the remedy instead.
+ANSWERS = {
+    "gate-surface": "PLANT_SURFACE",
+    "pgrx-postgres": "",
+    "msrv-plan": "PLANT_PLAN",
+}
+PG_CONFIG = "pg\t17\t/pg17/pg_config\n"
+
+
+def stand_in(command: str) -> Callable[[list[str]], int]:
+    """Stand in for one belt command's `main`, as the rows' stubs do.
+
+    Returns:
+        The stand-in.
+
+    """
+
+    def main(argv: list[str]) -> int:
+        failed = argv[:1] == ["--failed"]
+        given = "" if failed else sys.stdin.read().rstrip("\n")
+        line = f"belt {command} {' '.join(argv)} <{given}>\n"
+        with Path(os.environ["PLANT_LOG"]).open("a", encoding="utf-8") as log:
+            log.write(line)
+        if failed:
+            sys.stderr.write(f"lint:msrv: remedy for {argv[1]}\n")
+            return 1
+        if os.environ.get("PLANT_FAIL") == command:
+            return 5
+        answer = ANSWERS[command]
+        sys.stdout.write(
+            Path(os.environ[answer]).read_text(encoding="utf-8")
+            if answer
+            else PG_CONFIG
+        )
+        return 0
+
+    return main
+
+
 PGRX_ENV_STUB = f"""
 . "{BELT / "pgrx-env.sh"}"
 org_pgrx_darwin_prepare() {{
@@ -112,31 +143,6 @@ def lines(*text: str) -> list[str]:
     return list(text)
 
 
-@contextlib.contextmanager
-def captured(out: Path, err: Path) -> Generator[None]:
-    """Send this process's stdout and stderr descriptors to two files.
-
-    Yields:
-        Nothing; both descriptors are restored on the way out.
-
-    """
-    saved = [os.dup(1), os.dup(2)]
-    try:
-        for fd, path in ((1, out), (2, err)):
-            sys.stdout.flush()
-            sys.stderr.flush()
-            target = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC)
-            os.dup2(target, fd)
-            os.close(target)
-        yield
-    finally:
-        sys.stdout.flush()
-        sys.stderr.flush()
-        for fd, old in zip((1, 2), saved, strict=True):
-            os.dup2(old, fd)
-            os.close(old)
-
-
 def body() -> str:
     """Read lint:msrv's run body from the belt's config.
 
@@ -155,15 +161,17 @@ class TestPlanted:
     """The planted belt, stubs and log every in-process row runs in."""
 
     @pytest.fixture
-    def _set_up_test_planted(self, tmp_path: Path) -> None:
+    def _set_up_test_planted(
+        self, tmp_path: Path, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Plant the stubs, the surface, the plan and the belt."""
         self.tmp = tmp_path
+        self.capfd = capfd
         self.bins = self.tmp / "bin"
         self.bins.mkdir()
         for name, text in {
             "cargo": CARGO_STUB,
             "mise": MISE_STUB,
-            "python": PYTHON_STUB,
         }.items():
             stub = self.bins / name
             stub.write_text(text, encoding="utf-8")
@@ -184,7 +192,6 @@ class TestPlanted:
         self.env = env | {
             "PATH": f"{self.bins}:{env['PATH']}",
             "ORG_BELT_DIR": str(self.belt),
-            "ORG_PYTHON": str(self.bins / "python"),
             "ORG_FINDINGS": "",
             "MISE_TASK_NAME": TASK,
             "BASH_ENV": str(BELT / "findings.sh"),
@@ -221,16 +228,16 @@ class TestPlanted:
             The status, and the stdout and stderr lines.
 
         """
-        out, err = self.tmp / "out", self.tmp / "err"
-        with (
-            pytest.MonkeyPatch.context() as patched,
-            contextlib.chdir(self.tree),
-            captured(out, err),
-        ):
+        self.capfd.readouterr()
+        with pytest.MonkeyPatch.context() as patched:
+            patched.chdir(self.tree)
             for name in list(os.environ):
                 patched.delenv(name)
             for name, value in self.env.items():
                 patched.setenv(name, value)
+            patched.setattr(gate_surface, "main", stand_in("gate-surface"))
+            patched.setattr(msrv_plan, "main", stand_in("msrv-plan"))
+            patched.setattr(pgrx_postgres, "main", stand_in("pgrx-postgres"))
             patched.setattr(
                 rust_workspaces,
                 "resolved",
@@ -241,8 +248,8 @@ class TestPlanted:
             else:
                 status, checked = msrv_lint.workspace(manifest, self.tmp / "pins")
                 msrv_lint.say(f"{checked} checked")
-        said = out.read_text(encoding="utf-8").splitlines()
-        return status, said, err.read_text(encoding="utf-8").splitlines()
+        out, err = self.capfd.readouterr()
+        return status, out.splitlines(), err.splitlines()
 
     def logged(self) -> list[str]:
         """Read the stubs' log, the scratch directory masked.
@@ -267,7 +274,7 @@ class TestPlanted:
             "belt msrv-plan --toolchains <tmp>/toolchains.json --exclude "
             f" --pgrx {pgrx} --floor <belt>/rust-floor.toml --root Cargo.toml {META}"
         )
-        return [PINS, FETCH, METADATA, f"gate_surface.py --exclude  {META}", plan]
+        return [PINS, FETCH, METADATA, f"belt gate-surface --exclude  {META}", plan]
 
 
 class TestBody(TestPlanted):
@@ -297,7 +304,7 @@ class TestBody(TestPlanted):
             f"cargo metadata --format-version 1 --locked {ROOT} --features a"
             == logged[2]
         )
-        assert f"gate_surface.py --exclude gone {META}" == logged[3]
+        assert f"belt gate-surface --exclude gone {META}" == logged[3]
         assert "--exclude gone --pgrx " in logged[4]
         check = (
             f"cargo check --locked {ROOT} --features a -p plain@0.1.0 -p other@0.1.0"
@@ -372,7 +379,7 @@ class TestBody(TestPlanted):
         status, said, err = self.call()
         assert (status, said) == (1, NONE)
         unreadable = (
-            "lint:msrv: Cargo.toml: unreadable plan record from msrv_plan.py: verdict"
+            "lint:msrv: Cargo.toml: unreadable plan record from belt msrv-plan: verdict"
         )
         assert lines(unreadable) == err
         assert self.planned() == self.logged()
@@ -412,8 +419,8 @@ class TestBody(TestPlanted):
             "mise-rust": (3, 1),
             "cargo-fetch": (101, 2),
             "cargo-metadata": (101, 3),
-            "gate_surface.py": (5, 4),
-            "msrv_plan.py": (5, 5),
+            "gate-surface": (5, 4),
+            "msrv-plan": (5, 5),
         }
         for step, (code, calls) in rows.items():
             self.log.write_text("", encoding="utf-8")
@@ -426,7 +433,7 @@ class TestBody(TestPlanted):
         ("step", "code", "last"),
         [
             ("prepare", 4, "prepare 17"),
-            ("pgrx_postgres.py", 5, "belt pgrx-postgres --majors 17 <[]>"),
+            ("pgrx-postgres", 5, "belt pgrx-postgres --majors 17 <[]>"),
             (
                 "mise-aqua:theseus-rs/postgresql-binaries",
                 3,
@@ -435,7 +442,7 @@ class TestBody(TestPlanted):
         ],
     )
     def test_a_failed_registration_stops_before_any_compile(
-        self, step: object, code: object, last: object
+        self, step: str, code: int, last: str
     ) -> None:
         """The prepare's status, or the Postgres check's, and nothing compiled."""
         self.plant(PLAIN + EXTENSION, PG_CHECK)

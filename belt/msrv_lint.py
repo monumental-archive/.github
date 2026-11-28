@@ -43,7 +43,7 @@ if TYPE_CHECKING:
 
 TASK = "lint:msrv"
 NO_MISE = "mise missing — the toolchain pins this reads are mise's"
-UNREADABLE = "unreadable plan record from msrv_plan.py"
+UNREADABLE = "unreadable plan record from belt msrv-plan"
 # Fields of an msrv_plan.py record: kind, toolchain or note, own flags,
 # specs.
 FIELDS = 4
