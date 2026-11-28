@@ -579,13 +579,14 @@ SKIP_MESSAGE = [
 ]
 
 
+@pytest.mark.usefixtures("_set_up_test_planted")
 class TestPlanted:
     """A planted tree, a planted belt and the stubs, for rust_lint.py's rows."""
 
     task = "lint:rust"
     cargo = STUB_CARGO
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_planted(self, tmp_path: Path) -> None:
         """Plant the tree, the belt and the stubs."""
         tmp = tmp_path
@@ -977,7 +978,7 @@ class TestLintClippy(TestPlanted):
     def test_no_subcommand_is_a_usage_error(self) -> None:
         """No task named: status 2, the usage."""
         done = self.call()
-        self.assert_finding(done, 2, "usage: rust_lint.py lint|fix")
+        self.assert_finding(done, 2, "usage: belt rust-lint lint|fix")
 
 
 class TestFixBranches(TestPlanted):
@@ -1141,6 +1142,7 @@ class TestFixBranches(TestPlanted):
         assert "--fix" not in "\n".join(self.logged())
 
 
+@pytest.mark.usefixtures("_set_up_test_every_workspace")
 class TestEveryWorkspace(TestPlanted):
     """A tree of two workspaces: each is formatted, linted and fixed (#2004).
 
@@ -1150,7 +1152,7 @@ class TestEveryWorkspace(TestPlanted):
     formatted or linted.
     """
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_every_workspace(self) -> None:
         """Plant the fuzz crate as the tree's second root."""
         self.plant(TWO_ROOTS)

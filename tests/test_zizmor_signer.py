@@ -396,13 +396,11 @@ class TestRefusals:
             ),
         )
         for finding, said in shapes:
-            with self.subTest(finding=finding):
-                status, _, err = run([finding])
-                assert status == 1
-                assert (
-                    f"{TASK}: zizmor exited 14: the output is not zizmor's report:"
-                    f" {said}"
-                ) in err
+            status, _, err = run([finding])
+            assert status == 1
+            assert (
+                f"{TASK}: zizmor exited 14: the output is not zizmor's report: {said}"
+            ) in err
 
     def test_a_finding_with_no_primary_location_is_refused(self) -> None:
         """A remaining finding with no location at fault: refused by name."""
@@ -424,10 +422,11 @@ class TestRefusals:
         assert out == ""
 
 
+@pytest.mark.usefixtures("_set_up_test_records")
 class TestRecords:
     """What remains is recorded; zizmor runs once, its status the exit."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_records(self, tmp_path: Path) -> None:
         """Lay out the findings file and the environment a task gives."""
         self.file = Path(str(tmp_path)) / "findings" / "job.jsonl"

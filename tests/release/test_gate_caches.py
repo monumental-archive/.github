@@ -255,9 +255,8 @@ class TestReal:
         for job_id in CACHE_JOBS:
             job = workflow_yaml.jobs(parsed(real()))[job_id]
             names = job_installs.names(job)
-            with self.subTest(job=job_id):
-                assert TOOL_RESTORE.strip("'") in names
-                assert TOOL_SAVE.strip("'") in names
+            assert TOOL_RESTORE.strip("'") in names
+            assert TOOL_SAVE.strip("'") in names
 
 
 class TestPlanted:
@@ -494,9 +493,8 @@ class TestLegCaches:
             ),
         ]
         for label, (old, new), message in rows:
-            with self.subTest(row=label):
-                want: list[str] = [message]
-                assert want == leg_cache_findings(plant(old, new))
+            want: list[str] = [message]
+            assert want == leg_cache_findings(plant(old, new))
 
 
 # THE CARGO CACHES NAME THEIR COMPILER (#1864). `target` is what the
@@ -587,7 +585,7 @@ def compiler_findings(text: str, where: str = "ci.yml") -> list[str]:
         name = f"{where}: {job_id}"
         installs = [i for i, s in enumerate(steps) if s in job_installs.mise_steps(job)]
         named = [(i, s) for i, s in enumerate(steps) if field(s, "id") == "rustc"]
-        if not named or "gate_cache_key.py cargo" not in field(named[0][1], "run"):
+        if not named or "belt gate-cache-key cargo" not in field(named[0][1], "run"):
             out.append(f"{name}: no `gate_cache_key.py cargo` step with id rustc")
             continue
         at, digest_step = named[0]
@@ -623,7 +621,7 @@ FALLBACK_INPUTS = FALLBACK_END.replace(
     "format('{0}-{1}', steps.rustc.outputs.digest, steps.rustc.outputs.inputs))",
 )
 CARGO_RUN = (
-    '\'"${ORG_PYTHON}" .org-canon/mise/gate_cache_key.py cargo'
+    '\'"${ORG_PYTHON}" -I .org-canon/belt gate-cache-key cargo'
     ' --canon-ref "${ORG_CANON_REF}"\''
 )
 HANDED = (
@@ -715,13 +713,12 @@ class TestCompiler:
             (
                 "no digest step",
                 (f"{CARGO_RUN}\n\n      # unattested", "'true'\n\n      # unattested"),
-                "ci.yml: gate: no `gate_cache_key.py cargo` step with id rustc",
+                "ci.yml: gate: no `belt gate-cache-key cargo` step with id rustc",
             ),
         ]
         for label, (old, new), message in rows:
-            with self.subTest(row=label):
-                want: list[str] = [message]
-                assert want == compiler_findings(plant(old, new))
+            want: list[str] = [message]
+            assert want == compiler_findings(plant(old, new))
 
     def test_a_digest_read_before_the_install_is_named(self) -> None:
         """Planted: the step moved above mise-action reads no toolchain."""

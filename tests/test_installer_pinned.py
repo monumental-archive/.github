@@ -30,10 +30,13 @@ if TYPE_CHECKING:
 TASK = "lint:installer-pinned"
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)
+
+
+pytestmark = pytest.mark.usefixtures("_task")
 
 
 BELT = hermetic.MISE
@@ -76,10 +79,11 @@ def red(*short: str) -> list[str]:
     ]
 
 
+@pytest.mark.usefixtures("_set_up_test_pinned")
 class TestPinned:
     """Planted workflows; the installer pin's verdict on them."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_pinned(self, tmp_path: Path) -> None:
         """Plant an empty workflows directory."""
         self.tree = tmp_path
@@ -166,12 +170,11 @@ class TestPinned:
             "step after a hash": "x: 1 # uses: jdx/mise-action@v3\n",
         }
         for row, text in rows.items():
-            with self.subTest(row=row):
-                rel = self.plant("wf.yml", text)
-                done = self.helper(rel)
-                same(done.returncode, 0, done.stderr)
-                same(done.stdout.splitlines(), OK)
-                same(done.stderr, "")
+            rel = self.plant("wf.yml", text)
+            done = self.helper(rel)
+            same(done.returncode, 0, done.stderr)
+            same(done.stdout.splitlines(), OK)
+            same(done.stderr, "")
 
     def test_shortfalls_are_red_with_counts(self) -> None:
         """No pin, too few, a pin in prose or short: each named, in order."""

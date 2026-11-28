@@ -178,10 +178,11 @@ def at(crate: str, major: int) -> str:
     return judged(crate, "--only-explicit-features", "--features", f"pg{major}")
 
 
+@pytest.mark.usefixtures("_set_up_test_planted")
 class TestPlanted:
     """A planted tree, stub PATH and belt; the rows are in the classes below."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_planted(self, tmp_path: Path) -> None:
         """Plant a tracked tree, a stub PATH and a belt with stub provisioning."""
         self.tmp = tmp_path

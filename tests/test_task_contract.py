@@ -362,9 +362,8 @@ class TestMutants:
         assert run.search(own) is not None
         for other in sorted(workflows.glob("*.yml")):
             if other.name != "repo-mutants.yml":
-                with self.subTest(workflow=other.name):
-                    text = other.read_text(encoding="utf-8")
-                    assert run.search(text) is None
+                text = other.read_text(encoding="utf-8")
+                assert run.search(text) is None
         stub = BELT.parent / "workflow-templates" / "mutants.yml"
         assert "/.github/workflows/repo-mutants.yml@" in stub.read_text(
             encoding="utf-8"
@@ -400,10 +399,11 @@ class TestMutants:
         assert len(named) == len(set(named))
 
 
+@pytest.mark.usefixtures("_set_up_test_selection")
 class TestSelection:
     """MUTANTS_LEG selects one leg; unset, every leg runs."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_selection(self, tmp_path: Path) -> None:
         """Plant a belt of the real body and stub legs that only say they ran."""
         tmp = tmp_path

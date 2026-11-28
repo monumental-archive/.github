@@ -191,10 +191,11 @@ def a_function(name: str, returns: str = "INT /* i32 */", args: str = "") -> str
     )
 
 
+@pytest.mark.usefixtures("_set_up_test_the_guard_arithmetic")
 class TestTheGuardArithmetic:
     """The psql guard must fit 80 columns AND stay one line (#792, #801)."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_the_guard_arithmetic(self) -> None:
         """Skip unless python3 is installed."""
         if not PYTHON:
@@ -257,6 +258,7 @@ class TestTheGuardArithmetic:
         assert script == ""
 
 
+@pytest.mark.usefixtures("_set_up_test_the_statement_decisions")
 class TestTheStatementDecisions:
     """What the diff of two generated schemas is allowed to become.
 
@@ -266,7 +268,7 @@ class TestTheStatementDecisions:
     opaque — fine while identical, underivable otherwise.
     """
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_the_statement_decisions(self) -> None:
         """Skip unless python3 is installed."""
         if not PYTHON:

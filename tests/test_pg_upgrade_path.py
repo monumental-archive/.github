@@ -188,10 +188,11 @@ class Tree:
         )
 
 
+@pytest.mark.usefixtures("_set_up_test_needs_cargo")
 class TestNeedsCargo:
     """Rows the guard answers by resolving the crate version with cargo."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_needs_cargo(self) -> None:
         """Skip the row where cargo is not on PATH."""
         if not CARGO:

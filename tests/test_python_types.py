@@ -35,10 +35,13 @@ if TYPE_CHECKING:
 TASK = "lint:python-types"
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)
+
+
+pytestmark = pytest.mark.usefixtures("_task")
 
 
 BELT = hermetic.MISE
@@ -424,14 +427,15 @@ class TestTheHelpers:
         )
         assert (done.returncode, done.stderr) == (
             2,
-            "python_roots.py: usage: python_roots.py <belt-dir> <file>...\n",
+            "python_roots.py: usage: belt python-roots <belt-dir> <file>...\n",
         )
 
 
+@pytest.mark.usefixtures("_set_up_test_the_config")
 class TestTheConfig:
     """What the delivered config makes the pinned mypy refuse."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_the_config(self) -> None:
         """Skip the row where the belt's pinned mypy is not installed."""
         if not MYPY:
@@ -538,10 +542,11 @@ class Holds(unittest.TestCase):
 """
 
 
+@pytest.mark.usefixtures("_set_up_test_the_typed_given")
 class TestTheTypedGiven:
     """The belt's `given` under the unmodified config (#1604)."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_the_typed_given(self) -> None:
         """Skip the row where the pinned mypy or the belt's Hypothesis is absent."""
         if not MYPY:

@@ -225,10 +225,11 @@ def start_helper(
     )
 
 
+@pytest.mark.usefixtures("_set_up_test_queue_head")
 class TestQueueHead:
     """Each row: a merge group, and the pull request it was queued from."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_queue_head(self, tmp_path: Path) -> None:
         """Give each row its own scratch directory."""
         self.tmp = tmp_path
@@ -515,7 +516,7 @@ class TestWorkflow:
         (run,) = [
             r for r in workflow_yaml.runs(CI) if r.path == f"jobs/gate/steps/{at}"
         ]
-        assert run.text == '"${ORG_PYTHON}" .org-canon/mise/queue_head.py'
+        assert run.text == '"${ORG_PYTHON}" -I .org-canon/belt queue-head'
         assert run.style == "single"
         env = decoded.as_object(step["env"], "env")
         for key, value in (

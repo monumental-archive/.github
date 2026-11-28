@@ -307,6 +307,7 @@ def require_engine() -> None:
         pytest.skip("cargo refreshes the lockfiles the plan declares")
 
 
+@pytest.mark.usefixtures("_set_up_test_the_changelog_contract")
 class TestTheChangelogContract:
     """Decide, from a changelog's text, whether a version has a section.
 
@@ -315,7 +316,7 @@ class TestTheChangelogContract:
     version at all.
     """
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_the_changelog_contract(self) -> None:
         """Skip unless stele and cargo are installed."""
         require_engine()
@@ -373,10 +374,11 @@ class TestTheChangelogContract:
         assert "add a helper" in written
 
 
+@pytest.mark.usefixtures("_set_up_test_the_tree_decisions")
 class TestTheTreeDecisions:
     """The decisions phase 1 step 1 still owns after stele took the rest."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_the_tree_decisions(self) -> None:
         """Skip unless stele and cargo are installed."""
         require_engine()

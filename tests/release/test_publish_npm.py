@@ -283,7 +283,7 @@ class TestMain:
         out = io.StringIO()
         with redirect_stdout(out):
             assert publish_npm.main(argv) == 2
-        assert out.getvalue() == "usage: publish_npm.py <name@version>\n"
+        assert out.getvalue() == "usage: belt publish-npm <name@version>\n"
 
     def test_the_package_reaches_run_with_the_job_s_environment(self) -> None:
         """One argument: the job's own environment and directory."""

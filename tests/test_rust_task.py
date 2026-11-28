@@ -80,10 +80,11 @@ exit "${PLANT_CARGO_STATUS:-0}"
 SHOW = 'echo "major=${PLANT_MAJOR-unset} sdk=${PLANT_SDK-unset}"; exit "${1:-0}"'
 
 
+@pytest.mark.usefixtures("_set_up_test_planted")
 class TestPlanted:
     """A planted belt, the stubs, and the row's environment."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_planted(self, tmp_path: Path) -> None:
         """Plant the belt, the stubs and the row's environment."""
         self.tmp = tmp_path
@@ -154,8 +155,7 @@ class TestBasics(TestPlanted):
         """`${spec%@*}`: the last `@` only, and a spec with none is whole."""
         rows = {"plain@0.1.0": "plain", "odd@1@2": "odd@1", "bare": "bare", "@1": ""}
         for spec, name in rows.items():
-            with self.subTest(spec=spec):
-                assert name == rust_task.name_of(spec)
+            assert name == rust_task.name_of(spec)
 
     def test_features_are_clippy_features_else_all(self) -> None:
         """CLIPPY_FEATURES split into words; --all-features unset or empty."""
@@ -244,7 +244,7 @@ class TestBeltCalls(TestPlanted):
         assert rust_task.surface(str(self.tmp / "bin" / "cargo")) == (0, "")
         want = [
             "cargo metadata --no-deps --format-version 1 --locked",
-            'gate_surface.py --exclude held <{"meta": 1}>',
+            'belt gate-surface --exclude held <{"meta": 1}>',
         ]
         assert want == self.logged()
 
@@ -253,13 +253,12 @@ class TestBeltCalls(TestPlanted):
         cargo = str(self.tmp / "bin" / "cargo")
         rows = {("0", "5"): 5, ("3", "0"): 3, ("3", "5"): 5}
         for (meta, helper), want in rows.items():
-            with self.subTest(meta=meta, helper=helper):
-                os.environ |= {
-                    "PLANT_CARGO_STATUS": meta,
-                    "PLANT_PYTHON_STATUS": helper,
-                }
-                status, _ = rust_task.surface(cargo)
-                assert want == status
+            os.environ |= {
+                "PLANT_CARGO_STATUS": meta,
+                "PLANT_PYTHON_STATUS": helper,
+            }
+            status, _ = rust_task.surface(cargo)
+            assert want == status
 
 
 class TestPgrx(TestPlanted):
@@ -295,7 +294,7 @@ class TestPgrx(TestPlanted):
         want = [
             "prepare 16,17",
             "mise ls aqua:theseus-rs/postgresql-binaries --json",
-            "pgrx_postgres.py --majors 16,17 <[installed]>",
+            "belt pgrx-postgres --majors 16,17 <[installed]>",
         ]
         assert want == self.logged()
 
@@ -309,13 +308,12 @@ class TestPgrx(TestPlanted):
         """pgrx_postgres.py's status first, as pipefail reads the pipe."""
         rows = {("0", "5"): 5, ("3", "0"): 3, ("3", "5"): 5}
         for (listing, check), want in rows.items():
-            with self.subTest(listing=listing, check=check):
-                os.environ |= {
-                    "PLANT_MISE_STATUS": listing,
-                    "PLANT_PYTHON_STATUS": check,
-                }
-                status, _ = rust_task.register("17")
-                assert want == status
+            os.environ |= {
+                "PLANT_MISE_STATUS": listing,
+                "PLANT_PYTHON_STATUS": check,
+            }
+            status, _ = rust_task.register("17")
+            assert want == status
 
     def test_a_compile_runs_at_its_major_with_what_was_prepared(self) -> None:
         """org_pgrx_major given the major; the prepared variables reach it."""

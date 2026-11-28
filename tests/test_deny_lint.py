@@ -163,10 +163,11 @@ def top_only() -> list[str]:
     return [lint_call("Cargo.toml")]
 
 
+@pytest.mark.usefixtures("_set_up_test_planted")
 class TestPlanted:
     """A two-root tree, the stubs and the tools, per row."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_planted(self, tmp_path: Path) -> None:
         """Plant the stubs and the tools; the tree is planted per row."""
         self.tmp = tmp_path

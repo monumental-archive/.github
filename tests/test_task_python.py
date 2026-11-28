@@ -183,18 +183,18 @@ class TestTaskBodiesStartHelpersUnderTheBeltsPython:
         """Planted: the shape every belt task had before #1582."""
         text = (
             "[tasks.\"lint:x\"]\nrun = '''\n"
-            'python3 "${ORG_BELT_DIR}/gate_surface.py" --exclude ""\n'
-            'plan=$(python3 "${ORG_BELT_DIR}/msrv_plan.py" \\\n  --x y)\n'
+            'python3 -I "${ORG_BELT_ROOT}/belt" gate-surface --exclude ""\n'
+            'plan=$(python3 -I "${ORG_BELT_ROOT}/belt" msrv-plan \\\n  --x y)\n'
             "'''\n"
         )
         want: list[str] = [
             (
-                "mise/config.toml lint:x: starts gate_surface.py with the"
+                "mise/config.toml lint:x: starts belt gate-surface with the"
                 f" repository's python3; run it as {GUARDED} gate_surface.py"
                 " (#1582)"
             ),
             (
-                "mise/config.toml lint:x: starts msrv_plan.py with the"
+                "mise/config.toml lint:x: starts belt msrv-plan with the"
                 f" repository's python3; run it as {GUARDED} msrv_plan.py"
                 " (#1582)"
             ),
@@ -213,7 +213,7 @@ class TestTaskBodiesStartHelpersUnderTheBeltsPython:
         )
         want: list[str] = [
             (
-                "mise/config.toml lint:deny: starts deny_skips.py with the"
+                "mise/config.toml lint:deny: starts belt deny-skips with the"
                 f" repository's python3; run it as {GUARDED} deny_skips.py"
                 " (#1582)"
             )
@@ -228,7 +228,7 @@ class TestTaskBodiesStartHelpersUnderTheBeltsPython:
         )
         want: list[str] = [
             (
-                "mise/config.toml lint:y: starts subject_budget.py by its own"
+                "mise/config.toml lint:y: starts belt subject-budget by its own"
                 f" first line; run it as {GUARDED} subject_budget.py (#1582)"
             )
         ]
@@ -241,7 +241,7 @@ class TestTaskBodiesStartHelpersUnderTheBeltsPython:
             f'{GUARDED} "${{ORG_BELT_DIR}}/gate_surface.py" --helper registry.py\n'
             "actual=$(python3 -c 'import sys; print(sys.version)')\n"
             "python3 caller-build.py\n"
-            "# python3 mise/registry.py\n"
+            "# python3 -I belt registry\n"
             "'''\n"
         )
         none: list[str] = []
@@ -277,10 +277,11 @@ def belt_version() -> str:
 STUB = '#!/bin/sh\ncat > /dev/null\necho "{who} $*"\n'
 
 
+@pytest.mark.usefixtures("_set_up_test_a_scratch_repository_pinning_its_own_python")
 class TestAScratchRepositoryPinningItsOwnPython:
     """The real belt under a real mise, in a repository that pins Python."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_a_scratch_repository_pinning_its_own_python(
         self, tmp_path: Path
     ) -> None:

@@ -85,10 +85,11 @@ def write(cwd: Path, name: str) -> None:
     (cwd / name).write_text(f"{name}\n", encoding="utf-8")
 
 
+@pytest.mark.usefixtures("_set_up_test_pre_push_gate")
 class TestPrePushGate:
     """Every push runs the gate exactly once; none is skipped."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_pre_push_gate(self, tmp_path: Path) -> None:
         """Build the canon remote, a seeded consumer remote and a clone."""
         if LEFTHOOK is None or GIT is None:

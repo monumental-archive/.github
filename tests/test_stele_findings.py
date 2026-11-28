@@ -113,10 +113,11 @@ def same[T](got: T, want: T, msg: str = "") -> None:
     assert got == want, msg or None
 
 
+@pytest.mark.usefixtures("_set_up_test_adapter")
 class TestAdapter:
     """The adapter over a stub stele."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_adapter(self, tmp_path: Path) -> None:
         """Lay out a stub stele, its log, and the findings file."""
         self.dir = Path(str(tmp_path))
@@ -294,7 +295,7 @@ class TestAdapter:
         """Arguments that name no assertion: usage, exit 1, stele not run."""
         done = self.run_adapter(report("PASS"), 0, "inventory")
         same(done.returncode, 1, done.stderr)
-        assert "usage: stele_findings.py assert <target>" in done.stderr
+        assert "usage: belt stele-findings assert <target>" in done.stderr
         assert not self.log.exists()
 
     def test_no_stele_is_refused_by_name(self) -> None:

@@ -294,10 +294,9 @@ class TestReaders:
             ("as_int", decoded.as_int, True, "the doc is not an integer"),
         ]
         for name, reader, value, message in rows:
-            with self.subTest(reader=name, value=value):
-                with pytest.raises(decoded.UndecodableError) as caught:
-                    reader(value, "the doc")
-                assert message == str(caught.value)
+            with pytest.raises(decoded.UndecodableError) as caught:
+                reader(value, "the doc")
+            assert message == str(caught.value)
 
     def test_each_raising_reader_returns_its_kind(self) -> None:
         """The right kind comes back as it went in."""

@@ -120,10 +120,11 @@ def filled(ext: str, version: str, xy: str, num: str) -> str:
     return block + "\n\n"
 
 
+@pytest.mark.usefixtures("_set_up_test_floor_block")
 class TestFloorBlock:
     """floor.sh against an extension directory as the package lays it out."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_floor_block(self, tmp_path: Path) -> None:
         """Lay out a control, the install script and the upgrade scripts."""
         self.extdir = Path(str(tmp_path))
@@ -163,11 +164,9 @@ class TestFloorBlock:
             "demo_ext--1.0.0--1.2.0.sql",
             "demo_ext--1.1.0--1.2.0.sql",
         ):
-            with self.subTest(script=script):
-                assert block + GENERATED == (self.extdir / script).read_text()
+            assert block + GENERATED == (self.extdir / script).read_text()
         for script in ("demo_ext--1.0.0--1.1.0.sql", "demo_ext--1.1.0.sql"):
-            with self.subTest(untouched=script):
-                assert (self.extdir / script).read_text() == GENERATED
+            assert (self.extdir / script).read_text() == GENERATED
 
     def test_the_filled_block_names_the_floor(self) -> None:
         """No placeholder survives, and the number and X.Y are the build's."""
@@ -182,17 +181,16 @@ class TestFloorBlock:
         """The dollar-quote tag must be one no generated script uses."""
         rows = ("demo_ext--1.2.0.sql", "demo_ext--1.1.0--1.2.0.sql")
         for script in rows:
-            with self.subTest(script=script):
-                self.setUp()
-                planted = "SELECT $pgrx_floor$ x $pgrx_floor$;\n"
-                (self.extdir / script).write_text(planted)
-                result = self.floor()
-                assert result.returncode == 1
-                assert (
-                    f"::error::floor.sh: {script} already uses the pgrx_floor tag\n"
-                    == result.stderr
-                )
-                assert planted == (self.extdir / script).read_text()
+            self.setUp()
+            planted = "SELECT $pgrx_floor$ x $pgrx_floor$;\n"
+            (self.extdir / script).write_text(planted)
+            result = self.floor()
+            assert result.returncode == 1
+            assert (
+                f"::error::floor.sh: {script} already uses the pgrx_floor tag\n"
+                == result.stderr
+            )
+            assert planted == (self.extdir / script).read_text()
 
     def test_no_script_for_the_version_is_not_an_error(self) -> None:
         """A control whose version has no script yet leaves the tree alone."""
@@ -280,12 +278,13 @@ def release(tag: str, *assets: str, draft: bool = False) -> dict[str, object]:
     }
 
 
+@pytest.mark.usefixtures("_set_up_test_previous_release")
 class TestPreviousRelease:
     """The rows share one directory: a stub gh, a crate, a log."""
 
     CRATE = "crates/demo-ext"
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_previous_release(self, tmp_path: Path) -> None:
         """Put a stub gh first on PATH and a crate at CRATE."""
         if not JQ:
@@ -472,16 +471,15 @@ class TestPreviousTarball(TestPreviousRelease):
         """No release, none of this extension, or this version: said why."""
         rerun = release("v1.2.0", "demo_ext-1.2.0-pg18-linux-arm64.tar.gz")
         for releases in ([], [release("release-1")], [rerun]):
-            with self.subTest(releases=releases):
-                self.forge(releases)
-                self.graph("demo_ext--1.0.0--1.1.0.sql")
-                result = self.fetch()
-                assert result.returncode == 0
-                assert result.stdout == ""
-                assert (
-                    result.stderr
-                    == "::notice::no previous release; upgrade execution skipped\n"
-                )
+            self.forge(releases)
+            self.graph("demo_ext--1.0.0--1.1.0.sql")
+            result = self.fetch()
+            assert result.returncode == 0
+            assert result.stdout == ""
+            assert (
+                result.stderr
+                == "::notice::no previous release; upgrade execution skipped\n"
+            )
 
     def test_no_tarball_for_this_cell_skips(self) -> None:
         """The predecessor shipped no tarball of this pg and arch."""
@@ -652,6 +650,7 @@ class TestOnePredecessor(TestPreviousRelease):
         ) == self.gh_calls()[1]
 
 
+@pytest.mark.usefixtures("_set_up_test_older_line")
 class TestOlderLine(TestPreviousRelease):
     """The predecessor is LOWER than the version under release (#1592).
 
@@ -660,7 +659,7 @@ class TestOlderLine(TestPreviousRelease):
     A release on the newer line, 1.3.1, upgrades from 1.3.0.
     """
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_older_line(self) -> None:
         """Publish 1.2.4 and 1.3.0, each on its own `v` release."""
         self.forge(
@@ -777,10 +776,11 @@ CONTAINER_STUBS = {
 }
 
 
+@pytest.mark.usefixtures("_set_up_test_container_scripts")
 class TestContainerScripts:
     """The rows share the stub functions and a call log."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_container_scripts(self, tmp_path: Path) -> None:
         """Stub functions; PG 18, demo_ext, 1.1.0 to 1.2.0."""
         self.calls = Path(str(tmp_path)) / "calls"
@@ -1011,12 +1011,13 @@ SHIMS = {
 }
 
 
+@pytest.mark.usefixtures("_set_up_test_debug_split")
 class TestDebugSplit:
     """debug-split.sh over pkgroot/usr/lib/postgresql/18/lib/demo_ext.so."""
 
     REL = "usr/lib/postgresql/18/lib/demo_ext.so"
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_debug_split(self, tmp_path: Path) -> None:
         """Build a package root holding one real library with .dep-v0."""
         if not elf_tools_present():
@@ -1120,10 +1121,11 @@ class TestDebugSplit:
         ) == result.stderr
 
 
+@pytest.mark.usefixtures("_set_up_test_glibc_floor")
 class TestGlibcFloor:
     """glibc-floor.sh over a real library, against floors either side."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_glibc_floor(self, tmp_path: Path) -> None:
         """Make an empty package root."""
         if not elf_tools_present():

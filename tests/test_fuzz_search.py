@@ -276,10 +276,11 @@ def lib(script: str, *args: str) -> str:
 NO_CALLS: list[str] = []
 
 
+@pytest.mark.usefixtures("_set_up_test_search_case")
 class TestSearchCase:
     """A planted repository, the stand-in tools and a stage, per row."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_search_case(self, tmp_path: Path) -> None:
         """Plant an empty repository and the stubs beside it."""
         self.tmp = tmp_path
@@ -571,14 +572,13 @@ class TestMeasureNeedsItsLog(TestSearchCase):
                 text=True,
                 check=False,
             )
-            with self.subTest(kind):
-                assert done.returncode == 1, done.stdout
-                assert (
-                    "fuzz-x: org_fuzz_measure_log is unset — the search sets it to"
-                    " the replay's log file before it measures"
-                ) in done.stderr
-                assert done.stdout == ""
-                assert self.log("cargo") + self.log("go") == NO_CALLS
+            assert done.returncode == 1, done.stdout
+            assert (
+                "fuzz-x: org_fuzz_measure_log is unset — the search sets it to"
+                " the replay's log file before it measures"
+            ) in done.stderr
+            assert done.stdout == ""
+            assert self.log("cargo") + self.log("go") == NO_CALLS
 
 
 class TestGoSearch(TestSearchCase):
@@ -851,10 +851,9 @@ class TestNestedModule(TestSearchCase):
         module = f"{self.tree}/tools"
         for verb in ("test -fuzz", "test -race", "test -count=1", "list -deps"):
             ran = [c for c in calls if c.split(" ", 1)[1].startswith(verb)]
-            with self.subTest(verb=verb):
-                assert ran, calls
-                for call in ran:
-                    assert module == call.split(" ", 1)[0], call
+            assert ran, calls
+            for call in ran:
+                assert module == call.split(" ", 1)[0], call
         measured = next(c for c in calls if " test -count=1 " in c)
         assert measured.endswith(" ./gen"), measured
 
@@ -930,8 +929,7 @@ class TestSelection(TestSearchCase):
         passes = [c for c in self.log("go") if " -fuzz " in f" {c} "]
         assert len(passes) == 2, passes
         for call in passes:
-            with self.subTest(call=call):
-                assert "-fuzztime 150s" in call
+            assert "-fuzztime 150s" in call
         assert passes[1].startswith("test -race"), passes
         assert "last new coverage at 3s of 150s" in result.stdout
 
@@ -949,8 +947,7 @@ class TestSelection(TestSearchCase):
         passes = [c for c in self.log("go") if " -fuzz " in f" {c} "]
         assert passes
         for call in passes:
-            with self.subTest(call=call):
-                assert "-fuzztime 900s" in call
+            assert "-fuzztime 900s" in call
 
 
 class TestRunLength:
@@ -1053,11 +1050,10 @@ class TestHandover:
             [decoded.as_str(s.get("name"), "name") for s in uploads],
         )
         for upload in uploads:
-            with self.subTest(upload=upload.get("name")):
-                assert (
-                    upload["if"]
-                    == "${{ !cancelled() && steps.kept.outputs.staged == 'true' }}"
-                )
+            assert (
+                upload["if"]
+                == "${{ !cancelled() && steps.kept.outputs.staged == 'true' }}"
+            )
 
     def test_the_fuzz_job_hands_nothing_on_through_job_outputs(self) -> None:
         """A matrix's job outputs are last-writer-wins, so the job has none."""
@@ -1161,9 +1157,8 @@ class TestOneRunnerPerTarget:
                 decoded.as_str(decoded.as_object(e, "schedule")["cron"], "cron")
                 for e in decoded.as_array(on["schedule"], "schedule")
             ]
-            with self.subTest(stub=path.name):
-                assert len(crons) == 1, crons
-                assert re.search(r"^[0-9]+ [0-9]+ \* \* \*$", crons[0])
+            assert len(crons) == 1, crons
+            assert re.search(r"^[0-9]+ [0-9]+ \* \* \*$", crons[0])
 
     def test_each_target_uploads_its_own_artifact_and_propose_takes_all(self) -> None:
         """Upload by kind and target; propose downloads every one into one tree."""

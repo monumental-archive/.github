@@ -351,7 +351,9 @@ class TestScript:
         assert (done.returncode, done.stdout, done.stderr) == (
             2,
             "",
-            ("python_properties.py: usage: python_properties.py gate|audit FILE...\n"),
+            (
+                "python_properties.py: usage: belt python-properties gate|audit FILE...\n"
+            ),
         )
 
 
@@ -621,28 +623,25 @@ class TestWorkflowShape:
             "repo-deep-tests.yml": "needs.python-properties-seed.outputs.seed",
         }
         for workflow, seed in seeds.items():
-            with self.subTest(workflow=workflow):
-                path = CANON / ".github" / "workflows" / workflow
-                jobs = workflow_yaml.jobs(workflow_yaml.document(path))
-                job = jobs["python-properties"]
-                assert isinstance(job.get("timeout-minutes"), int)
-                strategy = decoded.as_object(job["strategy"], "strategy")
-                matrix = decoded.as_object(strategy["matrix"], "matrix")
-                planned = "needs.python-properties-seed.outputs"
-                assert (
-                    f"${{{{ fromJSON({planned}.python-shards) }}}}" == matrix["shard"]
-                )
-                env = {
-                    k: v
-                    for scope in (job, *workflow_yaml.steps(job))
-                    for k, v in decoded.as_object(scope.get("env") or {}, "env").items()
-                }
-                assert (
-                    f"${{{{ matrix.shard }}}}/${{{{ {planned}.python-of }}}}"
-                    == env["ORG_SHARD"]
-                )
-                assert f"${{{{ {seed} }}}}" == env["ORG_PROPERTY_SEED"]
-                planner = jobs["python-properties-seed"]
-                outputs = decoded.as_object(planner["outputs"], "outputs")
-                for name in ("python-shards", "python-of"):
-                    assert f"${{{{ steps.shards.outputs.{name} }}}}" == outputs[name]
+            path = CANON / ".github" / "workflows" / workflow
+            jobs = workflow_yaml.jobs(workflow_yaml.document(path))
+            job = jobs["python-properties"]
+            assert isinstance(job.get("timeout-minutes"), int)
+            strategy = decoded.as_object(job["strategy"], "strategy")
+            matrix = decoded.as_object(strategy["matrix"], "matrix")
+            planned = "needs.python-properties-seed.outputs"
+            assert f"${{{{ fromJSON({planned}.python-shards) }}}}" == matrix["shard"]
+            env = {
+                k: v
+                for scope in (job, *workflow_yaml.steps(job))
+                for k, v in decoded.as_object(scope.get("env") or {}, "env").items()
+            }
+            assert (
+                f"${{{{ matrix.shard }}}}/${{{{ {planned}.python-of }}}}"
+                == env["ORG_SHARD"]
+            )
+            assert f"${{{{ {seed} }}}}" == env["ORG_PROPERTY_SEED"]
+            planner = jobs["python-properties-seed"]
+            outputs = decoded.as_object(planner["outputs"], "outputs")
+            for name in ("python-shards", "python-of"):
+                assert f"${{{{ steps.shards.outputs.{name} }}}}" == outputs[name]

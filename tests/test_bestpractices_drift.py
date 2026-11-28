@@ -397,10 +397,11 @@ class TestRed:
         )
 
 
+@pytest.mark.usefixtures("_set_up_test_helper")
 class TestHelper:
     """The helper's pieces, in process."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_helper(self) -> None:
         """Run as the task does, recording no finding (#1934)."""
         self.enterContext(hermetic.as_task("audit:bestpractices"))

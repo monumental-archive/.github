@@ -69,10 +69,11 @@ def plant_canon(tree: Path, version: str) -> Path:
     return tree
 
 
+@pytest.mark.usefixtures("_set_up_test_the_mise_is_current")
 class TestTheMiseIsCurrent:
     """Each row: this machine's mise version, and the verdict."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_the_mise_is_current(self, tmp_path: Path) -> None:
         """Plant a canon tree pinning CI's mise and an empty repository."""
         self.tmp = tmp_path

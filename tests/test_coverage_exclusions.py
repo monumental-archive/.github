@@ -30,10 +30,13 @@ if TYPE_CHECKING:
 TASK = "lint:coverage-exclusions"
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)
+
+
+pytestmark = pytest.mark.usefixtures("_task")
 
 
 _HERE = hermetic.MISE
@@ -278,7 +281,7 @@ class TestMissingSibling:
         assert r.returncode != 0
         assert (
             r.stderr
-            == "lint:bash-portability: belt_shell.py did not arrive beside this file\n"
+            == "lint:bash-portability: belt belt-shell did not arrive beside this file\n"
         )
 
     def test_publish_crates_without_crates_index(self) -> None:

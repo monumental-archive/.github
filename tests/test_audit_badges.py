@@ -144,10 +144,11 @@ def bare_curls(source: str) -> list[str]:
     return found
 
 
+@pytest.mark.usefixtures("_set_up_test_planted")
 class TestPlanted:
     """A planted canon and org, alpha then beta, each wearing one shield."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_planted(self, tmp_path: Path) -> None:
         """Plant the canon tree, the floors and the stub tools."""
         tmp = tmp_path
@@ -303,10 +304,11 @@ def entry(repo: str, **fields: object) -> str:
     return json.dumps(bound | fields)
 
 
+@pytest.mark.usefixtures("_set_up_test_best_practices_read")
 class TestBestPracticesRead(TestPlanted):
     """The Best Practices badge leg, asked through `ask` (#1633)."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_best_practices_read(self) -> None:
         """Wear the passing badge, whose id the stub reads as the repo."""
         self.env["SHIELD"] = "https://www.bestpractices.dev/projects/@REPO@/badge"
@@ -364,10 +366,11 @@ class TestBestPracticesRead(TestPlanted):
             )
 
 
+@pytest.mark.usefixtures("_set_up_test_baseline_read")
 class TestBaselineRead(TestPlanted):
     """The OSPS Baseline leg, asked through `ask` (#1633)."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_baseline_read(self) -> None:
         """Wear the Baseline shield on the same entry."""
         self.env["SHIELD"] = "https://www.bestpractices.dev/projects/@REPO@/baseline"
@@ -407,10 +410,11 @@ class TestBaselineRead(TestPlanted):
         )
 
 
+@pytest.mark.usefixtures("_set_up_test_level_shield_read")
 class TestLevelShieldRead(TestPlanted):
     """The level shield's published document, asked through `ask` (#1633)."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_level_shield_read(self) -> None:
         """Wear a shields endpoint over a document named for the repo."""
         self.env["SHIELD"] = (
@@ -703,6 +707,7 @@ def both(said: str) -> str:
     return f"{DEFECTS}alpha{said} beta{said.replace('alpha', 'beta')}"
 
 
+@pytest.mark.usefixtures("_set_up_test_codecov_read")
 class TestCodecovRead(TestPlanted):
     """One question to Codecov, its branch route (#1668).
 
@@ -710,7 +715,7 @@ class TestCodecovRead(TestPlanted):
     at `abc1234`, committed at HEAD_AT (now, unless a row says).
     """
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_codecov_read(self) -> None:
         """Wear the Codecov shield."""
         self.env["SHIELD"] = CODECOV

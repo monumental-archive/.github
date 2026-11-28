@@ -96,6 +96,7 @@ def run(
     )
 
 
+@pytest.mark.usefixtures("_set_up_test_hook_fixture")
 class TestHookFixture:
     """A bare canon with two commits, a consumer pinning the first, a cache."""
 
@@ -103,7 +104,7 @@ class TestHookFixture:
     # is the commit's number. Empty: the rows read the file's text.
     belt_tasks = ""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_hook_fixture(self, tmp_path: Path) -> None:
         """Plant the canon with two commits, a consumer, HOME and cache."""
         self.tmp = tmp_path
@@ -495,6 +496,7 @@ HOOK_TASKS = "".join(
 )
 
 
+@pytest.mark.usefixtures("_set_up_test_every_hook_links_first")
 class TestEveryHookLinksFirst(TestHookFixture):
     """Each row: a hook of the real hook file, run by lefthook in a worktree (#1988).
 
@@ -506,7 +508,7 @@ class TestEveryHookLinksFirst(TestHookFixture):
 
     belt_tasks = HOOK_TASKS
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_every_hook_links_first(self) -> None:
         """Plant the cache of A and B, the consumer on A, and the worktree."""
         if LEFTHOOK is None:

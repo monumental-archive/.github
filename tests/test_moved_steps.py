@@ -52,12 +52,13 @@ def run(
     )
 
 
+@pytest.mark.usefixtures("_set_up_test_vex_decisions")
 class TestVexDecisions:
     """mise/vex-decisions.sh, in a planted git tree."""
 
     SCRIPT = HERE / "vex-decisions.sh"
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_vex_decisions(self, tmp_path: Path) -> None:
         """Make a repository with no decisions yet."""
         self.tree = Path(str(tmp_path))
@@ -186,10 +187,11 @@ def plant(root: Path, *, policy: bool = True) -> Path:
     return root / ".github" / "actions" / "source-attest" / "resolve.sh"
 
 
+@pytest.mark.usefixtures("_set_up_test_source_attest_resolve")
 class TestSourceAttestResolve:
     """.github/actions/source-attest/resolve.sh, in a planted canon tree."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_source_attest_resolve(self, tmp_path: Path) -> None:
         """Make a scratch directory, a runner temp and a GITHUB_ENV."""
         self.tmp = Path(os.path.realpath(str(tmp_path)))
@@ -277,10 +279,11 @@ RECORDER = """#!/usr/bin/env bash
 NO_STELE = "::error::{}: stele is not on the runner — it is a belt tool\n"
 
 
+@pytest.mark.usefixtures("_set_up_test_stubbed")
 class TestStubbed:
     """A scratch work directory, a stub bin, and a script run in it."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_stubbed(self, tmp_path: Path) -> None:
         """Make the work directory, the stub bin and the log."""
         self.tmp = Path(os.path.realpath(str(tmp_path)))

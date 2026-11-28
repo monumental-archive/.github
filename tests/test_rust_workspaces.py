@@ -248,13 +248,12 @@ class TestRoots:
         """No subcommand, or another: exit 2 and the usage line."""
         argvs: list[list[str]] = [[], ["root"], ["roots", "x"]]
         for argv in argvs:
-            with self.subTest(argv=argv):
-                done = hermetic.call(functools.partial(rust_workspaces.main, argv))
-                assert (done.returncode, done.stdout, done.stderr) == (
-                    2,
-                    "",
-                    "usage: rust_workspaces.py roots\n",
-                )
+            done = hermetic.call(functools.partial(rust_workspaces.main, argv))
+            assert (done.returncode, done.stdout, done.stderr) == (
+                2,
+                "",
+                "usage: belt rust-workspaces roots\n",
+            )
 
 
 class TestReader:
@@ -334,8 +333,7 @@ class TestFuzzing:
                 {encoded: "-D\x1fwarnings\x1f--cfg\x1ffuzzing"},
             ),
         ):
-            with self.subTest(environ=environ):
-                assert want == rust_workspaces.rustflags(marked, environ)
+            assert want == rust_workspaces.rustflags(marked, environ)
 
     def test_an_unmarked_root_adds_nothing(self) -> None:
         """No marker: no variable is named, whatever is already set."""

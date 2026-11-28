@@ -409,11 +409,10 @@ class TestDerivation:
             "mise/audit-legs.toml: repo-records.gone names no job of repo-records.yml",
             "mise/audit-legs.toml: nowhere is no subject workflow",
             "repo-records.yml: report does not need applies",
-            "repo-records.yml: applies runs no `audit_legs.py repo-records`",
+            "repo-records.yml: applies runs no `belt audit-legs repo-records`",
             "repo-public-api.yml: rows semver are conditional; no `applies` job",
         ):
-            with self.subTest(line=line):
-                assert line in got
+            assert line in got
         del table["repo-records"]
         assert "repo-records.yml has no table in mise/audit-legs.toml" in drift(table)
 
@@ -736,15 +735,13 @@ class TestHelper:
         got = every(git_tree({}))
         for workflow, rows in audit_legs.load_table().items():
             for job, row in rows.items():
-                with self.subTest(workflow=workflow, job=job):
-                    assert (row.when is None) == got[job]
+                assert (row.when is None) == got[job]
 
     def test_a_rust_only_tree_shaped_like_edtf(self) -> None:
         """The jobs edtf ran for languages it lacks come out false."""
         got = every(git_tree(EDTF))
         for job in NOT_EDTF:
-            with self.subTest(job=job):
-                assert not got[job]
+            assert not got[job]
         for job in (
             "deny",
             "fuzz",
@@ -755,8 +752,7 @@ class TestHelper:
             "lock-arch",
             "bestpractices",
         ):
-            with self.subTest(job=job):
-                assert got[job]
+            assert got[job]
 
     @pytest.mark.parametrize(
         "job,want",
@@ -810,10 +806,9 @@ class TestHelper:
             (GO, "applies: go.mod is tracked"),
         ):
             root = git_tree(files)
-            with self.subTest(want=want):
-                rows = audit_legs.load_table()["repo-deep-tests"]
-                reasons = audit_legs.applies(rows, root, gate_tools.tracked_files(root))
-                assert want == reasons["coverage-go-branches"]
+            rows = audit_legs.load_table()["repo-deep-tests"]
+            reasons = audit_legs.applies(rows, root, gate_tools.tracked_files(root))
+            assert want == reasons["coverage-go-branches"]
 
 
 PROPTEST_LOCK = 'version = 4\n\n[[package]]\nname = "proptest"\nversion = "1.12.0"\n'
@@ -935,9 +930,8 @@ class TestFuzzTargets:
         ]
         for files in trees:
             got = raw_outputs(git_tree(files), "repo-deep-tests")
-            with self.subTest(files=" ".join(sorted(files))):
-                assert got["fuzz-targets"] == "[]"
-                assert got["fuzz"] == "false"
+            assert got["fuzz-targets"] == "[]"
+            assert got["fuzz"] == "false"
 
     def test_a_fuzz_crate_with_no_bin_is_skipped_by_name(self) -> None:
         """fuzz/ applies by the table, but no [[bin]] means no runner."""
@@ -967,11 +961,10 @@ class TestFuzzTargets:
                 contextlib.redirect_stdout(io.StringIO()),
             ):
                 status = audit_legs.main(["--root", str(root), "repo-deep-tests"])
-            with self.subTest(text=text):
-                assert status == 1
-                assert err.getvalue().startswith(f"::error::{STEP}: {message}"), (
-                    err.getvalue()
-                )
+            assert status == 1
+            assert err.getvalue().startswith(f"::error::{STEP}: {message}"), (
+                err.getvalue()
+            )
 
     def test_the_list_names_every_target_and_its_leg(self) -> None:
         """Every Rust and Go target of one tree, each with its leg name."""
@@ -1056,11 +1049,10 @@ class TestRefusals:
             ('[w.x]\nfor = ["a"]\n', "w.x carries for: a row has `when` and `floor`"),
         ]
         for text, message in rows:
-            with self.subTest(text=text):
-                status, err, table = self.run_main(text)
-                assert status == 1
-                assert err.startswith(f"::error::{STEP}: {table}: "), err
-                assert message in err
+            status, err, table = self.run_main(text)
+            assert status == 1
+            assert err.startswith(f"::error::{STEP}: {table}: "), err
+            assert message in err
 
     def test_an_unknown_workflow(self) -> None:
         """A workflow the table has no section for is refused, not run."""

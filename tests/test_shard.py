@@ -145,10 +145,11 @@ SUITE = {
 }
 
 
+@pytest.mark.usefixtures("_set_up_test_guarded")
 class TestGuarded:
     """The belt's test runner takes a share, run for real at 1/2 and 2/2."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_guarded(self, tmp_path: Path) -> None:
         """Plant five test files and a reports directory."""
         self.root = Path(str(tmp_path))

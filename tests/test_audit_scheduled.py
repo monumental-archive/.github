@@ -56,10 +56,11 @@ def body() -> str:
     return decoded.as_str(task["run"], "lint:audit-scheduled.run")
 
 
+@pytest.mark.usefixtures("_set_up_test_scheduled")
 class TestScheduled:
     """A planted belt config and workflows; the lint's verdict on them."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_scheduled(self, tmp_path: Path) -> None:
         """Plant a tree with two belt audit tasks and a stub belt."""
         self.tmp = tmp_path
@@ -149,10 +150,11 @@ class TestScheduled:
         assert done.stderr.splitlines() == expected
 
 
+@pytest.mark.usefixtures("_set_up_test_own_tasks")
 class TestOwnTasks:
     """The repository half: its own audit tasks need a collecting caller."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_own_tasks(self, tmp_path: Path) -> None:
         """Plant a consumer tree (no belt config) defining one audit task."""
         self.tmp = tmp_path

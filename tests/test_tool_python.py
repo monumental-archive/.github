@@ -44,10 +44,11 @@ def refusal(have: str, want: str) -> str:
     )
 
 
+@pytest.mark.usefixtures("_set_up_test_tool_python")
 class TestToolPython:
     """One row per branch of the check."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_tool_python(self, tmp_path: Path) -> None:
         """Plant a venv with its entry point, and a PATH linking to it."""
         self.tmp = tmp_path

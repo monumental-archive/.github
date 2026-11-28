@@ -60,10 +60,11 @@ for arg in "$@"; do printf '%s\\0' "${arg}"; done > "${GH_ARGS}"
 """
 
 
+@pytest.mark.usefixtures("_set_up_test_file_an_issue")
 class TestFileAnIssue:
     """Each row: the compare outcome, and the exact issue filed."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_file_an_issue(self, tmp_path: Path) -> None:
         """Give each row its own directory and stub `gh`."""
         self.tmp = tmp_path

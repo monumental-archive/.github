@@ -152,10 +152,11 @@ def body() -> str:
     return decoded.as_str(entry["run"], f"{TASK}.run")
 
 
+@pytest.mark.usefixtures("_set_up_test_planted")
 class TestPlanted:
     """The planted belt, stubs and log every in-process row runs in."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_planted(self, tmp_path: Path) -> None:
         """Plant the stubs, the surface, the plan and the belt."""
         self.tmp = tmp_path
@@ -262,7 +263,7 @@ class TestPlanted:
 
         """
         plan = (
-            "msrv_plan.py --toolchains <tmp>/toolchains.json --exclude "
+            "belt msrv-plan --toolchains <tmp>/toolchains.json --exclude "
             f" --pgrx {pgrx} --floor <belt>/rust-floor.toml --root Cargo.toml {META}"
         )
         return [PINS, FETCH, METADATA, f"gate_surface.py --exclude  {META}", plan]
@@ -328,7 +329,7 @@ class TestBody(TestPlanted):
             *self.planned("ext:17"),
             "prepare 17",
             "mise ls aqua:theseus-rs/postgresql-binaries --json",
-            "pgrx_postgres.py --majors 17 <[]>",
+            "belt pgrx-postgres --majors 17 <[]>",
             (
                 f"cargo check --locked {ROOT} --all-features"
                 " -p plain@0.1.0 -p other@0.1.0 {1.85.0}"
@@ -357,9 +358,7 @@ class TestBody(TestPlanted):
         self.env["PLANT_FAIL"] = "cargo-check"
         status, said, err = self.call()
         assert status == 101
-        failed = (
-            "msrv_plan.py --failed 1.85.0 plain@0.1.0 other@0.1.0 --root Cargo.toml <>"
-        )
+        failed = "belt msrv-plan --failed 1.85.0 plain@0.1.0 other@0.1.0 --root Cargo.toml <>"
         assert failed == self.logged()[-1]
         assert len(self.logged()) == 7
         compiling = lines("lint:msrv: compiling at 1.85.0: plain@0.1.0 other@0.1.0")
@@ -416,22 +415,21 @@ class TestBody(TestPlanted):
             "msrv_plan.py": (5, 5),
         }
         for step, (code, calls) in rows.items():
-            with self.subTest(step=step):
-                self.log.write_text("", encoding="utf-8")
-                self.env["PLANT_FAIL"] = step
-                status, said, _ = self.call()
-                assert (code, NONE) == (status, said)
-                assert self.planned()[:calls] == self.logged()
+            self.log.write_text("", encoding="utf-8")
+            self.env["PLANT_FAIL"] = step
+            status, said, _ = self.call()
+            assert (code, NONE) == (status, said)
+            assert self.planned()[:calls] == self.logged()
 
     @pytest.mark.parametrize(
         "step,code,last",
         (
             ("prepare", 4, "prepare 17"),
-            ("pgrx_postgres.py", 5, "pgrx_postgres.py --majors 17 <[]>"),
+            ("pgrx_postgres.py", 5, "belt pgrx-postgres --majors 17 <[]>"),
             (
                 "mise-aqua:theseus-rs/postgresql-binaries",
                 3,
-                "pgrx_postgres.py --majors 17 <>",
+                "belt pgrx-postgres --majors 17 <>",
             ),
         ),
     )

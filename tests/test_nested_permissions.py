@@ -31,10 +31,13 @@ if TYPE_CHECKING:
 TASK = "lint:nested-permissions"
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)
+
+
+pytestmark = pytest.mark.usefixtures("_task")
 
 
 BELT = hermetic.MISE
@@ -87,10 +90,11 @@ def red(*offenders: str) -> list[str]:
     return [head, *(f"  {o}" for o in offenders), *TAIL]
 
 
+@pytest.mark.usefixtures("_set_up_test_nested")
 class TestNested:
     """Planted workflows; the lint's verdict on them."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_nested(self, tmp_path: Path) -> None:
         """Plant an empty workflows directory."""
         self.tree = tmp_path
@@ -247,5 +251,5 @@ class TestNested:
         """No workflow named: exit 2 with the usage line."""
         done = self.helper()
         same(done.returncode, nested_permissions.EXIT_ERROR)
-        usage = "lint:nested-permissions: usage: nested_permissions.py WORKFLOW..."
+        usage = "lint:nested-permissions: usage: belt nested-permissions WORKFLOW..."
         same(done.stderr.splitlines(), [usage])

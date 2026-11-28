@@ -572,8 +572,7 @@ class TestProjects:
         done = run(GATE, files, env={"STUB_SKIP": "orphan/o.prop.test.ts"})
         assert done.returncode == 1
         for name in ("tests/stack/trig.prop.test.ts", "tests/unit/h.prop.test.ts"):
-            with self.subTest(name=name):
-                assert f"fast-check: {name}: 200 runs, seed 1336\n" in done.stdout
+            assert f"fast-check: {name}: 200 runs, seed 1336\n" in done.stdout
         assert done.stderr == (
             "test:typescript-properties: not every property file ran:\n"
             "  orphan/o.prop.test.ts: did not run, or ran no test\n"
@@ -649,8 +648,7 @@ class TestLint:
             ("src/more.ts:4", "@fast-check/worker"),
             ("src/plain.test.ts:1", "@fast-check/vitest"),
         ):
-            with self.subTest(site=site):
-                assert f"  {site}: imports {package}{suffix}" in done.stderr
+            assert f"  {site}: imports {package}{suffix}" in done.stderr
         assert "a.prop.test.ts" not in done.stderr
 
     @pytest.mark.parametrize(
@@ -703,8 +701,7 @@ class TestLint:
             ("e.prop.test.ts:4", "interruptAfterTimeLimit"),
             ("f.prop.test.ts:4", "skipAllAfterTimeLimit"),
         ):
-            with self.subTest(site=site):
-                assert f"  {site}: restates {what}{tail}" in done.stderr
+            assert f"  {site}: restates {what}{tail}" in done.stderr
         assert done.stderr.count(": restates ") == 7, done.stderr
 
     def test_a_quote_in_a_regex_hides_no_bound(self) -> None:
@@ -721,8 +718,7 @@ class TestLint:
             ("a.prop.test.ts:2", "fast-check's timeout"),
             ("a.prop.test.ts:3", "numRuns"),
         ):
-            with self.subTest(what=what):
-                assert f"  {site}: restates {what}{tail}" in done.stderr
+            assert f"  {site}: restates {what}{tail}" in done.stderr
         assert done.stderr.count(": restates ") == 3, done.stderr
 
     @pytest.mark.parametrize(
@@ -786,8 +782,7 @@ class TestMasked:
             ("{ x } }", "{ x } }"),
         )
         for text, want in rows:
-            with self.subTest(text=text):
-                assert tp.masked(text) == want
+            assert tp.masked(text) == want
 
     def test_an_unclosed_call_and_a_bare_chain_still_read(self) -> None:
         """An unclosed group runs to the end; `test.each` uncalled stops."""
@@ -847,11 +842,9 @@ class TestDocuments:
             ('{"a": 1, "a": 2}', 'duplicate key "a"'),
         )
         for text, why in rows:
-            with self.subTest(text=text):
-                assert (
-                    self.answer("verify", text)
-                    == f"no vitest JSON report at DOC ({why})\n"
-                )
+            assert (
+                self.answer("verify", text) == f"no vitest JSON report at DOC ({why})\n"
+            )
 
     def test_a_listing_of_the_wrong_shape(self) -> None:
         """The list itself, an entry, and its file."""
@@ -861,11 +854,10 @@ class TestDocuments:
             ("[{}]", "listing[0].file is not a string"),
         )
         for text, why in rows:
-            with self.subTest(text=text):
-                assert (
-                    self.answer("collected", text)
-                    == f"no readable vitest file list at DOC ({why})\n"
-                )
+            assert (
+                self.answer("collected", text)
+                == f"no readable vitest file list at DOC ({why})\n"
+            )
 
 
 class TestShares:
@@ -919,9 +911,8 @@ class TestShares:
         """Unset or 1/1: every file, as given, and no report."""
         with tempfile.TemporaryDirectory() as reports:
             for spec in ("", "1/1"):
-                with self.subTest(spec=spec):
-                    every: list[str] = list(self.FILES)
-                    assert every == self.share(spec, reports)
+                every: list[str] = list(self.FILES)
+                assert every == self.share(spec, reports)
             written: list[Path] = list(Path(reports).iterdir())
             nothing: list[Path] = []
             assert nothing == written

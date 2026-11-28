@@ -181,13 +181,14 @@ def package(
     }
 
 
+@pytest.mark.usefixtures("_set_up_test_planted")
 class TestPlanted:
     """A planted extension-shaped tree, a stub PATH and a belt."""
 
     # The majors the planted extension declares.
     declares: ClassVar[tuple[int, ...]] = tuple(MAJORS)
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_planted(self, tmp_path: Path) -> None:
         """Plant a tracked workspace with one extension and one plain crate."""
         self.tmp = Path(str(tmp_path)).resolve()
@@ -361,19 +362,18 @@ class TestMeasuredRun(TestPlanted):
         self.git("add", "-A")
         self.git("commit", "-q", "-m", "planted")
         for named in ({"ORG_COVERAGE_REPORTS": str(self.tmp / "reports")}, {}):
-            with self.subTest(named=bool(named)):
-                done, _ = self.run_pgrx(PLANT_LH="17", **named)
-                assert done.returncode == 0, done.stderr
-                assert "pgrx-pg18 94.44444444444444" in done.stdout.splitlines()
-                status = subprocess.run(
-                    [GIT, "status", "--porcelain"],
-                    cwd=self.tree,
-                    env=hermetic.env(),
-                    capture_output=True,
-                    text=True,
-                    check=True,
-                )
-                assert status.stdout == ""
+            done, _ = self.run_pgrx(PLANT_LH="17", **named)
+            assert done.returncode == 0, done.stderr
+            assert "pgrx-pg18 94.44444444444444" in done.stdout.splitlines()
+            status = subprocess.run(
+                [GIT, "status", "--porcelain"],
+                cwd=self.tree,
+                env=hermetic.env(),
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            assert status.stdout == ""
 
     def test_a_major_below_the_floor_is_red_by_name(self) -> None:
         """14 of 18 is 77.8%, under the planted floor of 80.0."""
@@ -504,15 +504,14 @@ class TestIcuPerMajor(TestPlanted):
         )
         for name, env, checked, majors in shapes:
             for floor in (False, True):
-                with self.subTest(shape=name, measured=floor):
-                    if floor:
-                        self.floor()
-                    Path(f"{self.log}.icu").unlink(missing_ok=True)
-                    done, _ = self.run_pgrx(**(parent | env))
-                    assert done.returncode == 0, done.stderr
-                    want: list[str] = [f"icu-check [{checked}]", *self.flags(*majors)]
-                    assert want == self.icu()
-                    (self.tree / ".coverage-floor").unlink(missing_ok=True)
+                if floor:
+                    self.floor()
+                Path(f"{self.log}.icu").unlink(missing_ok=True)
+                done, _ = self.run_pgrx(**(parent | env))
+                assert done.returncode == 0, done.stderr
+                want: list[str] = [f"icu-check [{checked}]", *self.flags(*majors)]
+                assert want == self.icu()
+                (self.tree / ".coverage-floor").unlink(missing_ok=True)
 
 
 class TestPlainOrRefused(TestPlanted):

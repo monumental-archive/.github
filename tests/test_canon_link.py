@@ -51,10 +51,11 @@ def excluded(gitdir: pathlib.Path) -> str:
     return "\n".join(line for line in lines.splitlines() if "org-canon" in line)
 
 
+@pytest.mark.usefixtures("_set_up_test_link_the_canon_tree")
 class TestLinkTheCanonTree:
     """Each row: where the tree resolved, and what the step did."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_link_the_canon_tree(self, tmp_path: Path) -> None:
         """Give each row a scratch root and a workspace."""
         self.tmp = tmp_path

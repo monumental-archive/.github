@@ -119,10 +119,11 @@ def task_env(task: str) -> dict[str, str]:
     return {name: decoded.as_str(value, name) for name, value in env.items()}
 
 
+@pytest.mark.usefixtures("_set_up_test_planted")
 class TestPlanted:
     """A planted git repository and the belt's tasks run in it."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_planted(self, tmp_path: Path) -> None:
         """Plant an empty repository."""
         self.tmp = tmp_path

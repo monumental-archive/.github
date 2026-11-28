@@ -176,10 +176,13 @@ class Tree:
 TASK = "coverage:check"
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)
+
+
+pytestmark = pytest.mark.usefixtures("_task")
 
 
 NO_PROBLEMS: list[str] = []
@@ -466,11 +469,10 @@ class TestParseRefusals:
             ),
         ]
         for name, text, expected in rows:
-            with self.subTest(name):
-                parsed, problems = cf.parse(text)
-                assert parsed is None
-                assert len(problems) == 1, problems
-                assert expected in problems[0]
+            parsed, problems = cf.parse(text)
+            assert parsed is None
+            assert len(problems) == 1, problems
+            assert expected in problems[0]
 
     def test_drift_names_the_derivation_and_the_remedy(self) -> None:
         """A number typed over the record, refused whole."""
@@ -1122,7 +1124,7 @@ TS_NEEDS = (
 PG_NEEDS = (
     "the plpgsql leg needs a test command run through "
     '"${ORG_BELT_DIR}/measured" and its teardown to call '
-    "plpgsql_coverage.py collect while ORG_PLPGSQL_COVERAGE is set"
+    "belt plpgsql-coverage collect while ORG_PLPGSQL_COVERAGE is set"
 )
 
 
@@ -1611,6 +1613,7 @@ def plan_step() -> str:
     return textwrap.dedent(found.group(1))
 
 
+@pytest.mark.usefixtures("_set_up_test_the_plan_feeds_the_helper")
 class TestThePlanFeedsTheHelper:
     """pgrx-plan.sh's real output, read by `planned` as the plan passes it (#1880).
 
@@ -1620,7 +1623,7 @@ class TestThePlanFeedsTheHelper:
     canon's own gate cannot reach it: the canon has no pgrx crate.
     """
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_the_plan_feeds_the_helper(self, tmp_path: Path) -> None:
         """Plant a workspace with one extension declaring pg15 to pg18."""
         self.tmp = Path(str(tmp_path)).resolve()
@@ -1756,11 +1759,10 @@ class TestFuzzLegsLeft:
             ("bare", record(PY) + planted("fuzz-", "88", "90.0")),
         ):
             fuzz = "fuzz-" if name == "bare" else MARKER
-            with self.subTest(name):
-                parsed, problems = cf.parse(text)
-                want: list[str] = [f"states {fuzz}: {LEFT}"]
-                assert parsed is None
-                assert want == problems
+            parsed, problems = cf.parse(text)
+            want: list[str] = [f"states {fuzz}: {LEFT}"]
+            assert parsed is None
+            assert want == problems
 
     def test_two_fuzz_legs_are_each_named_once(self) -> None:
         """Every leg left is named, each once, in the order stated."""

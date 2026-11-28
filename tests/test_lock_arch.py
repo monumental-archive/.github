@@ -31,8 +31,7 @@ class TestAssetArch:
             "cargo-deny-0.20.2-aarch64-apple-darwin.tar.gz": "arm64",
         }
         for asset, want in cases.items():
-            with self.subTest(asset=asset):
-                assert lock_arch.asset_arch(asset) == want
+            assert lock_arch.asset_arch(asset) == want
 
     def test_longest_token_wins(self) -> None:
         """`x86_64` must not be read as the 32-bit `x86` it contains."""
@@ -57,8 +56,7 @@ class TestPlatformFamilies:
             "windows-x64": ("windows", "x64"),
         }
         for key, want in cases.items():
-            with self.subTest(key=key):
-                assert lock_arch.platform_families(key) == want
+            assert lock_arch.platform_families(key) == want
 
     def test_unrecognised_key_is_not_evidence(self) -> None:
         """An unknown OS or a key with no architecture yields nothing."""
@@ -91,8 +89,7 @@ class TestNativeRegex:
         """The caller hands this to grep -E; it must compile."""
         for os_family in ("macos", "linux", "windows"):
             for arch in ("x64", "arm64"):
-                with self.subTest(os=os_family, arch=arch):
-                    re.compile(lock_arch.native_regex(os_family, arch))
+                re.compile(lock_arch.native_regex(os_family, arch))
 
 
 class TestReleaseSource:

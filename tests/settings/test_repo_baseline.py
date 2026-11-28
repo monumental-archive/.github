@@ -270,10 +270,11 @@ class Forge:
         return calls
 
 
+@pytest.mark.usefixtures("_set_up_test_forge_case")
 class TestForgeCase:
     """A row with a fresh clean org."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_forge_case(self, tmp_path: Path) -> None:
         """Build the clean org in a temporary directory."""
         self.forge = Forge(Path(str(tmp_path)))
@@ -550,11 +551,10 @@ class TestQueueByPlan(TestForgeCase):
     def test_a_public_repo_is_unaffected_by_the_plan(self) -> None:
         """Public repositories carry the queue whatever the plan, read or not."""
         for served in ({"login": ORG, "plan": {"name": "team"}}, {"login": ORG}):
-            with self.subTest(org=served):
-                self.forge.answer(PLAN, served)
-                done = self.forge.check()
-                assert done.returncode == 0, done.stdout + done.stderr
-                assert "no drift" in done.stdout
+            self.forge.answer(PLAN, served)
+            done = self.forge.check()
+            assert done.returncode == 0, done.stdout + done.stderr
+            assert "no drift" in done.stdout
         self.forge.no_own_rulesets(ROSTER[0])
         self.forge.plan("team")
         done = self.forge.check()

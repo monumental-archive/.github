@@ -29,10 +29,13 @@ if TYPE_CHECKING:
 TASK = "lint:audit-scheduled"
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)
+
+
+pytestmark = pytest.mark.usefixtures("_task")
 
 
 BELT = hermetic.MISE
@@ -86,10 +89,11 @@ def unscheduled(names: str) -> list[str]:
     ]
 
 
+@pytest.mark.usefixtures("_set_up_test_helper")
 class TestHelper:
     """A planted tree; the helper's verdict on it."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_helper(self, tmp_path: Path) -> None:
         """Plant an empty repository with a workflows directory.
 

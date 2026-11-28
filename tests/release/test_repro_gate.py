@@ -298,8 +298,7 @@ class TestRehearsal:
             ("pgrx_extension_image", "pgrx"),
         ):
             for side, suffix in (("FIRST", "a"), ("REBUILD", "b")):
-                with self.subTest(var=f"{side}_{var}"):
-                    assert (
-                        f"${{{{ !inputs.dry-run && '{path}-{suffix}' || '' }}}}"
-                        == env[f"{side}_{var}"]
-                    )
+                assert (
+                    f"${{{{ !inputs.dry-run && '{path}-{suffix}' || '' }}}}"
+                    == env[f"{side}_{var}"]
+                )

@@ -30,10 +30,13 @@ if TYPE_CHECKING:
 TASK = "lint:gate-stub"
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)
+
+
+pytestmark = pytest.mark.usefixtures("_task")
 
 
 BELT = hermetic.MISE
@@ -119,10 +122,11 @@ def ungrouped(files: str) -> list[str]:
     ]
 
 
+@pytest.mark.usefixtures("_set_up_test_lint")
 class TestLint:
     """Planted callers; the helper's verdict on them."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_lint(self, tmp_path: Path) -> None:
         """Plant an empty workflows directory."""
         self.tree = tmp_path
@@ -260,10 +264,9 @@ class TestLint:
 
     def test_a_bad_call_is_a_usage_error(self) -> None:
         """No canon, half a canon, or no workflow: exit 2 with the usage line."""
-        usage = "lint:gate-stub: usage: gate_stub.py OWNER/REPO WORKFLOW..."
+        usage = "lint:gate-stub: usage: belt gate-stub OWNER/REPO WORKFLOW..."
         calls: list[list[str]] = [[], [CANON], ["/repo", "x"], ["owner/", "x"]]
         for argv in calls:
-            with self.subTest(argv=argv):
-                done = self.helper(*argv)
-                same(done.returncode, gate_stub.EXIT_ERROR)
-                same(done.stderr.splitlines(), [usage])
+            done = self.helper(*argv)
+            same(done.returncode, gate_stub.EXIT_ERROR)
+            same(done.stderr.splitlines(), [usage])

@@ -106,10 +106,11 @@ def expect(*text: str) -> list[str]:
     return list(text)
 
 
+@pytest.mark.usefixtures("_set_up_test_rows")
 class TestRows:
     """The run's two checkpoints, the legs' reports, and the helper run."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_rows(self, tmp_path: Path) -> None:
         """Lay out a run that did not advance, every leg stopped by its budget."""
         self.dir = Path(str(tmp_path))
@@ -399,20 +400,19 @@ class TestDecoded(TestRows):
             "a timestamp as text": ("timestamp", "1794940328655"),
         }
         for why, (field, value) in rows.items():
-            with self.subTest(why=why):
-                self.findings.unlink(missing_ok=True)
-                doc = checkpoint()
-                if field == "next":
-                    doc["next"] = value
-                else:
-                    tree_head(doc)[field] = value
-                self.write(self.end, doc)
-                proc = self.run_helper()
-                assert proc.returncode == 1, proc.stderr
-                assert self.detail()[4] == (
-                    f"{THIS_RUN}the newest checkpoint:"
-                    " the checkpoint file could not be read"
-                )
+            self.findings.unlink(missing_ok=True)
+            doc = checkpoint()
+            if field == "next":
+                doc["next"] = value
+            else:
+                tree_head(doc)[field] = value
+            self.write(self.end, doc)
+            proc = self.run_helper()
+            assert proc.returncode == 1, proc.stderr
+            assert self.detail()[4] == (
+                f"{THIS_RUN}the newest checkpoint:"
+                " the checkpoint file could not be read"
+            )
 
     def test_next_infinity_is_unreadable(self) -> None:
         """A `next` of Infinity: named unreadable, never a traceback (#1557)."""

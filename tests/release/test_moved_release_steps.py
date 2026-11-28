@@ -56,10 +56,11 @@ def strings(*items: str) -> list[str]:
     return list(items)
 
 
+@pytest.mark.usefixtures("_set_up_test_script")
 class TestScript:
     """A scratch directory, stub tools, and the script run in it."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_script(self, tmp_path: Path) -> None:
         """Make the scratch directory and its stub bin."""
         self.root = Path(str(tmp_path))

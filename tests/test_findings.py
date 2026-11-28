@@ -128,10 +128,11 @@ def writers() -> list[Writer]:
     return out
 
 
+@pytest.mark.usefixtures("_set_up_test_finding_rows")
 class TestFindingRows:
     """What each writer prints and records."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_finding_rows(self, tmp_path: Path) -> None:
         """Give each row a directory of its own."""
         self.root = Path(str(tmp_path))
@@ -365,21 +366,20 @@ class TestFindingRows:
         for writer in writers():
             name = f"reporter{writer.suffix}"
             for case, env in cases.items():
-                with self.subTest(writer=writer.name, case=case):
-                    self.file.unlink(missing_ok=True)
-                    planted = dict(env)
-                    if case == "no job":
-                        planted["RUNNER_TEMP"] = str(self.root)
-                    done = writer.run(
-                        self.root,
-                        "plain",
-                        "s",
-                        "m",
-                        ORG_FINDINGS=str(self.file),
-                        **planted,
-                    )
-                    assert done.stderr == f"{name}: s: m\n"
-                    assert self.records()[0]["task"] == name
+                self.file.unlink(missing_ok=True)
+                planted = dict(env)
+                if case == "no job":
+                    planted["RUNNER_TEMP"] = str(self.root)
+                done = writer.run(
+                    self.root,
+                    "plain",
+                    "s",
+                    "m",
+                    ORG_FINDINGS=str(self.file),
+                    **planted,
+                )
+                assert done.stderr == f"{name}: s: m\n"
+                assert self.records()[0]["task"] == name
 
     @pytest.mark.parametrize("writer", writers())
     def test_findings_append(self, writer: object) -> None:
@@ -425,10 +425,11 @@ def records(file: Path) -> list[dict[str, object]]:
     ]
 
 
+@pytest.mark.usefixtures("_set_up_test_runner_rows")
 class TestRunnerRows:
     """Where each writer records on a runner, ORG_FINDINGS unset (#1976)."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_runner_rows(self, tmp_path: Path) -> None:
         """Give each row a directory of its own."""
         self.root = Path(str(tmp_path))
@@ -514,23 +515,22 @@ class TestLoadingRows:
                 ("absolute", str(SHELL_WRITER), None),
                 ("no slash", SHELL_WRITER.name, SHELL_WRITER.parent),
             ):
-                with self.subTest(bash=label, path=how):
-                    done = subprocess.run(
-                        [
-                            bash,
-                            "--norc",
-                            "-euo",
-                            "pipefail",
-                            "-c",
-                            f'. "{source}"; declare -F org_finding > /dev/null',
-                        ],
-                        capture_output=True,
-                        text=True,
-                        env=hermetic.env(PATH=""),
-                        cwd=cwd,
-                        check=False,
-                    )
-                    assert (done.returncode, done.stdout, done.stderr) == (0, "", "")
+                done = subprocess.run(
+                    [
+                        bash,
+                        "--norc",
+                        "-euo",
+                        "pipefail",
+                        "-c",
+                        f'. "{source}"; declare -F org_finding > /dev/null',
+                    ],
+                    capture_output=True,
+                    text=True,
+                    env=hermetic.env(PATH=""),
+                    cwd=cwd,
+                    check=False,
+                )
+                assert (done.returncode, done.stdout, done.stderr) == (0, "", "")
 
 
 LINES_READER = f""". "{SHELL_WRITER}"
@@ -540,10 +540,11 @@ US = "\037"
 NO_RECORDS: list[dict[str, object]] = []
 
 
+@pytest.mark.usefixtures("_set_up_test_lines_rows")
 class TestLinesRows:
     """org_finding_lines: one finding per stdin line, unit-separated (#1934)."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_lines_rows(self, tmp_path: Path) -> None:
         """Give each row a directory of its own."""
         self.file = Path(str(tmp_path)) / "out" / "job.jsonl"

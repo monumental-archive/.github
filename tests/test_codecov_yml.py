@@ -125,8 +125,7 @@ class TestCodecovYml:
         for folder in DIRS:
             for name in NAMES:
                 path = f"{folder}{name}"
-                with self.subTest(path=path):
-                    self.assert_red({path: EDTF}, [path])
+                self.assert_red({path: EDTF}, [path])
 
     def test_every_hit_is_named(self) -> None:
         """Several files are all listed, root first."""

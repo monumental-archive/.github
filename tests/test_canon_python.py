@@ -63,10 +63,11 @@ def bash() -> str:
     return hermetic.tool("bash")
 
 
+@pytest.mark.usefixtures("_set_up_test_install_the_belts_python")
 class TestInstallTheBeltsPython:
     """Each row: the planted tree and stub, and what the step did."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_install_the_belts_python(self, tmp_path: Path) -> None:
         """Give each row a canon tree, a stub mise and a runner's files."""
         self.tmp = tmp_path
@@ -289,11 +290,10 @@ class TestAnUnsetOrgPythonIsRefused:
             if script.name in SOURCED:
                 continue
             for value in (None, ""):
-                with self.subTest(script=script.name, value=value):
-                    done = run_without([bash(), str(script)], value)
-                    assert done.returncode != 0, done.stdout
-                    assert REFUSAL in done.stderr
-                    assert done.stdout == ""
+                done = run_without([bash(), str(script)], value)
+                assert done.returncode != 0, done.stdout
+                assert REFUSAL in done.stderr
+                assert done.stdout == ""
 
     @pytest.mark.parametrize("value", (None, ""))
     def test_the_sourced_provisioner_refuses_an_unset_org_python(

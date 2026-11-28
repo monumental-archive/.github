@@ -32,10 +32,13 @@ if TYPE_CHECKING:
 TASK = "lint:actions"
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)
+
+
+pytestmark = pytest.mark.usefixtures("_task")
 
 
 BELT = hermetic.MISE
@@ -62,10 +65,11 @@ def names(tree: Path) -> list[str]:
     return sorted(found)
 
 
+@pytest.mark.usefixtures("_set_up_test_actions_lint")
 class TestActionsLint:
     """One planted workflow; actionlint's verdict through the helper."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_actions_lint(self, tmp_path: Path) -> None:
         """Plant an empty workflows directory."""
         self.tree = tmp_path
@@ -129,7 +133,7 @@ class TestActionsLint:
         """No file named: exit 2, never a walk of the directory."""
         done = hermetic.call(lambda: actions_lint.main([]), cwd=self.tree)
         assert done.returncode == actions_lint.EXIT_ERROR
-        usage: list[str] = ["lint:actions: usage: actions_lint.py WORKFLOW..."]
+        usage: list[str] = ["lint:actions: usage: belt actions-lint WORKFLOW..."]
         assert done.stderr.splitlines() == usage
 
     def test_no_canon_tree_is_refused(self) -> None:

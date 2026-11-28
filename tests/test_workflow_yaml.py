@@ -82,10 +82,11 @@ runs:
 """
 
 
+@pytest.mark.usefixtures("_set_up_test_fixture")
 class TestFixture:
     """The fixture, read once per row from a file of its own."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_fixture(self, tmp_path: Path) -> None:
         """Write the fixture and the action to a scratch directory."""
         self.dir = Path(str(tmp_path))

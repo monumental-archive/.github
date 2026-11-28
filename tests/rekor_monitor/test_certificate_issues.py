@@ -76,10 +76,11 @@ def search(index: int) -> list[str]:
     ]  # fmt: skip
 
 
+@pytest.mark.usefixtures("_set_up_test_harness")
 class TestHarness:
     """A stub gh, its call log and the real report, for each row."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_harness(self, tmp_path: Path) -> None:
         """Lay out a stub gh, its call log, and the real report."""
         self.dir = Path(str(tmp_path))
@@ -370,14 +371,13 @@ class TestDecoded(TestHarness):
             ),
         }
         for answer, why in rows.items():
-            with self.subTest(answer=answer):
-                proc = self.run_helper(STUB_LIST=answer)
-                assert proc.returncode == 2
-                assert proc.stderr.strip() == (
-                    "certificate_issues.py:"
-                    " gh issue list answered something that is not a list"
-                    f" of issues: {why}; the checkpoint is not saved"
-                )
+            proc = self.run_helper(STUB_LIST=answer)
+            assert proc.returncode == 2
+            assert proc.stderr.strip() == (
+                "certificate_issues.py:"
+                " gh issue list answered something that is not a list"
+                f" of issues: {why}; the checkpoint is not saved"
+            )
 
     def test_a_search_answer_that_is_not_json(self) -> None:
         """A search answer that is not strict JSON: exit 2 by name."""
@@ -393,15 +393,14 @@ class TestDecoded(TestHarness):
         """Findings of another kind, falsy or not: exit 2 by name (#1683)."""
         values: tuple[object, ...] = ("", 0, dict[str, object](), "ab")
         for value in values:
-            with self.subTest(findings=value):
-                self.doc["findings"] = value
-                proc = self.run_helper()
-                assert proc.returncode == 2
-                assert proc.stderr.strip() == (
-                    "certificate_issues.py:"
-                    f" the report's findings are not a list: {value!r};"
-                    " the checkpoint is not saved"
-                )
+            self.doc["findings"] = value
+            proc = self.run_helper()
+            assert proc.returncode == 2
+            assert proc.stderr.strip() == (
+                "certificate_issues.py:"
+                f" the report's findings are not a list: {value!r};"
+                " the checkpoint is not saved"
+            )
 
     def test_report_with_a_key_twice(self) -> None:
         """A report that is not strict JSON is not JSON here: exit 2 by name."""

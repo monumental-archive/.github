@@ -385,11 +385,9 @@ class TestTheLaw:
             'print("::error::a literal")',
         ]
         for line in red:
-            with self.subTest(red=line):
-                assert rule_one(line)
+            assert rule_one(line)
         for line in green:
-            with self.subTest(green=line):
-                assert not rule_one(line)
+            assert not rule_one(line)
 
     def test_rule_two_allows_only_percent_q_for_outside_text(self) -> None:
         """An expansion reaches the log as a `%q` argument, or not at all."""
@@ -420,11 +418,9 @@ class TestTheLaw:
             "printf '100%% done\\n'",
         ]
         for line in red:
-            with self.subTest(red=line):
-                assert rule_two(line)
+            assert rule_two(line)
         for line in green:
-            with self.subTest(green=line):
-                assert not rule_two(line)
+            assert not rule_two(line)
 
     def test_a_group_written_to_a_file_is_not_the_log(self) -> None:
         """`{ echo "X=${x}"; } >> "${GITHUB_ENV}"` writes a file."""
@@ -454,9 +450,7 @@ class TestTheLaw:
 
     def test_rule_two_reads_only_units_that_print_a_command(self) -> None:
         """A step that prints no command may echo its text as it likes."""
-        with self.subTest(prints=False):
-            unit = [(1, 'echo "${x}"')]
-            assert not any(PRINTS.search(ln) for _, ln in unit)
-        with self.subTest(prints=True):
-            unit = [(1, 'echo "${x}"'), (2, 'echo "::error::literal"')]
-            assert any(PRINTS.search(ln) for _, ln in unit)
+        unit = [(1, 'echo "${x}"')]
+        assert not any(PRINTS.search(ln) for _, ln in unit)
+        unit = [(1, 'echo "${x}"'), (2, 'echo "::error::literal"')]
+        assert any(PRINTS.search(ln) for _, ln in unit)

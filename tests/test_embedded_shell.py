@@ -37,10 +37,13 @@ if TYPE_CHECKING:
 TASK = "lint:shell-embedded"
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)
+
+
+pytestmark = pytest.mark.usefixtures("_task")
 
 
 _HERE = hermetic.MISE
@@ -303,9 +306,8 @@ class TestHeaders:
         for header in ["|", "|-", "|+", "|2", "|2-", "|-2", ">", ">-", ">+", ">2"]:
             style = es.LITERAL if header.startswith("|") else es.FOLDED
             for comment in ["", " # zizmor: ignore[github-env]"]:
-                with self.subTest(header=header, comment=comment):
-                    [run] = read_runs(workflow(folded("H", 16, header + comment)))
-                    assert (run.style, es.weight(run.source)) == (style, 16)
+                [run] = read_runs(workflow(folded("H", 16, header + comment)))
+                assert (run.style, es.weight(run.source)) == (style, 16)
 
     def test_what_shellcheck_reads_and_how(self) -> None:
         """Every literal header is read as written, every folded one folded.
@@ -858,8 +860,7 @@ class TestReader:
             ("- name: First\n  run: |\n    x\n- run: |\n    y\n", "First"),
         ]
         for text, name in rows:
-            with self.subTest(text=text):
-                assert read_runs(workflow(text))[0].name == name
+            assert read_runs(workflow(text))[0].name == name
         second = read_runs(workflow(rows[-1][0]))[1]
         assert second.name is None
 
@@ -886,8 +887,7 @@ class TestReader:
             ("- shell: python\n  run: |\n    x\n- run: |\n    y\n", "python"),
         ]
         for text, shell in rows:
-            with self.subTest(text=text):
-                assert read_runs(workflow(text))[0].shell == shell
+            assert read_runs(workflow(text))[0].shell == shell
         second = read_runs(workflow(rows[-1][0]))[1]
         assert second.shell == "bash"
 
@@ -1016,10 +1016,11 @@ def config(**tasks: int | list[int]) -> str:
     return out
 
 
+@pytest.mark.usefixtures("_set_up_test_tasks")
 class TestTasks:
     """The Done-when rows of #1544: task bodies under the same ceiling."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_tasks(self, tmp_path: Path) -> None:
         """Give each row a scratch directory for the config and the debt."""
         self.root = Path(str(tmp_path))

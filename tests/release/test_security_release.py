@@ -292,10 +292,11 @@ NOTHING_REMEDIED = (
 ISSUE_TITLE = "the supported release carries an advisory and main does not remedy it"
 
 
+@pytest.mark.usefixtures("_set_up_test_decision_case")
 class TestDecisionCase:
     """A fresh passing case per row; each row breaks exactly one input."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_decision_case(self, tmp_path: Path) -> None:
         """Build the passing case."""
         self.repo = Repo(Path(str(tmp_path)))

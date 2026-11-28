@@ -153,7 +153,7 @@ class TestBuildStepIsTheHelper:
     def test_the_shipped_step_calls_the_helper(self) -> None:
         """The run: is the call alone, through `.org-canon`."""
         body = step("Build every command")["run"]
-        assert body == '"${ORG_PYTHON}" .org-canon/release/build_go_commands.py\n'
+        assert body == '"${ORG_PYTHON}" -I .org-canon/belt build-go-commands\n'
 
 
 class TestBuilds:

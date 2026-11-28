@@ -33,10 +33,13 @@ if TYPE_CHECKING:
 TASK = "lint:bash-portability"
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)
+
+
+pytestmark = pytest.mark.usefixtures("_task")
 
 
 BELT = hermetic.MISE
@@ -93,10 +96,11 @@ def clean(count: int) -> str:
     return f"lint:bash-portability: {count} files clean"
 
 
+@pytest.mark.usefixtures("_set_up_test_planted")
 class TestPlanted:
     """A planted git tree."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_planted(self, tmp_path: Path) -> None:
         """Plant an empty tree."""
         self.tree = tmp_path
@@ -357,11 +361,10 @@ class TestCalls(TestPlanted):
             (conf, f"{TASK}: {conf}: cannot be read as UTF-8:"),
             ("d.sh", f"{TASK}: mise/exit_trap.py cannot read a file:"),
         ):
-            with self.subTest(name=name):
-                lists = ("--", name, "--") if name != conf else ("--", "--", name)
-                done = self.helper(*lists)
-                same(done.returncode, bash_portability.EXIT_ERROR)
-                assert done.stderr.startswith(said), done.stderr
+            lists = ("--", name, "--") if name != conf else ("--", "--", name)
+            done = self.helper(*lists)
+            same(done.returncode, bash_portability.EXIT_ERROR)
+            assert done.stderr.startswith(said), done.stderr
 
     @pytest.mark.parametrize("argv", ([], ["a.sh"], ["--"], ["--", "--", "--"]))
     def test_a_bad_call_is_a_usage_error(self, argv: object) -> None:

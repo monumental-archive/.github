@@ -41,10 +41,13 @@ if TYPE_CHECKING:
 TASK = "lint:subject-budget"
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)
+
+
+pytestmark = pytest.mark.usefixtures("_task")
 
 
 SUFFIX = "[SECURITY]"
@@ -1073,11 +1076,10 @@ class TestLockfileBranch:
             (dep("hono", "^4.1.0", "npm"), PRESET),
         )
         for row, source in cases:
-            with self.subTest(dep=row.current, manager=row.manager):
-                locks = sb.Locks([])
-                found = sb.judge([row], owned(source), 200, [], locks)
-                assert found == NO_FINDINGS
-                assert locks.missing == NO_LINES
+            locks = sb.Locks([])
+            found = sb.judge([row], owned(source), 200, [], locks)
+            assert found == NO_FINDINGS
+            assert locks.missing == NO_LINES
 
     @pytest.mark.parametrize(
         "extra",
@@ -1608,14 +1610,13 @@ class TestMainGuards:
         ]
         assert names
         for name in names:
-            with self.subTest(row=name):
-                TestMainGuards(name).run(unittest.TestResult())
-                try:
-                    here = str(Path.cwd())
-                except FileNotFoundError:
-                    here = "a deleted directory"
-                os.chdir(start)
-                assert here == str(start)
+            TestMainGuards(name).run(unittest.TestResult())
+            try:
+                here = str(Path.cwd())
+            except FileNotFoundError:
+                here = "a deleted directory"
+            os.chdir(start)
+            assert here == str(start)
 
     def test_no_renovate_json_skips_clean(self) -> None:
         """Nothing mints subjects here, so there is nothing to bound."""

@@ -114,10 +114,11 @@ def run(
     )
 
 
+@pytest.mark.usefixtures("_set_up_test_stage")
 class TestStage:
     """`pgrx_images.py stage`: every branch, messages asserted."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_stage(self, tmp_path: Path) -> None:
         """Make a workspace with a tarballs/ directory, removed after."""
         self.root = tmp_path
@@ -167,22 +168,19 @@ class TestStage:
         assert result.returncode == 0, result.stderr
         for arch in ("amd64", "arm64"):
             image = self.root / "staged" / arch / "image"
-            with self.subTest(arch=arch):
-                found = sorted(
-                    str(p.relative_to(image))
-                    for p in image.rglob("*")
-                    if not p.is_dir()
-                )
-                want: list[str] = [
-                    "lib/edtf.so",
-                    "lib/edtf_postgres.so",
-                    "share/extension/edtf_postgres--1.2.3.sql",
-                    "share/extension/edtf_postgres.control",
-                ]
-                assert want == found
-                so = image / "lib" / "edtf_postgres.so"
-                assert stat.S_IMODE(so.stat().st_mode) == 0o755
-                assert (image / "lib" / "edtf.so").is_symlink()
+            found = sorted(
+                str(p.relative_to(image)) for p in image.rglob("*") if not p.is_dir()
+            )
+            want: list[str] = [
+                "lib/edtf.so",
+                "lib/edtf_postgres.so",
+                "share/extension/edtf_postgres--1.2.3.sql",
+                "share/extension/edtf_postgres.control",
+            ]
+            assert want == found
+            so = image / "lib" / "edtf_postgres.so"
+            assert stat.S_IMODE(so.stat().st_mode) == 0o755
+            assert (image / "lib" / "edtf.so").is_symlink()
 
     def test_a_missing_tarball(self) -> None:
         """No amd64 tarball: the build did not produce the cell."""
@@ -248,21 +246,20 @@ class TestBaseImage:
         """Each [build] row is what the verb prints."""
         rows = build_rows()
         for pg, ref in rows.items():
-            with self.subTest(pg=pg):
-                result = run(
-                    [
-                        sys.executable,
-                        str(STAGE),
-                        "base-image",
-                        "--pg",
-                        pg,
-                        "--table",
-                        str(TABLE),
-                    ],
-                    CANON,
-                )
-                assert (0, f"{ref}\n") == (result.returncode, result.stdout)
-                assert "@sha256:" in ref
+            result = run(
+                [
+                    sys.executable,
+                    str(STAGE),
+                    "base-image",
+                    "--pg",
+                    pg,
+                    "--table",
+                    str(TABLE),
+                ],
+                CANON,
+            )
+            assert (0, f"{ref}\n") == (result.returncode, result.stdout)
+            assert "@sha256:" in ref
 
     def test_a_major_with_no_row(self) -> None:
         """A major the table does not pin is refused by name."""
@@ -387,15 +384,14 @@ class TestConsumerDockerfile:
         rows = build_rows()
         for pg, base in rows.items():
             for recipe in ("copy", "path"):
-                with self.subTest(pg=pg, recipe=recipe):
-                    result = render(recipe, PINNED, base, pg)
-                    assert result.returncode == 0, result.stderr
-                    from_lines = [
-                        ln for ln in result.stdout.splitlines() if ln.startswith("FROM")
-                    ]
-                    assert len(from_lines) == 2
-                    for line in from_lines:
-                        assert "@sha256:" in line.split()[1]
+                result = render(recipe, PINNED, base, pg)
+                assert result.returncode == 0, result.stderr
+                from_lines = [
+                    ln for ln in result.stdout.splitlines() if ln.startswith("FROM")
+                ]
+                assert len(from_lines) == 2
+                for line in from_lines:
+                    assert "@sha256:" in line.split()[1]
 
     def test_an_unpinned_extension_image(self) -> None:
         """A tag, not a digest: refused, nothing rendered."""
@@ -432,10 +428,11 @@ done
 """
 
 
+@pytest.mark.usefixtures("_set_up_test_proof")
 class TestProof:
     """`pgrx-image-proof.sh`: the recipes it runs, per Postgres major."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_proof(self, tmp_path: Path) -> None:
         """Put a recording docker first on PATH, beside a digest record."""
         self.root = tmp_path
@@ -585,10 +582,11 @@ def extension_name(tree: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
+@pytest.mark.usefixtures("_set_up_test_extension_name")
 class TestExtensionName:
     """`pgrx_images.py extension-name`: the one shipped extension (#1439)."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_extension_name(self, tmp_path: Path) -> None:
         """Make an empty staged share/extension tree, removed after."""
         self.tree = tmp_path
@@ -635,10 +633,11 @@ printf '%s\\n' "$*" >> "${PSQL_LOG}"
 """
 
 
+@pytest.mark.usefixtures("_set_up_test_copy_proof")
 class TestCopyProof:
     """docker/pgrx-copy-proof.sh, run for real against a planted root."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_copy_proof(self, tmp_path: Path) -> None:
         """Plant a stock postgres's directories and stub su and psql."""
         self.root = tmp_path

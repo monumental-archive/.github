@@ -33,10 +33,13 @@ if TYPE_CHECKING:
 TASK = "audit:template-pins"
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)
+
+
+pytestmark = pytest.mark.usefixtures("_task")
 
 
 BELT = hermetic.MISE
@@ -101,10 +104,11 @@ def window(pin_tag: str, age_hours: int, since: str) -> list[str]:
     ]
 
 
+@pytest.mark.usefixtures("_set_up_test_planted")
 class TestPlanted:
     """Planted templates in a tree of dated commits."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_planted(self, tmp_path: Path) -> None:
         """Plant a tree whose first commit, day 0, touches mise/."""
         self.tree = tmp_path
@@ -356,13 +360,12 @@ class TestDrift(TestPlanted):
 
     def test_a_bad_call_is_a_usage_error(self) -> None:
         """No canon, half a canon, or no template: exit 2 with the usage line."""
-        usage = "audit:template-pins: usage: template_drift.py OWNER/REPO TEMPLATE..."
+        usage = "audit:template-pins: usage: belt template-drift OWNER/REPO TEMPLATE..."
         calls: list[list[str]] = [[], [CANON], ["/repo", STUB], ["owner/", STUB]]
         for argv in calls:
-            with self.subTest(argv=argv):
-                done = self.helper(*argv)
-                same(done.returncode, template_drift.EXIT_ERROR)
-                same(done.stderr.splitlines(), [usage])
+            done = self.helper(*argv)
+            same(done.returncode, template_drift.EXIT_ERROR)
+            same(done.stderr.splitlines(), [usage])
 
     def test_version_order(self) -> None:
         """Digit runs order as numbers: v1.10.0 after v1.9.0."""

@@ -91,10 +91,11 @@ def plant_belt(tree: Path) -> Path:
     return belt
 
 
+@pytest.mark.usefixtures("_set_up_test_planted")
 class TestPlanted:
     """A repository and one tree for each carrier; the rows are below."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_planted(self, tmp_path: Path) -> None:
         """Plant a repository and one tree for each carrier."""
         self.tmp = tmp_path

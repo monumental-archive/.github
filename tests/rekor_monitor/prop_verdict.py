@@ -205,10 +205,11 @@ CLEAN_EXIT: Reported = {
 }
 
 
+@pytest.mark.usefixtures("_set_up_test_scratch")
 class TestScratch:
     """One scratch report file for a test's examples."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_scratch(self, tmp_path: Path) -> None:
         """Hold the scratch file."""
         self.path = Path(str(tmp_path)) / "report.json"

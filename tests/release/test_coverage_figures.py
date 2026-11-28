@@ -323,8 +323,7 @@ class TestCommandLine:
                 "pgrx-pg17 96.5\n",
             ),
         ):
-            with self.subTest(argv=argv):
-                assert (0, said, "") == self.main(argv, data)
+            assert (0, said, "") == self.main(argv, data)
 
     def test_a_refusal_is_one_line_and_status_one(self) -> None:
         """The reason, labelled, on stderr; nothing on stdout."""
@@ -440,10 +439,11 @@ MEASURED_ALL: list[str] = ["all"]
 MEASURED_PGRX: list[str] = ["pgrx"]
 
 
+@pytest.mark.usefixtures("_set_up_test_derive")
 class TestDerive:
     """derive-coverage-floor.sh, read or measured, in a planted tree."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_derive(self, tmp_path: Path) -> None:
         """Plant the canon's two scripts, the stubs, and a tree with a floor."""
         self.base = Path(str(tmp_path))
@@ -611,17 +611,14 @@ class TestDerive:
         before = (self.tree / ".coverage-floor").read_text(encoding="utf-8")
         written = {}
         for read in (True, False):
-            with self.subTest(read=read):
-                (self.tree / ".coverage-floor").write_text(before, encoding="utf-8")
-                if read:
-                    self.offer("", LEGS)
-                else:
-                    self.none_for()
-                done = self.derive(measure=not read)
-                assert done.returncode == 0, done.stderr
-                written[read] = (self.tree / ".coverage-floor").read_text(
-                    encoding="utf-8"
-                )
+            (self.tree / ".coverage-floor").write_text(before, encoding="utf-8")
+            if read:
+                self.offer("", LEGS)
+            else:
+                self.none_for()
+            done = self.derive(measure=not read)
+            assert done.returncode == 0, done.stderr
+            written[read] = (self.tree / ".coverage-floor").read_text(encoding="utf-8")
         assert written[True] == written[False]
         assert "v1.1.0" in written[True]
 

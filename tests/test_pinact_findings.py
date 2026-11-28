@@ -208,10 +208,11 @@ def refused(file: Path, stderr: str) -> None:
     assert f"{TASK}: {got[0]['message']}\n" in stderr
 
 
+@pytest.mark.usefixtures("_set_up_test_stubbed")
 class TestStubbed:
     """A stub pinact on PATH, its log, the findings file."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_stubbed(self, tmp_path: Path) -> None:
         """Lay out the stub, its log, and the findings file."""
         self.dir = tmp_path

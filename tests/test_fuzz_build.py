@@ -221,10 +221,11 @@ NESTED_SEEDED: list[tuple[str, str]] = [
 ]
 
 
+@pytest.mark.usefixtures("_set_up_test_fuzz_build")
 class TestFuzzBuild:
     """lint:fuzz-build says "stale" only when cargo says the lock is."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_fuzz_build(
         self, tmp_path: Path, request: pytest.FixtureRequest
     ) -> None:

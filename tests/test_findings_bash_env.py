@@ -103,10 +103,11 @@ def bashes() -> list[tuple[str, str]]:
     return out
 
 
+@pytest.mark.usefixtures("_set_up_test_bash_env_rows")
 class TestBashEnvRows:
     """A body under the belt's shell and BASH_ENV has the writer."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_bash_env_rows(self, tmp_path: Path) -> None:
         """Give each row a directory of its own."""
         self.root = Path(str(tmp_path))
@@ -173,9 +174,8 @@ class TestBashEnvRows:
         for label, bash in bashes():
             for ssh in (False, True):
                 where = "SSH_CLIENT" if ssh else "socket stdin"
-                with self.subTest(bash=label, where=where):
-                    assert self.probe([bash, "-c", PROBE], ssh=ssh) == "none"
-                    assert self.probe([bash, *shell[1:]], ssh=ssh) == "function"
+                assert self.probe([bash, "-c", PROBE], ssh=ssh) == "none"
+                assert self.probe([bash, *shell[1:]], ssh=ssh) == "function"
 
     @pytest.mark.parametrize("label,bash", bashes())
     def test_a_body_and_its_child_bash_have_the_writer(

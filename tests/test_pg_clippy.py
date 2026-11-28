@@ -90,10 +90,11 @@ def clippy(spec: str, belt: Path, root: str = "Cargo.toml") -> str:
     return f"cargo clippy -p {spec} {at} {OWN} {LADDER} [yes pg17 {belt}]"
 
 
+@pytest.mark.usefixtures("_set_up_test_planted")
 class TestPlanted:
     """A planted tree, a planted belt and the stubs."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_planted(self, tmp_path: Path) -> None:
         """Plant the tree, the belt and the stubs."""
         tmp = tmp_path

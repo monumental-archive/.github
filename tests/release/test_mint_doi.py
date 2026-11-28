@@ -1683,9 +1683,8 @@ class TestReadCitation:
             ("an empty file reads as nothing", "", ([], "", "")),
         ]  # fmt: skip
         for name, text, want in rows:
-            with self.subTest(name):
-                got = mint_doi.read_citation(text)
-                assert (got.creators, got.licence, got.concept_doi) == want
+            got = mint_doi.read_citation(text)
+            assert (got.creators, got.licence, got.concept_doi) == want
 
 
 class TestLicenceIds:
@@ -1699,8 +1698,7 @@ class TestLicenceIds:
             ("MIT AND Apache-2.0 OR GPL-2.0+", ["mit", "apache-2.0", "gpl-2.0+"]),
         ]
         for licence, want in rows:
-            with self.subTest(licence):
-                assert mint_doi.licence_ids(licence) == want
+            assert mint_doi.licence_ids(licence) == want
 
     def test_refused(self) -> None:
         """Each refusal names its cause."""
@@ -1715,13 +1713,12 @@ class TestLicenceIds:
             ("MIT OR", "is not a complete expression"),
         ]
         for licence, why in rows:
-            with self.subTest(licence):
-                with pytest.raises(mint_doi.RefusedError) as caught:
-                    mint_doi.licence_ids(licence)
-                assert str(caught.value) == (
-                    f"CITATION.cff license '{licence}' {why} — the record carries"
-                    " plain SPDX ids joined by OR or AND"
-                )
+            with pytest.raises(mint_doi.RefusedError) as caught:
+                mint_doi.licence_ids(licence)
+            assert str(caught.value) == (
+                f"CITATION.cff license '{licence}' {why} — the record carries"
+                " plain SPDX ids joined by OR or AND"
+            )
 
 
 class TestAnswerShapes:
@@ -1781,10 +1778,7 @@ class TestAnswerShapes:
             ({"id": 1, "links": links, "files": [{}]}, f"a file of {what} has no id"),
             ({"links": links}, f"{what} has no id"),
         ):
-            with self.subTest(value=value):
-                self.refused(
-                    functools.partial(mint_doi.deposition, value, what), message
-                )
+            self.refused(functools.partial(mint_doi.deposition, value, what), message)
 
     def test_a_deposition_reads_its_id_links_and_files(self) -> None:
         """The shape the step reads, an id that is not a string compact."""
@@ -1807,10 +1801,9 @@ class TestAnswerShapes:
             ({"metadata": {"rights": [{}]}}, f"a right of {where} has no id"),
             ({"metadata": []}, f"{where} is not an object"),
         ):
-            with self.subTest(value=value):
-                with pytest.raises(decoded.UndecodableError) as caught:
-                    mint_doi.rights_ids(value, where)
-                assert message == str(caught.value)
+            with pytest.raises(decoded.UndecodableError) as caught:
+                mint_doi.rights_ids(value, where)
+            assert message == str(caught.value)
 
     def test_a_newversion_answer_with_no_draft_link_is_refused(self) -> None:
         """No deposit is grown from an answer that names no draft."""

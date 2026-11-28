@@ -15,7 +15,6 @@ stdlib `unittest`, run by `mise run test`.
 from pathlib import Path
 
 import pytest
-import unittest_guarded
 
 from belt import decoded, gate_shard
 from belt.tracked import tracked
@@ -36,19 +35,11 @@ class TestTable:
         none: list[str] = []
         assert none == stale
 
-    def test_every_test_cost_is_a_tracked_test_file(self) -> None:
-        """A test cost naming no tracked test file is stale, red by name (#2054)."""
-        _, rows = unittest_guarded.file_costs()
-        files = set(tracked("*test_*.py", root=HERE.parent))
-        stale = sorted(set(rows) - files)
-        none: list[str] = []
-        assert none == stale
-
     def test_the_canon_defaults(self) -> None:
         """The table's counts are defaults within the ceiling (#2160)."""
         costs = gate_shard.load()
         assert costs.lint_shards == 4
-        mutants: dict[str, int] = {"rust": 4, "go": 4, "python": 48, "typescript": 8}
+        mutants: dict[str, int] = {"rust": 4, "go": 4, "python": 4, "typescript": 8}
         deep: dict[str, int] = {"python": 8, "typescript": 1, "rust": 1}
         assert mutants == costs.languages["mutants"]
         assert deep == costs.languages["deep-tests"]
@@ -58,7 +49,7 @@ class TestTable:
         """ci.yml's gate matrix is the plan job's output, nothing else."""
         text = CI.read_text("utf-8")
         assert "      matrix: ${{ fromJSON(needs.plan.outputs.legs) }}\n" in text
-        assert 'gate_shard.py plan >> "${GITHUB_OUTPUT}"' in text
+        assert 'belt gate-shard plan >> "${GITHUB_OUTPUT}"' in text
 
 
 COSTS = gate_shard.Costs(
@@ -142,13 +133,13 @@ def planted(tree: Path, config: str, run: str) -> list[str]:
 
 
 # A `test` that is three suites, each a task of its own (#2160): one runs
-# the belt's test runner, one vitest through `measured`, one cargo test.
+# one pytest and one vitest through `measured`, one cargo test.
 THREE = """
 [tasks.test]
 depends = ["test:py", "test:ts", { task = "test:rs", optional = true }]
 
 [tasks."test:py"]
-run = "mise/measured python3 mise/unittest_guarded.py discover"
+run = "mise/measured pytest -c mise/pytest.toml tests"
 
 [tasks."test:ts"]
 run = '"${ORG_BELT_DIR}/measured" pnpm exec vitest run'
@@ -172,10 +163,11 @@ LINT_ROWS: list[tuple[object, ...]] = [("lint", "ci:lint", i, 4) for i in range(
 PROPERTIES_ROW: tuple[object, ...] = ("properties", "ci:properties", 1, 1)
 
 
+@pytest.mark.usefixtures("_set_up_test_planted")
 class TestPlanted:
     """A scratch tree, its root mise config and its shards.toml."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_planted(self, tmp_path: Path) -> None:
         """Make a scratch tree for the planted config."""
         self.tree = Path(str(tmp_path))
@@ -211,9 +203,7 @@ class TestPlan(TestPlanted):
 
     def test_no_file_is_todays_matrix(self) -> None:
         """One `test` run line, no file: lint shards, ci:test, ci:properties."""
-        files = planted(
-            self.tree, "mise.toml", "python3 mise/unittest_guarded.py discover"
-        )
+        files = planted(self.tree, "mise.toml", "mise/measured pytest tests")
         want = [*LINT_ROWS, ("test", "ci:test", 1, 1), PROPERTIES_ROW]
         assert want == legs(gate_shard.plan(COSTS, files, self.tree))
 
@@ -327,8 +317,7 @@ class TestPlan(TestPlanted):
         for task, script in scripts.items():
             text = (HERE / script).read_text("utf-8")
             for pattern in gate_shard.APPLIES[task]:
-                with self.subTest(task=task, pattern=pattern):
-                    assert f"'*{pattern.lstrip('*')}'" in text
+                assert f"'*{pattern.lstrip('*')}'" in text
 
     def test_an_untracked_config_is_not_read(self) -> None:
         """Only a tracked config plans: the gate reads tracked files only."""
@@ -467,7 +456,8 @@ class TestAdapter:
     @pytest.mark.parametrize(
         "line,want",
         (
-            ("python3 mise/unittest_guarded.py roots mise", "unittest_guarded.py"),
+            ('"${ORG_BELT_DIR}/measured" pytest -c mise/pytest.toml tests', "pytest"),
+            ("pytest tests", None),
             ('"${ORG_BELT_DIR}/python-properties.sh" gate', "python-properties"),
             (
                 '"${ORG_BELT_DIR}/typescript-properties.sh" gate',

@@ -149,11 +149,10 @@ class TestJudgeTest:
             ({"skipLibCheck": True}, False),
         )
         for stated, want in pairs:
-            with self.subTest(stated=stated):
-                key = next(iter(stated))
-                findings = tsconfig_dials.judge(stated, {key: want})
-                assert len(findings) == 1
-                assert "weaker" in findings[0]
+            key = next(iter(stated))
+            findings = tsconfig_dials.judge(stated, {key: want})
+            assert len(findings) == 1
+            assert "weaker" in findings[0]
 
     def test_the_live_finding_from_the_fixture(self) -> None:
         """monumental-archive states skipLibCheck true against the org's false."""
@@ -270,10 +269,9 @@ class TestMainTest:
         """The shrunk example, `[]`: a sentence, not AttributeError (#1555)."""
         shapes: tuple[object, ...] = ([], 1, "x")
         for resolved in shapes:
-            with self.subTest(resolved=resolved):
-                status, _out, err = self.invoke(resolved)
-                assert status == 1
-                assert "did not resolve to an object" in err
+            status, _out, err = self.invoke(resolved)
+            assert status == 1
+            assert "did not resolve to an object" in err
 
     def test_unresolvable_json_fails(self) -> None:
         """Output from tsc that is not JSON must not pass."""

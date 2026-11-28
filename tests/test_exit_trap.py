@@ -37,10 +37,13 @@ if TYPE_CHECKING:
 TASK = "lint:bash-portability"
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)
+
+
+pytestmark = pytest.mark.usefixtures("_task")
 
 
 BASH = Path("/bin/bash")
@@ -209,13 +212,12 @@ class TestLint:
                 (GUARDED, []),
                 (BASH_GUARDED, [] if is_bash else [f"a.sh:{line}: {NOT_BASH}"]),
             ):
-                with self.subTest(shebang=shebang, guard=guard):
-                    status, lines, shaped = lint(("a.sh", body.format(guard=guard)))
-                    assert (status, lines, shaped) == (
-                        1 if want else 0,
-                        want,
-                        bool(want),
-                    )
+                status, lines, shaped = lint(("a.sh", body.format(guard=guard)))
+                assert (status, lines, shaped) == (
+                    1 if want else 0,
+                    want,
+                    bool(want),
+                )
 
     def test_bare_trap_under_sh_reds_as_unguarded(self) -> None:
         """Under `#!/bin/sh` a bare trap owes the guard as anywhere."""
@@ -304,10 +306,11 @@ def run_bash(*body: str, shell: str = str(BASH), shebang: str = "") -> int:
         return done.returncode
 
 
+@pytest.mark.usefixtures("_set_up_test_pattern")
 class TestPattern:
     """The defect, then the guard, on the shell that has the defect."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_pattern(self) -> None:
         """Skip every row unless /bin/bash is the shell with the defect."""
         if not IS_32:
@@ -322,15 +325,13 @@ class TestPattern:
             (('echo "${nope}"',), 1),
         ]
         for body, code in rows:
-            with self.subTest(body=body):
-                assert run_bash(*body) == code
+            assert run_bash(*body) == code
 
     def test_guard_fails_the_unfinished_run(self) -> None:
         """Both unset-variable deaths exit 1 under either form."""
         for guard in (GUARDED, BASH_GUARDED):
             for death in ('echo "${nope}"', ': "${nope:?unset}"'):
-                with self.subTest(guard=guard, death=death):
-                    assert run_bash(guard, death, "org_done=1") == 1
+                assert run_bash(guard, death, "org_done=1") == 1
 
     @pytest.mark.parametrize("guard", (GUARDED, BASH_GUARDED))
     def test_guard_passes_the_finished_run(self, guard: object) -> None:

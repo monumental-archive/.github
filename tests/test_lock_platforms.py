@@ -47,10 +47,13 @@ STUB_PATH = ".github/workflows/publish.yml"
 REMOTE = "monumental-archive/.github/.github/workflows/publish.yml@" + "a" * 40
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding (#1934)."""
     as_task(NAME)
+
+
+pytestmark = pytest.mark.usefixtures("_task")
 
 
 def stub(with_lines: str, uses: str = REMOTE) -> str:
@@ -603,8 +606,7 @@ class TestLocated:
             ),
         }
         for row, (found, beside, line) in rows.items():
-            with self.subTest(row=row):
-                self.assert_skip({STUB_PATH: RUST_BINARY} | found | beside, line)
+            self.assert_skip({STUB_PATH: RUST_BINARY} | found | beside, line)
 
     def test_a_found_lock_is_named_in_the_red(self) -> None:
         """The nested lock short of a platform: red, the lock named."""

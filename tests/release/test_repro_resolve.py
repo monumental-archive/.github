@@ -78,10 +78,11 @@ CHECKSUMS = "aaaa  tool-1.2.3-linux.tar.gz\n"
 TYPED = {"schema": 5, "entries": [{"name": "tool-1.2.3-linux.tar.gz"}]}
 
 
+@pytest.mark.usefixtures("_set_up_test_read_the_latest_release")
 class TestReadTheLatestRelease:
     """Each row: the latest release, and what the step handed on."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_read_the_latest_release(self, tmp_path: Path) -> None:
         """Give each row a working directory, fixtures and a stub `gh`."""
         self.tmp = tmp_path

@@ -135,10 +135,11 @@ def refusal(number: int, line: str) -> str:
     )
 
 
+@pytest.mark.usefixtures("_set_up_test_step_harness")
 class TestStepHarness:
     """Run the helper as the step does, with a stub `mise`."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_step_harness(self, tmp_path: Path) -> None:
         """Give each row its own runner temp and stub `mise`."""
         self.tmp = tmp_path
@@ -394,10 +395,11 @@ def entry_after_blank(body: str, entry: list[str]) -> bool:
     raise AssertionError(msg)
 
 
+@pytest.mark.usefixtures("_set_up_test_the_reader_agrees")
 class TestTheReaderAgrees:
     """#1924: the rule refuses exactly what stele would publish in the break."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_the_reader_agrees(self, tmp_path: Path) -> None:
         """Skip unless the belt's stele is installed; make the scratch repo."""
         if not STELE or not GIT:
@@ -466,13 +468,12 @@ class TestTheReaderAgrees:
     def test_every_row(self) -> None:
         """Refused exactly when the rendered break carries a later paragraph."""
         for row, (body, refused) in BREAKING_ROWS.items():
-            with self.subTest(row=row):
-                entry = self.breaking_entry(body)
-                published = bool(entry) and entry_after_blank(body, entry)
-                try:
-                    squash_message.breaking_footer(body)
-                except squash_message.StepError:
-                    found = True
-                else:
-                    found = False
-                assert (found, published) == (refused, refused), entry
+            entry = self.breaking_entry(body)
+            published = bool(entry) and entry_after_blank(body, entry)
+            try:
+                squash_message.breaking_footer(body)
+            except squash_message.StepError:
+                found = True
+            else:
+                found = False
+            assert (found, published) == (refused, refused), entry

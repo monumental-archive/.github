@@ -46,10 +46,13 @@ if TYPE_CHECKING:
 TASK = "audit:mutants"
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)
+
+
+pytestmark = pytest.mark.usefixtures("_task")
 
 
 BELT = hermetic.MISE
@@ -219,10 +222,11 @@ def outcomes(
     }
 
 
+@pytest.mark.usefixtures("_set_up_test_planted")
 class TestPlanted:
     """A planted tree, a stub PATH and a belt with stub provisioning."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_planted(self, tmp_path: Path) -> None:
         """Plant a git tree, the stubs and the belt the leg reads."""
         self.tmp = tmp_path
@@ -979,10 +983,9 @@ class TestReaders:
             ),
         )
         for value, why in rows:
-            with self.subTest(value=value):
-                with pytest.raises(decoded.UndecodableError) as caught:
-                    helper.read_metadata(value)
-                assert str(caught.value) == why
+            with pytest.raises(decoded.UndecodableError) as caught:
+                helper.read_metadata(value)
+            assert str(caught.value) == why
 
     def test_default_major_refuses_metadata_it_cannot_read(self) -> None:
         """The step says so on stderr and exits 1; the leg stops with it."""
@@ -1080,10 +1083,9 @@ class TestReaders:
             (f"{MARK} {EQUAL}:  \t", f"{EQUAL} gives no reason"),
         )
         for comment, fault in rows:
-            with self.subTest(comment=comment):
-                found = helper.read_records(f"src/lib.rs:19:  {comment}\n")
-                want = [f"src/lib.rs:19: {MARK} {fault}"]
-                assert helper.malformed(found) == want
+            found = helper.read_records(f"src/lib.rs:19:  {comment}\n")
+            want = [f"src/lib.rs:19: {MARK} {fault}"]
+            assert helper.malformed(found) == want
         sound = helper.read_records(f"src/lib.rs:19: {MARK} {EQUAL}: why\n")
         assert helper.malformed(sound) == list[str]()
 

@@ -663,10 +663,11 @@ class TestRustBuildInputs:
             assert seen.read_text() == "fat"
 
 
+@pytest.mark.usefixtures("_set_up_test_open_release_pr_inputs")
 class TestOpenReleasePrInputs:
     """`open-release-pr.sh` is plumbing, and refuses to plumb blind."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_open_release_pr_inputs(self) -> None:
         """Skip unless jq is installed."""
         if not JQ:
@@ -700,10 +701,9 @@ class TestOpenReleasePrInputs:
             for missing in self.REQUIRED:
                 env = TestOpenReleasePrInputs._full_env(plan)
                 del env[missing]
-                with self.subTest(missing=missing):
-                    result = run_script("open-release-pr.sh", Path(d), **env)
-                    assert result.returncode == 1
-                    assert missing in result.stderr
+                result = run_script("open-release-pr.sh", Path(d), **env)
+                assert result.returncode == 1
+                assert missing in result.stderr
 
     def test_a_plan_that_states_no_branch_is_refused_by_field(self) -> None:
         """The branch, staging ref, version and subject are all the plan's.
@@ -945,6 +945,7 @@ class ReleaseForge:
         }
 
 
+@pytest.mark.usefixtures("_set_up_test_open_release_pr_head")
 class TestOpenReleasePrHead(
     ReleaseForge,
 ):
@@ -971,7 +972,7 @@ class TestOpenReleasePrHead(
         f"DELETE repos/{FORGE_REPO}/git/refs/heads/release-staging/next",
     )
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_open_release_pr_head(self) -> None:
         """Lay out the stubbed forge and a plan with something to release."""
         if not JQ:
@@ -1043,21 +1044,20 @@ class TestOpenReleasePrHead(
             ),
         )
         for refuse, what, calls in rows:
-            with self.subTest(refused=refuse):
-                (self.state / "calls").unlink(missing_ok=True)
-                (self.state / "refuse").write_text(refuse + "\n")
-                self.forge(self.PLANNED)
-                result = self.run_executor()
-                assert result.returncode == 1, result.stdout
-                assert (
-                    "gh: Resource not accessible by integration (HTTP 403)\n"
-                    f"open-release-pr.sh: could not {what}\n"
-                    "  HTTP/2.0 403 Forbidden\n"
-                    "  X-Github-Request-Id: STUB:633\n"
-                    "  X-Accepted-Github-Permissions: contents=write\n"
-                ) == result.stderr
-                assert result.stdout == ""
-                assert calls == self.calls()
+            (self.state / "calls").unlink(missing_ok=True)
+            (self.state / "refuse").write_text(refuse + "\n")
+            self.forge(self.PLANNED)
+            result = self.run_executor()
+            assert result.returncode == 1, result.stdout
+            assert (
+                "gh: Resource not accessible by integration (HTTP 403)\n"
+                f"open-release-pr.sh: could not {what}\n"
+                "  HTTP/2.0 403 Forbidden\n"
+                "  X-Github-Request-Id: STUB:633\n"
+                "  X-Accepted-Github-Permissions: contents=write\n"
+            ) == result.stderr
+            assert result.stdout == ""
+            assert calls == self.calls()
 
     def test_the_sign_off_names_the_app_bot_without_the_user_endpoint(
         self,
@@ -1309,18 +1309,15 @@ class TestOpenReleasePrHead(
             ("head is the tag", tagged, 0, f"main moved to {tagged}"),
         )
         for label, head, status, said in cases:
-            with self.subTest(case=label):
-                (self.state / "calls").unlink(missing_ok=True)
-                self.forge(head)
-                result = self.run_executor(
-                    cwd=repo, GITHUB_EVENT_NAME="release", GITHUB_SHA=tagged
-                )
-                assert status == result.returncode, result.stderr
-                assert said in result.stdout
-                expected = (
-                    list(self.PROCEEDED) if head == checked_out else ["graphql head"]
-                )
-                assert expected == self.calls()
+            (self.state / "calls").unlink(missing_ok=True)
+            self.forge(head)
+            result = self.run_executor(
+                cwd=repo, GITHUB_EVENT_NAME="release", GITHUB_SHA=tagged
+            )
+            assert status == result.returncode, result.stderr
+            assert said in result.stdout
+            expected = list(self.PROCEEDED) if head == checked_out else ["graphql head"]
+            assert expected == self.calls()
 
 
 class TestCloseReleasePr(
@@ -1448,6 +1445,7 @@ class TestCloseReleasePr(
         assert list[str]() == self.calls()
 
 
+@pytest.mark.usefixtures("_set_up_test_tag_release_refusals")
 class TestTagReleaseRefusals:
     """`tag-release.sh` decides whether a commit may be tagged at all.
 
@@ -1509,7 +1507,7 @@ class TestTagReleaseRefusals:
             RUNNER_TEMP=str(repo / ".rt"),
         )
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_tag_release_refusals(self) -> None:
         """Nothing shared; each row builds the history it is about."""
         if not STELE:
@@ -1596,6 +1594,7 @@ TAG_REFUSED = (
 )
 
 
+@pytest.mark.usefixtures("_set_up_test_tag_release_push")
 class TestTagReleasePush:
     """What `tag-release.sh` says when the tag push itself fails (#1322).
 
@@ -1604,7 +1603,7 @@ class TestTagReleasePush:
     the way GitHub answered edtf's v1.3.5 push.
     """
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_tag_release_push(self) -> None:
         """Skip unless stele is installed."""
         if not STELE:
@@ -1752,6 +1751,7 @@ esac
 """
 
 
+@pytest.mark.usefixtures("_set_up_test_tag_release_upgrade_path")
 class TestTagReleaseUpgradePath:
     """The mint guard acts on previous_release.py's predecessor (#1592).
 
@@ -1762,7 +1762,7 @@ class TestTagReleaseUpgradePath:
     newest. Each row reaches the push or stops before signing.
     """
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_tag_release_upgrade_path(self) -> None:
         """Skip unless stele and jq is installed."""
         if not STELE:

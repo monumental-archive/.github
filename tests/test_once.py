@@ -27,10 +27,13 @@ SH = hermetic.tool("sh")
 TASK = "test"
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)
+
+
+pytestmark = pytest.mark.usefixtures("_task")
 
 
 def lines(*logged: str) -> list[str]:
@@ -43,10 +46,11 @@ def lines(*logged: str) -> list[str]:
     return list(logged)
 
 
+@pytest.mark.usefixtures("_set_up_test_once")
 class TestOnce:
     """One branch per row: run, skip, fail and retry, race."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_once(self, tmp_path: Path) -> None:
         """Make the row's scratch, its log and its marker's path."""
         self.tmp = tmp_path
@@ -120,6 +124,5 @@ class TestOnce:
     def test_no_separator_is_a_usage_error(self) -> None:
         """Arguments without `--` or a command: 2, nothing run."""
         for argv in ([str(self.marker)], [str(self.marker), "--"], ["a", "b", "c"]):
-            with self.subTest(argv=argv):
-                assert once.main(argv) == 2
+            assert once.main(argv) == 2
         assert not self.marker.exists()

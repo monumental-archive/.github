@@ -90,10 +90,11 @@ def call(argv: list[str]) -> hermetic.Called:
         return hermetic.call(lambda: verdict.main(argv), env=hermetic.env())
 
 
+@pytest.mark.usefixtures("_set_up_test_verdict")
 class TestVerdict:
     """One row per branch of verdict.judge()."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_verdict(self, tmp_path: Path) -> None:
         """Lay out a report file."""
         self.report = Path(str(tmp_path)) / "report.json"
@@ -252,15 +253,14 @@ class TestVerdict:
         }
         argv = ["--exit-code", "0", "--report", str(self.report), "--saved", "true"]
         for why, text in rows.items():
-            with self.subTest(why=why):
-                self.report.write_text(text, encoding="utf-8")
-                proc = call(argv)
-                assert proc.returncode == 1, proc.stderr
-                assert proc.stdout == ""
-                assert proc.stderr.strip() == (
-                    "::error::verdict.py: stele exited 0 and its report could not"
-                    " be judged: the report could not be read"
-                )
+            self.report.write_text(text, encoding="utf-8")
+            proc = call(argv)
+            assert proc.returncode == 1, proc.stderr
+            assert proc.stdout == ""
+            assert proc.stderr.strip() == (
+                "::error::verdict.py: stele exited 0 and its report could not"
+                " be judged: the report could not be read"
+            )
 
     def test_report_from_another_target(self) -> None:
         """Another verb's report: named, never read on."""

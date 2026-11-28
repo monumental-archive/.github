@@ -181,11 +181,10 @@ class TestTargets(TestRows):
         """Nothing requested, after spaces and the first line."""
         for cls in ("go-binary", "rust-binary"):
             for request in ("", "  ", "\nlinux-amd64"):
-                with self.subTest(cls=cls, request=request):
-                    self.refused(
-                        ("targets", cls, request),
-                        f"::error::matrix: no targets requested — {NOTHING}",
-                    )
+                self.refused(
+                    ("targets", cls, request),
+                    f"::error::matrix: no targets requested — {NOTHING}",
+                )
 
     def test_an_unknown_go_target_names_the_go_form(self) -> None:
         """The Go hint names the target form."""
@@ -381,11 +380,10 @@ class TestMappingShape(TestRows):
                 ("base-images",),
             )
             for argv in modes:
-                with self.subTest(text=text, mode=argv[0]):
-                    self.refused(
-                        (argv[0], self.mapping(text), *argv[1:]),
-                        f"::error::matrix: {said}",
-                    )
+                self.refused(
+                    (argv[0], self.mapping(text), *argv[1:]),
+                    f"::error::matrix: {said}",
+                )
 
 
 class TestPgrxImages(TestRows):
@@ -513,4 +511,4 @@ class TestCommandLine:
         """A missing argument or an unknown class prints the usage."""
         code, out, err = run(*argv)
         assert (code, out) == (2, "")
-        assert err.startswith("matrix: usage: matrix.py targets")
+        assert err.startswith("matrix: usage: belt matrix targets")

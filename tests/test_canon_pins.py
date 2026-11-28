@@ -33,10 +33,13 @@ if TYPE_CHECKING:
 TASK = "lint:canon-pins"
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)
+
+
+pytestmark = pytest.mark.usefixtures("_task")
 
 
 BELT = hermetic.MISE
@@ -129,10 +132,11 @@ def checkout(tail: str = "") -> str:
     )
 
 
+@pytest.mark.usefixtures("_set_up_test_planted")
 class TestPlanted:
     """A planted git tree."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_planted(self, tmp_path: Path) -> None:
         """Plant an empty tree."""
         self.tree = tmp_path
@@ -387,7 +391,6 @@ class TestCalls(TestPlanted):
             [CANON, "--", "--", "--", "--"],
         ]
         for argv in calls:
-            with self.subTest(argv=argv):
-                done = self.helper(*argv)
-                same(done.returncode, canon_pins.EXIT_ERROR)
-                same(done.stderr.splitlines(), [usage])
+            done = self.helper(*argv)
+            same(done.returncode, canon_pins.EXIT_ERROR)
+            same(done.stderr.splitlines(), [usage])

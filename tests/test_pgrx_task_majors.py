@@ -71,7 +71,7 @@ echo '[]'
 PYTHON_STUB = r"""#!/usr/bin/env bash
 script=$(basename "$1")
 case ${script} in
-  rust_lint.py | msrv_lint.py | pg_clippy.py) exec "${PLANT_PYTHON}" "$@" ;;
+  belt rust-lint | belt msrv-lint | pg_clippy.py) exec "${PLANT_PYTHON}" "$@" ;;
 esac
 shift
 [[ $1 == --failed ]] || cat > /dev/null
@@ -107,7 +107,7 @@ METADATA = "cargo metadata --no-deps --format-version 1 --locked"
 REGISTER = [
     "prepare 16,17",
     "mise ls aqua:theseus-rs/postgresql-binaries --json",
-    "pgrx_postgres.py --majors 16,17",
+    "belt pgrx-postgres --majors 16,17",
 ]
 
 
@@ -124,10 +124,11 @@ def body(task: str) -> str:
     return decoded.as_str(entry["run"], f"{task}.run")
 
 
+@pytest.mark.usefixtures("_set_up_test_two_extensions")
 class TestTwoExtensions:
     """A workspace of two extensions at different highest majors."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_two_extensions(self, tmp_path: Path) -> None:
         """Plant the stubs, the surface, the plan and the belt."""
         self.tmp = tmp_path
@@ -224,7 +225,7 @@ class TestTwoExtensions:
             f"cargo fmt --all {at} -- --config-path {self.belt}/rustfmt.toml",
             f"cargo fetch --locked {at}",
             f"{METADATA} {at}",
-            "gate_surface.py --exclude ",
+            "belt gate-surface --exclude ",
             (
                 f"{fix} --workspace --exclude first --exclude second"
                 f" --all-features --locked {at} -- -D warnings"
@@ -251,7 +252,7 @@ class TestTwoExtensions:
         want = [
             f"cargo fetch --locked {at}",
             f"{METADATA} {at}",
-            "gate_surface.py --exclude ",
+            "belt gate-surface --exclude ",
             *REGISTER,
             (
                 f"cargo clippy -p first@0.1.0 {at} {own} --features pg17"
@@ -292,9 +293,9 @@ class TestTwoExtensions:
             f"cargo fetch --locked {at}",
             # The whole graph, resolved with the gate's features (#1850).
             f"cargo metadata --format-version 1 --locked {at} --all-features",
-            "gate_surface.py --exclude ",
+            "belt gate-surface --exclude ",
             (
-                "msrv_plan.py --toolchains <tmp>/toolchains.json --exclude "
+                "belt msrv-plan --toolchains <tmp>/toolchains.json --exclude "
                 f" --pgrx first:17,second:16 --floor {self.belt}/rust-floor.toml"
                 " --root Cargo.toml"
             ),
@@ -321,7 +322,9 @@ class TestTwoExtensions:
         done = self.run_task("lint:msrv")
         assert done.returncode == 101, done.stderr
         failed = [line for line in self.logged() if "--failed" in line]
-        want: list[str] = ["msrv_plan.py --failed 1.82.0 first@0.1.0 --root Cargo.toml"]
+        want: list[str] = [
+            "belt msrv-plan --failed 1.82.0 first@0.1.0 --root Cargo.toml"
+        ]
         assert want == failed
         said = ["lint:msrv: compiling at 1.82.0: first@0.1.0"]
         assert said == done.stdout.splitlines()

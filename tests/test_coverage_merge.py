@@ -72,10 +72,11 @@ TASKS = {
 }
 
 
+@pytest.mark.usefixtures("_set_up_test_measured")
 class TestMeasured:
     """Two tasks on two shards each merge to one runner's figure."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_measured(self, tmp_path: Path) -> None:
         """Plant the code, the two tasks' suites, and the run's rc file."""
         self.base = Path(str(tmp_path))

@@ -129,10 +129,11 @@ def measured(crate: str) -> str:
     )
 
 
+@pytest.mark.usefixtures("_set_up_test_planted")
 class TestPlanted:
     """A planted repository, stub PATH and belt; the rows are below."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_planted(self, tmp_path: Path) -> None:
         """Plant an empty repository, the stubs and a belt."""
         self.tmp = tmp_path
@@ -551,10 +552,11 @@ DECLARATIONS: dict[str, tuple[str, str, bool]] = {
 }
 
 
+@pytest.mark.usefixtures("_set_up_test_the_reader_agrees")
 class TestTheReaderAgrees:
     """#1906: "declared breaking" is what stele files under "Breaking"."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_the_reader_agrees(self, tmp_path: Path) -> None:
         """Skip unless the belt's stele is installed; plant a repository."""
         if not STELE:
@@ -608,7 +610,6 @@ class TestTheReaderAgrees:
     def test_every_declaration(self) -> None:
         """The reading and the reader agree, row by row."""
         for row, (title, body, breaking) in DECLARATIONS.items():
-            with self.subTest(row=row):
-                reading = declared_break.declared(title, body)
-                filed = self.filed_breaking(title, body)
-                assert (reading, filed) == (breaking, breaking)
+            reading = declared_break.declared(title, body)
+            filed = self.filed_breaking(title, body)
+            assert (reading, filed) == (breaking, breaking)

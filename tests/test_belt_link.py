@@ -63,10 +63,11 @@ def body() -> str:
     return decoded.as_str(task["run"], f"{NAME}'s run")
 
 
+@pytest.mark.usefixtures("_set_up_test_the_belt_claims_its_directory")
 class TestTheBeltClaimsItsDirectory:
     """Each row: what the repository tracks under .config/mise/."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_the_belt_claims_its_directory(self, tmp_path: Path) -> None:
         """Plant an empty repository."""
         self.tmp = tmp_path

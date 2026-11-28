@@ -882,11 +882,10 @@ class TestCoverage:
         """No job installs the whole config, and none can be empty."""
         for workflow, job_id in IN_SCOPE:
             job = load(workflow)[job_id]
-            with self.subTest(workflow=workflow, job=job_id):
-                assert strings() == whole_config(workflow, job_id, job)
-                if (workflow, job_id) not in WHOLE_CONFIG:
-                    keys, needed, _ = installs(job)
-                    assert keys or needed, "an empty list installs all"
+            assert strings() == whole_config(workflow, job_id, job)
+            if (workflow, job_id) not in WHOLE_CONFIG:
+                keys, needed, _ = installs(job)
+                assert keys or needed, "an empty list installs all"
 
     @pytest.mark.parametrize("workflow,job_id", WHOLE_CONFIG)
     def test_the_exemption_is_still_true(
@@ -921,10 +920,9 @@ class TestCoverage:
         """The legs name their tools; the gate does not."""
         for workflow, job_id in GATE_LISTS:
             job = load(workflow)[job_id]
-            with self.subTest(job=job_id):
-                keys, needed, optional = installs(job)
-                assert keys
-                assert needed or optional
+            keys, needed, optional = installs(job)
+            assert keys
+            assert needed or optional
         for workflow, job_id in GATE_WHOLE:
             (step,) = mise_steps(load(workflow)[job_id])
             assert "install_args" not in inputs(step)
@@ -934,10 +932,9 @@ class TestCoverage:
         known = set(belt_table("tools"))
         listed = [j for j in IN_SCOPE if j not in WHOLE_CONFIG]
         for workflow, job_id in [*listed, *GATE_LISTS]:
-            with self.subTest(workflow=workflow, job=job_id):
-                keys, _, _ = installs(load(workflow)[job_id])
-                unknown: list[str] = [k for k in keys if k not in known]
-                assert strings() == unknown
+            keys, _, _ = installs(load(workflow)[job_id])
+            unknown: list[str] = [k for k in keys if k not in known]
+            assert strings() == unknown
 
 
 class TestJobInstalls:
@@ -1218,8 +1215,7 @@ class TestGateUploadMeasuresNothing:
     def test_the_upload_installs_and_runs_nothing(self) -> None:
         """The real job: download, list, hand to Codecov."""
         for (workflow, job_id), why in GATE_NONE.items():
-            with self.subTest(job=job_id, why=why):
-                assert strings() == measures(workflow, job_id, load(workflow)[job_id])
+            assert strings() == measures(workflow, job_id, load(workflow)[job_id])
 
     def test_the_upload_that_hung_on_main_is_named(self) -> None:
         """Planted: the job as it was, re-measuring with five tools."""
@@ -1402,10 +1398,7 @@ class TestPythonCode:
             ('import sys\nNEXT = "planted-next.py"\n', strings()),
             ('"""Runs planted-next.py, once."""\n', strings()),
         ):
-            with self.subTest(helper=helper):
-                assert red == planted_uninstalled(
-                    helper, {"release/planted-next.py": nxt}
-                )
+            assert red == planted_uninstalled(helper, {"release/planted-next.py": nxt})
 
     def test_a_task_in_an_argv_is_followed(self) -> None:
         """A task a subprocess call runs is reached; one a message names is not."""
@@ -1414,8 +1407,7 @@ class TestPythonCode:
             ('subprocess.run(["mise", "run", "audit:deny"], check=True)\n', DENY_RED),
             (f'print("run mise run audit:deny by hand")\n{git}', strings()),
         ):
-            with self.subTest(helper=helper):
-                assert red == planted_uninstalled(f"import subprocess\n{helper}")
+            assert red == planted_uninstalled(f"import subprocess\n{helper}")
 
 
 DENY_RED = [
@@ -1585,8 +1577,7 @@ class TestProseFromTheParser:
             ('echo "a\nb" x', "echo   \n    "),
         ]
         for text, want in rows:
-            with self.subTest(text=text):
-                assert want == code(text)
+            assert want == code(text)
 
     def test_text_shfmt_refuses_is_named(self) -> None:
         """No fallback: a parse error is a ValueError naming shfmt's message."""
@@ -1859,12 +1850,12 @@ class TestBeltPython:
         text = PLANTED_JOB + (
             "      - name: Push the image\n"
             "        run: |\n"
-            '          python3 .org-canon/release/registry.py push --image "${IMAGE}"\n'
+            '          python3 -I .org-canon/belt registry push --image "${IMAGE}"\n'
         )
         assert strings(
             ".github/workflows/x.yml build: step 'Push the image' starts"
-            " registry.py with the runner's python3; run it as"
-            ' "${ORG_PYTHON}" registry.py (#1543)'
+            " belt registry with the runner's python3; run it as"
+            ' "${ORG_PYTHON}" belt registry (#1543)'
         ) == interpreter_findings({".github/workflows/x.yml": text}, {"registry.py"})
 
     def test_a_start_by_first_line_is_named(self) -> None:
@@ -1880,13 +1871,13 @@ class TestBeltPython:
         assert strings(
             (
                 ".github/workflows/x.yml build: step 'Attach' starts"
-                " attach_publish.py by its own first line; run it as"
-                ' "${ORG_PYTHON}" attach_publish.py (#1543)'
+                " belt attach-publish by its own first line; run it as"
+                ' "${ORG_PYTHON}" belt attach-publish (#1543)'
             ),
             (
                 ".github/workflows/x.yml build: step 'Fetch' starts"
-                " previous_release.py by its own first line; run it as"
-                ' "${ORG_PYTHON}" previous_release.py (#1543)'
+                " belt previous-release by its own first line; run it as"
+                ' "${ORG_PYTHON}" belt previous-release (#1543)'
             ),
         ) == interpreter_findings(
             {".github/workflows/x.yml": text},
@@ -1931,9 +1922,9 @@ class TestBeltPython:
             "          git ls-files '*.py' | wc -l\n"
             "          ./caller-build.py --release\n"
             "          python3 -c 'print(1)'\n"
-            '          "${ORG_PYTHON}" .org-canon/mise/gate_tools.py'
+            '          "${ORG_PYTHON}" -I .org-canon/belt gate-tools'
             " --helper registry.py\n"
-            "          # python3 .org-canon/release/registry.py tag\n"
+            "          # python3 -I .org-canon/belt registry tag\n"
         )
         assert strings() == interpreter_findings(
             {".github/workflows/x.yml": text}, {"registry.py", "gate_tools.py"}
@@ -2305,7 +2296,7 @@ class TestGateCoverageReports:
 # runs on the first. A split leg is a row per task and shard (#2160).
 GATE_LEGS = ("lint", "test", "properties")
 RUN_LEG = (
-    '"${ORG_PYTHON}" .org-canon/mise/gate_shard.py run'
+    '"${ORG_PYTHON}" -I .org-canon/belt gate-shard run'
     ' "${LEG}" "${TASK}" "${SHARD}" "${OF}"'
 )
 # The row's name is the plan's (#2160): its leg, task and shard.
@@ -2547,8 +2538,7 @@ class TestGateLegs:
             ),
         ]
         for label, (old, new), message in rows:
-            with self.subTest(row=label):
-                assert strings(message) == leg_findings(planted(old, new))
+            assert strings(message) == leg_findings(planted(old, new))
 
 
 # A default-branch test compares the ref with the event's own name for

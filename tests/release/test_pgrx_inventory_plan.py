@@ -136,7 +136,7 @@ class TestPlanStepIsTheHelper:
     def test_the_shipped_step_calls_the_helper(self) -> None:
         """The run: is the call alone, from the canon tree."""
         assert step()["run"] == (
-            '"${ORG_PYTHON}" .org-canon/release/pgrx/inventory_plan.py'
+            '"${ORG_PYTHON}" -I .org-canon/belt inventory-plan'
             ' "${UNTRUSTED_CRATE_DIR}" "${PG}"\n'
         )
 
@@ -230,5 +230,5 @@ class TestRefuses:
         run = run_helper(args=("crate",))
         assert run.returncode == 2
         assert (
-            run.stderr == "inventory-plan: usage: inventory_plan.py CRATE_DIR MAJOR\n"
+            run.stderr == "inventory-plan: usage: belt inventory-plan CRATE_DIR MAJOR\n"
         )

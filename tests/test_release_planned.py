@@ -119,10 +119,11 @@ class History:
         )
 
 
+@pytest.mark.usefixtures("_set_up_test_release_planned")
 class TestReleasePlanned:
     """Green where planned, red with both commits and the count, else skip."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_release_planned(self, tmp_path: Path) -> None:
         """Build a history with one commit on the default branch."""
         if GIT is None or BASH is None:

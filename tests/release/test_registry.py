@@ -257,10 +257,11 @@ class Fake(BaseHTTPRequestHandler):
         self.answer(201)
 
 
+@pytest.mark.usefixtures("_set_up_test_harness")
 class TestHarness:
     """A fresh fake, a stub docker on PATH, and the step's environment."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_harness(
         self, request: pytest.FixtureRequest, tmp_path: Path
     ) -> None:
@@ -388,13 +389,12 @@ class TestBuildxFloor(TestHarness):
             ("", "buildx unknown"),
         ]
         for text, shown in rows:
-            with self.subTest(text=text):
-                with pytest.raises(registry.RefusedError) as cm:
-                    registry.buildx_floor(text)
-                assert (
-                    str(cm.value)
-                    == f"{shown} < 0.12: index annotations would be dropped silently"
-                )
+            with pytest.raises(registry.RefusedError) as cm:
+                registry.buildx_floor(text)
+            assert (
+                str(cm.value)
+                == f"{shown} < 0.12: index annotations would be dropped silently"
+            )
 
     def test_assemble_refuses_below_the_floor_before_any_push(self) -> None:
         """The assemble step asserts the floor first."""
@@ -610,14 +610,13 @@ class TestPush(TestHarness):
                 (oci_push(self.tmp), "no digest from the push"),
                 (pgrx_push(self.tmp), "no index digest from the push"),
             ]:
-                with self.subTest(meta=meta, message=message):
-                    (self.tmp / "meta.json").unlink(missing_ok=True)
-                    self.env.pop("STUB_META", None)
-                    if meta is not None:
-                        self.env["STUB_META"] = meta
-                    self.refused(message, *argv)
-                    assert not (self.tmp / "digests" / "amd64").exists()
-                    assert not (self.tmp / "digests" / "pg17.json").exists()
+                (self.tmp / "meta.json").unlink(missing_ok=True)
+                self.env.pop("STUB_META", None)
+                if meta is not None:
+                    self.env["STUB_META"] = meta
+                self.refused(message, *argv)
+                assert not (self.tmp / "digests" / "amd64").exists()
+                assert not (self.tmp / "digests" / "pg17.json").exists()
 
     def test_a_failed_build_refuses_on_its_status(self) -> None:
         """The build's exit status is not masked by the metadata read."""
@@ -627,10 +626,11 @@ class TestPush(TestHarness):
         assert not (self.tmp / "digests" / "amd64").exists()
 
 
+@pytest.mark.usefixtures("_set_up_test_assemble")
 class TestAssemble(TestHarness):
     """assemble-oci-index.yml: the index, by digest, proven by the registry."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_assemble(self) -> None:
         """Lay out both per-architecture digests, as the download leaves them."""
         self.digests = self.tmp / "digests"
@@ -706,20 +706,19 @@ class TestAssemble(TestHarness):
             ("arm64", ARM + "\nextra"),
         ]
         for arch, content in rows:
-            with self.subTest(arch=arch, content=content):
-                (self.digests / "amd64").write_text(AMD, "utf-8")
-                (self.digests / "arm64").write_text(ARM, "utf-8")
-                if content is None:
-                    (self.digests / arch).unlink()
-                else:
-                    (self.digests / arch).write_text(content, "utf-8")
-                Path(self.env["STUB_LOG"]).unlink(missing_ok=True)
-                self.refused(
-                    message, "assemble", "--digests", str(self.digests), "--tag", "1"
-                )
-                only: list[list[str]] = [["buildx", "version"]]
-                assert self.argvs() == only
-                assert Fake.log == list[Logged]()
+            (self.digests / "amd64").write_text(AMD, "utf-8")
+            (self.digests / "arm64").write_text(ARM, "utf-8")
+            if content is None:
+                (self.digests / arch).unlink()
+            else:
+                (self.digests / arch).write_text(content, "utf-8")
+            Path(self.env["STUB_LOG"]).unlink(missing_ok=True)
+            self.refused(
+                message, "assemble", "--digests", str(self.digests), "--tag", "1"
+            )
+            only: list[list[str]] = [["buildx", "version"]]
+            assert self.argvs() == only
+            assert Fake.log == list[Logged]()
 
     def test_a_trailing_newline_on_the_digest_file_is_read_as_cat_read_it(self) -> None:
         """`$(cat f)` dropped trailing newlines; so does the helper."""
@@ -749,15 +748,14 @@ class TestAssemble(TestHarness):
             (b"not json\n", "no media type"),
         ]
         for data, shown in rows:
-            with self.subTest(shown=shown):
-                self.dry_run(data)
-                code, out = self.assemble()
-                assert code == 1, out
-                assert (
-                    f"::error::registry: the assembled index is '{shown}',"
-                    " not an OCI image index\n"
-                ) in out
-                assert Fake.log == list[Logged]()
+            self.dry_run(data)
+            code, out = self.assemble()
+            assert code == 1, out
+            assert (
+                f"::error::registry: the assembled index is '{shown}',"
+                " not an OCI image index\n"
+            ) in out
+            assert Fake.log == list[Logged]()
 
     def test_a_registry_answering_another_digest_for_the_index(self) -> None:
         """The registry stored other bytes: refused, no outputs written."""
@@ -892,10 +890,9 @@ class TestTag(TestHarness):
             "[" * 100_000,
         ]
         for images in rows:
-            with self.subTest(images=images[:60]):
-                self.env["UNTRUSTED_IMAGES"] = images
-                self.refused(message, "tag")
-                assert Fake.log == list[Logged]()
+            self.env["UNTRUSTED_IMAGES"] = images
+            self.refused(message, "tag")
+            assert Fake.log == list[Logged]()
 
     def test_field_whitelists(self) -> None:
         """Each field's whitelist, each message; nothing is requested."""
@@ -921,10 +918,9 @@ class TestTag(TestHarness):
             ({"digest": AMD + "a"}, "digest is not sha256:<64 lowercase hex>"),
         ]
         for change, message in rows:
-            with self.subTest(change=change):
-                self.env["UNTRUSTED_IMAGES"] = dumps([{**ok, **change}])
-                self.refused(message, "tag")
-                assert Fake.log == list[Logged]()
+            self.env["UNTRUSTED_IMAGES"] = dumps([{**ok, **change}])
+            self.refused(message, "tag")
+            assert Fake.log == list[Logged]()
 
     def test_a_bad_later_entry_refuses_before_the_first_is_tagged(self) -> None:
         """Validation is whole-input: no tag lands from a refused input."""

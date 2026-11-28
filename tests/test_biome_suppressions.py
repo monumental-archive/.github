@@ -45,10 +45,13 @@ Found = list[tuple[int, str]]
 NOTHING: Found = []
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)
+
+
+pytestmark = pytest.mark.usefixtures("_task")
 
 
 def wide(name: str, text: str) -> Found:

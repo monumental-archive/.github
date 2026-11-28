@@ -93,11 +93,10 @@ class TestOnePublishKeyPerRow:
             ("another registry only", ["x"], ""),
         )
         for label, key, expected in rows:
-            with self.subTest(label):
-                name = "fx-" + label.replace(" ", "-")
-                result, _ = run_helper({name: key}, (name,))
-                assert result.returncode == 0, result.stderr
-                assert expected == result.stdout
+            name = "fx-" + label.replace(" ", "-")
+            result, _ = run_helper({name: key}, (name,))
+            assert result.returncode == 0, result.stderr
+            assert expected == result.stdout
 
 
 class TestTheWholeWorkspace:

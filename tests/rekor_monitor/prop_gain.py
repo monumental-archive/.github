@@ -139,10 +139,11 @@ def doc(point: tuple[int, int, int]) -> bytes:
     return json.dumps(checkpoint).encode()
 
 
+@pytest.mark.usefixtures("_set_up_test_scratch")
 class TestScratch:
     """Two scratch checkpoint files for a test's examples."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_scratch(self, tmp_path: Path) -> None:
         """Hold the scratch files."""
         self.start = Path(str(tmp_path)) / "run-start.json"

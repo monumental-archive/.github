@@ -232,11 +232,10 @@ class TestLint:
             {},
         ]
         for files in rows:
-            with self.subTest(files=" ".join(files)):
-                got = run(LINT, files)
-                assert got.returncode == 0, got.stderr
-                assert got.stdout == SKIP_LINT
-                assert got.calls == NONE
+            got = run(LINT, files)
+            assert got.returncode == 0, got.stderr
+            assert got.stdout == SKIP_LINT
+            assert got.calls == NONE
 
     def test_an_unreadable_lock_is_red_by_name(self) -> None:
         """A lock that is not TOML is named, never read as empty."""
@@ -313,11 +312,10 @@ class TestAudit:
         """Nothing to run: the skip line, and the stub never called."""
         rows: list[dict[str, str]] = [{"Cargo.lock": lock(("rand", "0.9.0"))}, {}]
         for files in rows:
-            with self.subTest(files=" ".join(files)):
-                got = run(AUDIT, files)
-                assert got.returncode == 0, got.stderr
-                assert got.stdout == SKIP_AUDIT
-                assert got.calls == NONE
+            got = run(AUDIT, files)
+            assert got.returncode == 0, got.stderr
+            assert got.stdout == SKIP_AUDIT
+            assert got.calls == NONE
 
     def test_no_test_task_is_red_by_lock_file(self) -> None:
         """Proptest locked and nothing to run it: red, naming the lock."""
@@ -370,8 +368,7 @@ class TestHelper:
             ("2.0.0", False),
         ]
         for version, below in rows:
-            with self.subTest(version=version):
-                assert below == rp.below_minimum(version)
+            assert below == rp.below_minimum(version)
 
     def test_locks_proptest_reads_tracked_locks_only(self) -> None:
         """audit_legs.py's answer: the lock files the tasks read."""

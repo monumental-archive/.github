@@ -217,10 +217,11 @@ class TestTask:
         assert snapshot(real) == before
 
 
+@pytest.mark.usefixtures("_set_up_test_helper")
 class TestHelper:
     """`run` names each kind of change a leak can make."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_helper(self, tmp_path: Path) -> None:
         """Plant a decoy in a scratch directory."""
         self.decoy = pathlib.Path(str(tmp_path)) / "decoy"
@@ -300,13 +301,12 @@ class TestHelper:
             ("git config user.name leaked", ["config rewritten"]),
         ]
         for script, wanted in rows:
-            with self.subTest(script=script):
-                self.setUp()
-                status, err = self.leak(script)
-                assert status == 1, err
-                assert gd.MESSAGE in err
-                for line in wanted:
-                    assert line in err
+            self.setUp()
+            status, err = self.leak(script)
+            assert status == 1, err
+            assert gd.MESSAGE in err
+            for line in wanted:
+                assert line in err
 
     def test_no_git_passes_the_status_through(self) -> None:
         """A run that leaves the decoy alone answers with its own status."""

@@ -34,10 +34,13 @@ if TYPE_CHECKING:
 TASK = "lint:caller-permissions"
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)
+
+
+pytestmark = pytest.mark.usefixtures("_task")
 
 
 BELT = hermetic.MISE
@@ -97,10 +100,11 @@ def body() -> str:
     return decoded.as_str(task["run"], f"{TASK}.run")
 
 
+@pytest.mark.usefixtures("_set_up_test_planted")
 class TestPlanted:
     """A planted git tree, and a stub stele first on PATH."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_planted(
         self, tmp_path: Path, request: pytest.FixtureRequest
     ) -> None:
@@ -280,8 +284,7 @@ class TestHelper(TestPlanted):
         usage = f"{TASK}: {caller_permissions.USAGE}"
         calls: list[list[str]] = [[], [CANON], ["", "ci.yml"]]
         for argv in calls:
-            with self.subTest(argv=argv):
-                done = self.helper(*argv)
-                same(done.returncode, caller_permissions.EXIT_ERROR)
-                same(done.stderr.splitlines(), [usage])
+            done = self.helper(*argv)
+            same(done.returncode, caller_permissions.EXIT_ERROR)
+            same(done.stderr.splitlines(), [usage])
         same(self.logged(), [])

@@ -157,5 +157,4 @@ class TestOneTree:
             ),
         ]
         for name, text, want in rows:
-            with self.subTest(name):
-                assert one_tree(text) == want
+            assert one_tree(text) == want

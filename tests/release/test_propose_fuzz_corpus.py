@@ -110,10 +110,11 @@ def same(want: list[str], got: list[str]) -> None:
     assert want == got
 
 
+@pytest.mark.usefixtures("_set_up_test_forge")
 class TestForge:
     """A scratch directory with the stubbed gh first on PATH."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_forge(self, tmp_path: Path) -> None:
         """Lay out the stub, its state and an empty artifact."""
         self.tmp = tmp_path
@@ -244,15 +245,14 @@ class TestRefusals(TestForge):
             ("testdata/fuzz/FuzzLoad/abc", ""),
         )
         for path, why in rows:
-            with self.subTest(path=path):
-                said = subprocess.run(
-                    [BASH, "-c", f'. "{PROPOSE}"; corpus_path_refusal "$1"', "t", path],
-                    env=self.env,
-                    capture_output=True,
-                    text=True,
-                    check=True,
-                ).stdout
-                assert why == said.strip()
+            said = subprocess.run(
+                [BASH, "-c", f'. "{PROPOSE}"; corpus_path_refusal "$1"', "t", path],
+                env=self.env,
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout
+            assert why == said.strip()
 
     def test_an_empty_artifact_proposes_nothing(self) -> None:
         """No file: refused before any call."""

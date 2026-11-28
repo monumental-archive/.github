@@ -248,10 +248,11 @@ UNDECIDED = {
 }
 
 
+@pytest.mark.usefixtures("_set_up_test_audit_deny")
 class TestAuditDeny:
     """stele's status is the verdict; cargo-deny's is not read."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_audit_deny(self, tmp_path: Path) -> None:
         """Plant a checkout, a canon with security/vex/, the stubs and tools."""
         self.tmp = tmp_path

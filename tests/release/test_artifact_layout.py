@@ -276,23 +276,22 @@ class TestStaged:
         for step in steps:
             env = _env(step)
             family = _family(env.get("ARTIFACT"))
-            with self.subTest(step=step.get("name"), artifact=env.get("ARTIFACT")):
-                scratch = tempfile.TemporaryDirectory()
-                self.addCleanup(scratch.cleanup)
-                base = Path(scratch.name)
-                stage = base / "up"
-                artifact = f"{family}7"
-                source, inside = plant(base, directory=family == "coverage-run-")
-                self.stage(step, source, stage, artifact)
-                want: list[str] = [artifact]
-                names = [p.name for p in stage.iterdir()]
-                assert want == names
-                found = sorted(
-                    str(p.relative_to(stage / artifact))
-                    for p in (stage / artifact).rglob("*")
-                    if p.is_file()
-                )
-                assert inside == found
+            scratch = tempfile.TemporaryDirectory()
+            self.addCleanup(scratch.cleanup)
+            base = Path(scratch.name)
+            stage = base / "up"
+            artifact = f"{family}7"
+            source, inside = plant(base, directory=family == "coverage-run-")
+            self.stage(step, source, stage, artifact)
+            want: list[str] = [artifact]
+            names = [p.name for p in stage.iterdir()]
+            assert want == names
+            found = sorted(
+                str(p.relative_to(stage / artifact))
+                for p in (stage / artifact).rglob("*")
+                if p.is_file()
+            )
+            assert inside == found
 
     def test_a_row_that_measured_nothing_stages_nothing(self) -> None:
         """No run directory, no stage: the upload then finds no files."""

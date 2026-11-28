@@ -131,10 +131,11 @@ CEILING = (
 )
 
 
+@pytest.mark.usefixtures("_set_up_test_planted")
 class TestPlanted:
     """A planted, tracked tree; a lint's verdict on it."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_planted(self, tmp_path: Path) -> None:
         """Make an empty git repository and a scrubbed environment."""
         tmp = tmp_path
@@ -282,10 +283,11 @@ class TestActionPins(TestPlanted):
         )
 
 
+@pytest.mark.usefixtures("_set_up_test_zizmor")
 class TestZizmor(TestPlanted):
     """lint:zizmor, with zizmor stubbed to record its arguments."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_zizmor(self) -> None:
         """Put a recording zizmor first on PATH."""
         self.args = self.bin / "args"

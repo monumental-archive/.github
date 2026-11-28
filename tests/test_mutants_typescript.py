@@ -41,10 +41,13 @@ if TYPE_CHECKING:
 TASK = "audit:mutants"
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)
+
+
+pytestmark = pytest.mark.usefixtures("_task")
 
 
 BELT = hermetic.MISE
@@ -140,10 +143,11 @@ def report(*mutants: dict[str, object]) -> dict[str, object]:
 KILLED = (mutant("Killed", 1), mutant("Timeout", 2, mutator="BlockStatement"))
 
 
+@pytest.mark.usefixtures("_set_up_test_planted")
 class TestPlanted:
     """A planted tree and a stub StrykerJS; the rows are in the classes below."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_planted(self, tmp_path: Path) -> None:
         """Plant a git tree, the stub and its answers."""
         self.tmp = tmp_path
@@ -376,6 +380,7 @@ class TestShards(TestPlanted):
         assert log == list[str]()
 
 
+@pytest.mark.usefixtures("_set_up_test_share_out")
 class TestShareOut:
     """`share`: the config's `mutate` list, expanded and cut round-robin."""
 
@@ -391,7 +396,7 @@ class TestShareOut:
         "README.md",
     )
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_share_out(self, tmp_path: Path) -> None:
         """Plant a git tree of tracked files, and work in it."""
         tmp = tmp_path

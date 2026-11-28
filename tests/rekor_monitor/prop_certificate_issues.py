@@ -174,10 +174,11 @@ class TestTitleRoundTrip:
             )
 
 
+@pytest.mark.usefixtures("_set_up_test_report_reading")
 class TestReportReading:
     """Whatever the report file holds: a grouping, or the refusal."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_report_reading(self, tmp_path: Path) -> None:
         """Hold one scratch report file for the test's examples."""
         self.path = Path(str(tmp_path)) / "report.json"

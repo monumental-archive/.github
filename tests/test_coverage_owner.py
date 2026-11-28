@@ -91,10 +91,11 @@ def owner(target: Path) -> str:
     return (target / coverage_owner.OWNER).read_text(encoding="utf-8")
 
 
+@pytest.mark.usefixtures("_set_up_test_claim")
 class TestClaim:
     """A row per branch of `claim`."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_claim(self, tmp_path: Path) -> None:
         """Make a temporary directory for the build directory and the runs."""
         self.tmp = Path(str(tmp_path)).resolve()
@@ -182,10 +183,11 @@ class TestClaim:
         assert f"{winner}\n" == owner(self.target)
 
 
+@pytest.mark.usefixtures("_set_up_test_tag")
 class TestTag:
     """Cargo refuses to clean a directory with no tag: the claim leaves one."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_tag(self, tmp_path: Path) -> None:
         """Make a temporary directory for the build directory and the run."""
         self.tmp = Path(str(tmp_path)).resolve()

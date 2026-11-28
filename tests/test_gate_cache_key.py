@@ -491,10 +491,9 @@ class TestCompiler:
         ]
         before = gate_cache_key.rustc_digest(RUSTC)
         for label, old, new in rows:
-            with self.subTest(row=label):
-                assert old in RUSTC
-                after = gate_cache_key.rustc_digest(RUSTC.replace(old, new))
-                assert before != after
+            assert old in RUSTC
+            after = gate_cache_key.rustc_digest(RUSTC.replace(old, new))
+            assert before != after
 
     def test_text_naming_no_compiler_is_red(self) -> None:
         """Empty output is refused, never digested into a key."""
@@ -544,10 +543,11 @@ class TestCompiler:
         assert "-vV exited 1: toolchain 1.100.0 is not installed" in err
 
 
+@pytest.mark.usefixtures("_set_up_test_cargo_inputs")
 class TestCargoInputs:
     """The cargo key names every declared input of its builds (#2045)."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_cargo_inputs(self, tmp_path: Path) -> None:
         """Put a `rustc` on PATH for every row."""
         self.path = rustc_on_path(Path(str(tmp_path)), f"printf '%s' '{RUSTC}'")
@@ -653,10 +653,11 @@ CLANG = "Ubuntu clang version 21.1.8 (6ubuntu1)"
 LDD = "ldd (Ubuntu GLIBC 2.43-2ubuntu2.7) 2.43"
 
 
+@pytest.mark.usefixtures("_set_up_test_toolchain")
 class TestToolchain:
     """The cargo key names the toolchain the build takes from the image."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_toolchain(self, tmp_path: Path) -> None:
         """Put `rustc`, the toolchain and an `xcrun` on PATH for every row.
 

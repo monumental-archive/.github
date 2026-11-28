@@ -39,10 +39,11 @@ HOME = "mise/typed_std.py"
 VERSION = re.compile(r"v(?P<major>\d+)\.(\d+)(-(?P<pre>\w+))?")
 
 
+@pytest.mark.usefixtures("_set_up_test_group")
 class TestGroup:
     """The group's text by its span, or None, never Any."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_group(self) -> None:
         """Match one version with no pre-release part."""
         found = VERSION.fullmatch("v1.70")

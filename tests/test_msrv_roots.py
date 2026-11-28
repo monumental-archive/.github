@@ -62,7 +62,7 @@ printf 'rustup %s\n' "$*" >> "${PLANT_LOG}"
 exit 99
 """
 PYTHON_STUB = r"""#!/usr/bin/env bash
-if [[ $(basename "$1") == gate_surface.py ]]; then
+if [[ $(basename "$1") == belt gate-surface ]]; then
   cat > /dev/null
   exit 0
 fi
@@ -105,10 +105,11 @@ def body() -> str:
     return decoded.as_str(entry["run"], f"{TASK}.run")
 
 
+@pytest.mark.usefixtures("_set_up_test_two_roots")
 class TestTwoRoots:
     """A tree of two workspaces: the root's and a fuzz crate's."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_two_roots(self, tmp_path: Path) -> None:
         """Plant the tree, its metadata, the stubs and the log."""
         tmp = tmp_path

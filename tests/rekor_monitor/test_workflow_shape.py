@@ -320,10 +320,11 @@ ROWS = [
 ]
 
 
+@pytest.mark.usefixtures("_set_up_test_shape")
 class TestShape:
     """The workflow as built, and one planted copy per rule."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_shape(self) -> None:
         """Read the workflow."""
         self.text = WORKFLOW.read_text(encoding="utf-8")

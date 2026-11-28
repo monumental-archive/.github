@@ -273,12 +273,11 @@ class TestRefuses:
         """
         manifests: tuple[object, ...] = (0, [])
         for manifest in manifests:
-            with self.subTest(manifest=manifest):
-                self.assert_refused(
-                    run_helper(manifest),
-                    "::error::pack-wasm: crates/edtf-wasm/pkg/package.json is not"
-                    " a JSON object\n",
-                )
+            self.assert_refused(
+                run_helper(manifest),
+                "::error::pack-wasm: crates/edtf-wasm/pkg/package.json is not"
+                " a JSON object\n",
+            )
 
 
 class TestEmptyPack:

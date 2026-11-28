@@ -51,10 +51,13 @@ BELT = hermetic.MISE
 TASK = "lint:workspace-inherit"
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)
+
+
+pytestmark = pytest.mark.usefixtures("_task")
 
 
 ROOT = Path("/ws")
@@ -596,7 +599,7 @@ class TestEveryRoot:
         assert (done.returncode, done.stdout, done.stderr) == (
             2,
             "",
-            "usage: workspace_inherit.py <root Cargo.toml>...\n",
+            "usage: belt workspace-inherit <root Cargo.toml>...\n",
         )
 
     def test_the_task_reads_the_roots_and_judges_both(self) -> None:

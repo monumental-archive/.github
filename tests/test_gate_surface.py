@@ -32,10 +32,13 @@ if TYPE_CHECKING:
 TASK = "lint:gate-surface"
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)
+
+
+pytestmark = pytest.mark.usefixtures("_task")
 
 
 ROOT = "/w"
@@ -345,10 +348,11 @@ class TestPublishedTest:
         )
 
 
+@pytest.mark.usefixtures("_set_up_test_invariant_test")
 class TestInvariantTest:
     """The check itself. Mutation: report a finding only when built is empty."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_invariant_test(self) -> None:
         """Build the stub every row here shares."""
         self.surface = TestPublishedTest.surface()

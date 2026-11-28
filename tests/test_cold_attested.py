@@ -37,10 +37,13 @@ if TYPE_CHECKING:
 TASK = "lint:cold-attested"
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)
+
+
+pytestmark = pytest.mark.usefixtures("_task")
 
 
 BELT = hermetic.MISE
@@ -215,10 +218,11 @@ def body() -> str:
     return decoded.as_str(task["run"], f"{TASK}.run")
 
 
+@pytest.mark.usefixtures("_set_up_test_cold_attested")
 class TestColdAttested:
     """Planted workflows; the lint's verdict on them."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_cold_attested(self, tmp_path: Path) -> None:
         """Plant an empty workflows directory."""
         self.tree = tmp_path
@@ -314,13 +318,12 @@ class TestColdAttested:
     def test_cases(self) -> None:
         """Every row of CASES, through the helper's main."""
         for name, (files, status, out, err) in CASES.items():
-            with self.subTest(name):
-                for old in (self.tree / WF).iterdir():
-                    old.unlink()
-                done = self.helper(*self.plant(files))
-                same(done.returncode, status, done.stderr)
-                same(done.stdout.splitlines(), out)
-                same(done.stderr.splitlines(), err)
+            for old in (self.tree / WF).iterdir():
+                old.unlink()
+            done = self.helper(*self.plant(files))
+            same(done.returncode, status, done.stderr)
+            same(done.stdout.splitlines(), out)
+            same(done.stderr.splitlines(), err)
 
     def test_no_workflow_is_a_usage_error(self) -> None:
         """Called with nothing to read: exit 2, saying how to call it."""

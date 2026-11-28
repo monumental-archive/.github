@@ -48,10 +48,13 @@ if TYPE_CHECKING:
 TASK = "leg"
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)
+
+
+pytestmark = pytest.mark.usefixtures("_task")
 
 
 CANON = hermetic.CANON
@@ -496,7 +499,7 @@ class TestHelperRows(TestCollecting):
         assert read.returncode == 1
         assert read.stderr == (
             "leg: plpgsql: the test task wrote no report — its teardown must"
-            " call plpgsql_coverage.py collect while ORG_PLPGSQL_COVERAGE is set\n"
+            " call belt plpgsql-coverage collect while ORG_PLPGSQL_COVERAGE is set\n"
         )
 
     def test_a_file_that_is_not_a_report_is_refused_by_what(self) -> None:
@@ -794,12 +797,11 @@ class TestClientRows(TestCollecting):
         """`collect <conninfo>`, with or without a bare `--`, runs psql."""
         clients: tuple[list[str] | None, ...] = (None, [])
         for client in clients:
-            with self.subTest(client=client):
-                self.client = client
-                collected, read = self.measure(TWO)
-                assert collected.returncode == 0, collected.stderr
-                assert read.returncode == 0, read.stderr
-                assert (self.answers / "linted").is_file()
+            self.client = client
+            collected, read = self.measure(TWO)
+            assert collected.returncode == 0, collected.stderr
+            assert read.returncode == 0, read.stderr
+            assert (self.answers / "linted").is_file()
 
     def test_a_named_client_is_run_with_its_words_first(self) -> None:
         """The words run as an argv, unjoined, then the helper's own."""
@@ -998,14 +1000,13 @@ class TestRefusalRows(TestCollecting):
             ),
         ]
         for document, what in rows:
-            with self.subTest(what=what):
-                read = self.read_planted(document)
-                assert read.returncode == 1
-                assert read.stdout == ""
-                assert (
-                    f"leg: plpgsql: the report is not a coverage report: {what}\n"
-                    == read.stderr
-                )
+            read = self.read_planted(document)
+            assert read.returncode == 1
+            assert read.stdout == ""
+            assert (
+                f"leg: plpgsql: the report is not a coverage report: {what}\n"
+                == read.stderr
+            )
 
     @pytest.mark.parametrize("argv", ([], ["measure", "leg"]))
     def test_a_usage_error_names_both_subcommands(self, argv: object) -> None:
@@ -1225,7 +1226,7 @@ class TestLegRows:
         remedy = (
             "  the plpgsql leg needs a test command run through"
             ' "${{ORG_BELT_DIR}}/measured" and its teardown to call'
-            " plpgsql_coverage.py collect while ORG_PLPGSQL_COVERAGE is set;"
+            " belt plpgsql-coverage collect while ORG_PLPGSQL_COVERAGE is set;"
             " or record the leg's removal on purpose:"
             " `# dropped: {leg} <reason>` in .coverage-floor\n"
         )
@@ -1399,10 +1400,11 @@ NOT_HELD_LINE = (
 )
 
 
+@pytest.mark.usefixtures("_set_up_test_merge_rows")
 class TestMergeRows:
     """Several databases' reports, merged by signature (#2163), on the stub."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_merge_rows(self, tmp_path: Path) -> None:
         """Plant the stub database and an empty reports directory."""
         self.tmp = tmp_path
@@ -1560,7 +1562,7 @@ class TestMergeRows:
         assert read.returncode == 1
         assert read.stderr == (
             "leg: plpgsql: the test task wrote no report — its teardown must"
-            " call plpgsql_coverage.py collect while ORG_PLPGSQL_COVERAGE is set\n"
+            " call belt plpgsql-coverage collect while ORG_PLPGSQL_COVERAGE is set\n"
         )
 
     def test_a_report_path_that_is_a_file_is_refused_at_collect(self) -> None:

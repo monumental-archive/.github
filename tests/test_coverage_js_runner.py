@@ -29,10 +29,13 @@ if TYPE_CHECKING:
 TASK = "coverage:check"
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)
+
+
+pytestmark = pytest.mark.usefixtures("_task")
 
 
 HERE = hermetic.MISE
@@ -52,8 +55,7 @@ class TestReaders:
             ({"scripts": {"test": "   "}}, None),
             ({"scripts": "not a table"}, None),
         ):
-            with self.subTest(manifest=manifest):
-                assert runner == cj.other_runner(cj.read_manifest(manifest))
+            assert runner == cj.other_runner(cj.read_manifest(manifest))
 
 
 # One lockfile of each format the reader answers, and the versions each

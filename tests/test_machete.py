@@ -49,10 +49,11 @@ def body() -> str:
     return decoded.as_str(table["run"], f"{TASK}.run")
 
 
+@pytest.mark.usefixtures("_set_up_test_machete")
 class TestMachete:
     """A planted tree; lint:machete's verdict on it."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_machete(self, tmp_path: Path) -> None:
         """Make an empty git repository and a scrubbed environment."""
         hermetic.tool("cargo-machete")

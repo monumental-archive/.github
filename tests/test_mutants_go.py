@@ -48,10 +48,13 @@ if TYPE_CHECKING:
 TASK = "audit:mutants"
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)
+
+
+pytestmark = pytest.mark.usefixtures("_task")
 
 
 BELT = hermetic.MISE
@@ -191,10 +194,11 @@ def measuring(count: int = 2) -> str:
     return f"{LABEL}: measuring coverage of {count} package(s)\n"
 
 
+@pytest.mark.usefixtures("_set_up_test_planted")
 class TestPlanted:
     """A planted module, a real GOROOT, a shim first on PATH, stub gomu."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_planted(self, tmp_path: Path) -> None:
         """Plant the module, the stubs and the default answers."""
         self.tmp = tmp_path
@@ -544,11 +548,10 @@ class TestVerdicts(TestPlanted):
         self.adopt()
         self.report("b", ("KILLED", 4, "arithmetic"))
         for text, why in rows:
-            with self.subTest(text=text):
-                (self.reports / "a.json").write_text(text, encoding="utf-8")
-                got = self.run_leg()
-                assert got.returncode == 1
-                assert got.stderr == f"{LABEL}: not judged: 1.json: {why}\n" + RED_TAIL
+            (self.reports / "a.json").write_text(text, encoding="utf-8")
+            got = self.run_leg()
+            assert got.returncode == 1
+            assert got.stderr == f"{LABEL}: not judged: 1.json: {why}\n" + RED_TAIL
 
     def test_a_red_baseline_is_red_before_any_mutant(self) -> None:
         """A suite that already fails cannot judge a mutant."""
@@ -854,6 +857,7 @@ def call(argv: list[str]) -> hermetic.Called:
     return hermetic.call(lambda: mutants_go.main(argv))
 
 
+@pytest.mark.usefixtures("_set_up_test_main")
 class TestMain:
     """The verdict half over a planted scratch directory, in this process.
 
@@ -861,7 +865,7 @@ class TestMain:
     package `a` holds `a.go`, lines 3-5 covered and 9 not.
     """
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_main(self, tmp_path: Path) -> None:
         """Plant the scratch tables for one package and an empty report."""
         self.root = Path(str(tmp_path), "tree")

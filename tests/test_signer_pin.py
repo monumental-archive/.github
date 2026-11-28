@@ -42,10 +42,13 @@ TASK = "lint:signer-pin"
 CANON_NAME = "monumental-archive/.github"
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)
+
+
+pytestmark = pytest.mark.usefixtures("_task")
 
 
 def body() -> str:
@@ -174,10 +177,11 @@ def literal_message(*found: str) -> list[str]:
     ]
 
 
+@pytest.mark.usefixtures("_set_up_test_branches")
 class TestBranches:
     """Each branch of the helper, its whole message asserted."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_branches(self, tmp_path: Path) -> None:
         """Plant an empty repository: the pin is asked of git (#2013)."""
         self.tree = tmp_path
@@ -345,7 +349,7 @@ class TestBranches:
         """No workflow, an empty owner, repo or signer: the usage line."""
         usage = [
             (
-                "lint:signer-pin: usage: signer_pin.py OWNER/REPO SIGNER-WORKFLOW"
+                "lint:signer-pin: usage: belt signer-pin OWNER/REPO SIGNER-WORKFLOW"
                 " WORKFLOW..."
             )
         ]
@@ -357,7 +361,6 @@ class TestBranches:
             "no signer": [CANON_NAME, "", "a.yml"],
         }
         for row, argv in rows.items():
-            with self.subTest(row=row):
-                done = self.helper(*argv)
-                assert done.returncode == signer_pin.EXIT_ERROR
-                assert usage == done.stderr.splitlines()
+            done = self.helper(*argv)
+            assert done.returncode == signer_pin.EXIT_ERROR
+            assert usage == done.stderr.splitlines()

@@ -35,10 +35,13 @@ if TYPE_CHECKING:
 TASK = "lint:template-pins"
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)
+
+
+pytestmark = pytest.mark.usefixtures("_task")
 
 
 BELT = hermetic.MISE
@@ -99,10 +102,11 @@ def red(*violations: str) -> list[str]:
     return [head, *TAIL]
 
 
+@pytest.mark.usefixtures("_set_up_test_pins")
 class TestPins:
     """Planted templates in a tree with a released commit."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_pins(self, tmp_path: Path) -> None:
         """Plant a tree whose first commit is released as v1.0.0."""
         self.tree = tmp_path
@@ -276,13 +280,12 @@ class TestPins:
 
     def test_no_canon_is_a_usage_error(self) -> None:
         """No canon, or one missing its owner or repository: exit 2."""
-        usage = "lint:template-pins: usage: template_pins.py OWNER/REPO TEMPLATE..."
+        usage = "lint:template-pins: usage: belt template-pins OWNER/REPO TEMPLATE..."
         calls: list[list[str]] = [[], ["/repo", STUB], ["owner/", STUB]]
         for argv in calls:
-            with self.subTest(argv=argv):
-                done = self.refused(argv)
-                same(done.returncode, template_pins.EXIT_ERROR)
-                same(done.stderr.splitlines(), [usage])
+            done = self.refused(argv)
+            same(done.returncode, template_pins.EXIT_ERROR)
+            same(done.stderr.splitlines(), [usage])
 
     def refused(self, argv: list[str]) -> hermetic.Called:
         """Call the helper's main with a command line of the row's.

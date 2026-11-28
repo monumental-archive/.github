@@ -29,10 +29,13 @@ if TYPE_CHECKING:
 TASK = "lint:pg-clippy"
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)
+
+
+pytestmark = pytest.mark.usefixtures("_task")
 
 
 def install(version: str, *, nested: bool = True, empty: bool = False) -> str:
@@ -265,9 +268,8 @@ class TestMainTest:
             (["18.6.0"], "listing[0] is not an object"),
         )
         for listing, where in cases:
-            with self.subTest(where=where):
-                status, out, err = self.invoke("18", listing)
-                assert (1, "", f"{cmd}: {where}\n") == (status, out, err)
+            status, out, err = self.invoke("18", listing)
+            assert (1, "", f"{cmd}: {where}\n") == (status, out, err)
 
     def test_a_listing_that_is_not_json_is_red(self) -> None:
         """No listing is not the same as no pins."""

@@ -30,10 +30,13 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)
+
+
+pytestmark = pytest.mark.usefixtures("_task")
 
 
 BELT = hermetic.MISE
@@ -161,10 +164,11 @@ class Tree:
         )
 
 
+@pytest.mark.usefixtures("_set_up_test_one_per_merge")
 class TestOnePerMerge:
     """The commits ahead of origin/main change at most one decision."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_one_per_merge(self, tmp_path: Path) -> None:
         """Plant a tree whose default branch holds one decision."""
         self.tree = Tree(Path(str(tmp_path)))
@@ -297,10 +301,11 @@ class TestNoneTracked:
             assert f"{TASK}: no VEX decisions tracked, skipped" in done.stdout
 
 
+@pytest.mark.usefixtures("_set_up_test_listing")
 class TestListing:
     """vex-attest.yml's signing list is the lint's own reader (#1615)."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_listing(self, tmp_path: Path) -> None:
         """Plant a tree whose default branch holds two decisions."""
         self.tree = Tree(Path(str(tmp_path)))

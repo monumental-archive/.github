@@ -121,10 +121,11 @@ def stub(tree: Path, sha: str, name: str = "gate.yml") -> None:
     )
 
 
+@pytest.mark.usefixtures("_set_up_test_planted")
 class TestPlanted:
     """The cache trees of A and B, and a consumer with no pin yet."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_planted(self, tmp_path: Path) -> None:
         """Plant both cache trees and an empty consumer repository."""
         self.tmp = tmp_path
@@ -323,10 +324,11 @@ class TestTheBeltAnswersOnlyForItsPin(TestPlanted):
         self.assert_runs(self.repo)
 
 
+@pytest.mark.usefixtures("_set_up_test_only_tasks_refuse")
 class TestOnlyTasksRefuse(TestPlanted):
     """A refused tree: mise's own commands still work, so the remedy can run."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_only_tasks_refuse(self) -> None:
         """Plant the refused tree: pin B, link A."""
         self.pin(self.repo, B)

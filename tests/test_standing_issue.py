@@ -185,10 +185,11 @@ def logged(*lines: str) -> str:
     )
 
 
+@pytest.mark.usefixtures("_set_up_test_stubbed")
 class TestStubbed:
     """A stub gh, a stub forge for logs, the run's job list, the report run."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_stubbed(
         self, tmp_path: Path, request: pytest.FixtureRequest
     ) -> None:
@@ -909,10 +910,11 @@ SPELL = standing.Finding("lint:typos", "README.md", "a word is misspelt")
 LOOSE = standing.Finding("audit:deny", "", "a pin is loose")
 
 
+@pytest.mark.usefixtures("_set_up_test_findings_body")
 class TestFindingsBody:
     """The body written from the run's findings files (#1890)."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_findings_body(self, tmp_path: Path) -> None:
         """Give each row a findings directory."""
         self.dir = Path(str(tmp_path)) / "findings"
@@ -1117,7 +1119,7 @@ class TestFindingsReport(TestStubbed):
 
     def test_each_record_reaches_the_job_whose_step_ran_it(self) -> None:
         """A's record in A's issue only; verdict.py by its script; the rest in all."""
-        verdict = '"${ORG_PYTHON}" .github/rekor-monitor/verdict.py --report r.json'
+        verdict = '"${ORG_PYTHON}" -I belt verdict --report r.json'
         self.jobs([
             job(1, "a", "failure"),
             job(2, "b", "failure"),
@@ -1148,7 +1150,7 @@ class TestFindingsReport(TestStubbed):
         assert "finding of b" not in a
         assert "- b.py: finding of b\n" in b
         assert "finding of a" not in b
-        assert "### verdict.py (1)\n" in watch
+        assert "### belt verdict (1)\n" in watch
         assert "Its findings are above, under <code>verdict.py</code>." in watch
         assert "finding of the watch" not in a + b
         for text in (a, b, watch):

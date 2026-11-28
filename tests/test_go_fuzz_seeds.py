@@ -125,10 +125,11 @@ def task_body(name: str) -> str:
     )
 
 
+@pytest.mark.usefixtures("_set_up_test_go_fuzz_seeds")
 class TestGoFuzzSeeds:
     """lint:go-fuzz-seeds runs exactly the packages the listing names."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_go_fuzz_seeds(
         self, tmp_path: Path, request: pytest.FixtureRequest
     ) -> None:

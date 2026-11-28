@@ -34,10 +34,13 @@ if TYPE_CHECKING:
 TASK = "lint:citation"
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)
+
+
+pytestmark = pytest.mark.usefixtures("_task")
 
 
 BELT = hermetic.MISE
@@ -75,10 +78,11 @@ def source(name: str) -> str:
     return (CANON / name).read_text(encoding="utf-8")
 
 
+@pytest.mark.usefixtures("_set_up_test_citation")
 class TestCitation:
     """Planted trees; the citation's verdict on them."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_citation(self, tmp_path: Path) -> None:
         """Plant an empty repository: the helper asks git (#2013)."""
         self.tree = tmp_path
@@ -242,12 +246,11 @@ class TestCitation:
             "after a hash": "x: 1 # mint-doi: true\n",
         }
         for row, text in rows.items():
-            with self.subTest(row=row):
-                rel = self.plant(".github/workflows/wf.yml", text)
-                done = self.helper(rel)
-                same(done.returncode, 0, done.stderr)
-                same(done.stdout.splitlines(), SKIPPED)
-                same(done.stderr, "")
+            rel = self.plant(".github/workflows/wf.yml", text)
+            done = self.helper(rel)
+            same(done.returncode, 0, done.stderr)
+            same(done.stdout.splitlines(), SKIPPED)
+            same(done.stderr, "")
 
     def test_minting_without_a_citation_is_red(self) -> None:
         """Each workflow requesting a DOI named, in order, then the remedy."""

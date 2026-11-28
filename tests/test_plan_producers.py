@@ -38,10 +38,13 @@ if TYPE_CHECKING:
 TASK = "lint:plan-producers"
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)
+
+
+pytestmark = pytest.mark.usefixtures("_task")
 
 
 REPO = hermetic.CANON
@@ -146,10 +149,11 @@ def delivered() -> tuple[pp.Policy, dict[str, str]]:
 WHOLE = crate(CRATE_LEG)
 
 
+@pytest.mark.usefixtures("_set_up_test_delivered_tree_test")
 class TestDeliveredTreeTest:
     """The canon's own policy and workflows, exactly as they ship."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_delivered_tree_test(self) -> None:
         """Skip where the canon's documents are not in the tree."""
         if not POLICY.exists() or not WORKFLOWS.is_dir():

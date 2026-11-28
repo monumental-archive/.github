@@ -39,10 +39,13 @@ Pinned = dict[Version, str]
 TASK = "lint:msrv"
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)
+
+
+pytestmark = pytest.mark.usefixtures("_task")
 
 
 def member(
@@ -589,21 +592,20 @@ class TestMainTest:
         }
         floor = str(floor_file(PIN_ROWS_FLOOR))
         for said, (doc, listing) in rows.items():
-            with self.subTest(said=said):
-                path = Path(tempfile.mkdtemp()) / "toolchains.json"
-                path.write_text(json.dumps(listing), encoding="utf-8")
-                argv = ["--toolchains", str(path), "--floor", floor, "--root", fuzz]
-                err = io.StringIO()
-                with (
-                    pytest.MonkeyPatch.context() as patched,
-                    redirect_stdout(io.StringIO()),
-                    redirect_stderr(err),
-                ):
-                    patched.setattr("sys.stdin", io.StringIO(json.dumps(doc)))
-                    status = msrv_plan.main(argv)
-                assert status == 1
-                said_err = err.getvalue()
-                assert said_err.startswith(f"{TASK}: {fuzz}: {said}"), said_err
+            path = Path(tempfile.mkdtemp()) / "toolchains.json"
+            path.write_text(json.dumps(listing), encoding="utf-8")
+            argv = ["--toolchains", str(path), "--floor", floor, "--root", fuzz]
+            err = io.StringIO()
+            with (
+                pytest.MonkeyPatch.context() as patched,
+                redirect_stdout(io.StringIO()),
+                redirect_stderr(err),
+            ):
+                patched.setattr("sys.stdin", io.StringIO(json.dumps(doc)))
+                status = msrv_plan.main(argv)
+            assert status == 1
+            said_err = err.getvalue()
+            assert said_err.startswith(f"{TASK}: {fuzz}: {said}"), said_err
         err_io = io.StringIO()
         with redirect_stderr(err_io):
             status = msrv_plan.main(["--failed", "1.85.0", "a@1", "--root", fuzz])
@@ -634,9 +636,8 @@ class TestMainTest:
             (good, ["1.82.0"], "`mise ls rust`: listing[0] is not an object"),
         )
         for doc, listing, said in cases:
-            with self.subTest(said=said):
-                status, out, err = self.invoke(doc, listing)
-                assert (1, "", f"{TASK}: {said}\n") == (status, out, err)
+            status, out, err = self.invoke(doc, listing)
+            assert (1, "", f"{TASK}: {said}\n") == (status, out, err)
 
     def test_metadata_that_is_not_json_is_red(self) -> None:
         """A broken cargo must not read as a workspace with no promises."""
@@ -794,14 +795,13 @@ class TestEdgeFilterTest:
         """Two at the highest number: the lower name, whatever the order."""
         one, two = dependency("zeta", "1.90"), dependency("alpha", "1.90")
         for order in ((one, two), (two, one)):
-            with self.subTest(first=order[0]["name"]):
-                doc = metadata(
-                    APP,
-                    nodes=[node(APP, *(edge(d) for d in order)), node(one), node(two)],
-                    extra=order,
-                )
-                got = derived(doc, "app").reason
-                assert got == "`alpha 1.0.0` requires it"
+            doc = metadata(
+                APP,
+                nodes=[node(APP, *(edge(d) for d in order)), node(one), node(two)],
+                extra=order,
+            )
+            got = derived(doc, "app").reason
+            assert got == "`alpha 1.0.0` requires it"
 
     def test_the_floor_wins_a_tie_with_a_dependency(self) -> None:
         """The floor holds the number whatever the dependency says."""

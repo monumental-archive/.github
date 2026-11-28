@@ -33,10 +33,13 @@ if TYPE_CHECKING:
 TASK = "audit:regression-tests"
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)
+
+
+pytestmark = pytest.mark.usefixtures("_task")
 
 
 _GIT_ENV = {
@@ -121,10 +124,11 @@ class Repo:
         }
 
 
+@pytest.mark.usefixtures("_set_up_test_repo_case")
 class TestRepoCase:
     """A row with a fresh repository and an isolated git."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_repo_case(self, tmp_path: Path) -> None:
         """Isolate git's config, then build the repository."""
         clean = hermetic.env(MISE_TASK_NAME=TASK)
@@ -194,10 +198,9 @@ class TestEachLanguage(TestRepoCase):
             subject: verdict for subject, (verdict, _) in self.repo.verdicts().items()
         }
         for lang in self.LANGUAGES:
-            with self.subTest(language=lang):
-                assert got[f"fix: {lang} with test"] == rc.TEST_ADDED
-                assert got[f"fix: {lang} without test"] == rc.NO_TEST
-                assert got[f"fix: {lang} lockfile"] == rc.NOT_CODE
+            assert got[f"fix: {lang} with test"] == rc.TEST_ADDED
+            assert got[f"fix: {lang} without test"] == rc.NO_TEST
+            assert got[f"fix: {lang} lockfile"] == rc.NOT_CODE
 
     @pytest.mark.parametrize("directory", ("tests", "testdata", "tests/fixtures"))
     def test_test_directories(self, directory: object) -> None:

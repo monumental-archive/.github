@@ -42,10 +42,13 @@ LINT = "lint:belt-shell"
 FIX = "fix:belt-shell"
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the lint task does, recording no finding."""
     as_task(LINT)
+
+
+pytestmark = pytest.mark.usefixtures("_task")
 
 
 # A body mise would run verbatim, already in the org's format.

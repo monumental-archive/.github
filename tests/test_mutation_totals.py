@@ -24,10 +24,11 @@ BASH = hermetic.tool("bash")
 LABEL = "audit:mutants: rust"
 
 
+@pytest.mark.usefixtures("_set_up_test_totals")
 class TestTotals:
     """Plant per-shard summaries and total them."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_totals(self, tmp_path: Path) -> None:
         """Make an empty download directory."""
         self.dir = tmp_path

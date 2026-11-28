@@ -30,10 +30,13 @@ if TYPE_CHECKING:
 TASK = "lint:capability-boundary"
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)
+
+
+pytestmark = pytest.mark.usefixtures("_task")
 
 
 BELT = hermetic.MISE
@@ -76,10 +79,11 @@ def red(*files: str) -> list[str]:
     ]
 
 
+@pytest.mark.usefixtures("_set_up_test_boundary")
 class TestBoundary:
     """Planted workflows; the boundary's verdict on them."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_boundary(self, tmp_path: Path) -> None:
         """Plant an empty workflows directory."""
         self.tree = tmp_path
@@ -161,12 +165,11 @@ class TestBoundary:
             "marked, indented": CALLED + GRANT + JOBS + "  #  " + MARKER[2:],
         }
         for row, text in rows.items():
-            with self.subTest(row=row):
-                rel = self.plant("wf.yml", text)
-                done = self.helper(rel)
-                same(done.returncode, 0, done.stderr)
-                same(done.stdout.splitlines(), OK)
-                same(done.stderr, "")
+            rel = self.plant("wf.yml", text)
+            done = self.helper(rel)
+            same(done.returncode, 0, done.stderr)
+            same(done.stdout.splitlines(), OK)
+            same(done.stderr, "")
 
     def test_breaches_are_red_and_named(self) -> None:
         """No marker, or a marker only in prose: red, every file named."""
@@ -212,5 +215,5 @@ class TestBoundary:
         """No workflow named: exit 2 with the usage line."""
         done = self.helper()
         same(done.returncode, capability_boundary.EXIT_ERROR)
-        usage = "lint:capability-boundary: usage: capability_boundary.py WORKFLOW..."
+        usage = "lint:capability-boundary: usage: belt capability-boundary WORKFLOW..."
         same(done.stderr.splitlines(), [usage])

@@ -35,10 +35,13 @@ if TYPE_CHECKING:
 TASK = "lint:biome"
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)
+
+
+pytestmark = pytest.mark.usefixtures("_task")
 
 
 BELT = hermetic.MISE
@@ -161,8 +164,7 @@ class TestDeclarationProblemsTest:
             {"linter": {"domains": {"vue": "all"}}},
         )
         for document in documents:
-            with self.subTest(document=document):
-                self.check(document, admissible=True)
+            self.check(document, admissible=True)
 
     def test_a_repository_may_not_write_none(self) -> None:
         """The word "none" is the belt's — writing it here switches a domain off."""
@@ -213,8 +215,7 @@ class TestDeclarationProblemsTest:
             {"linter": {"domains": []}},
         )
         for document in shapes:
-            with self.subTest(document=document):
-                self.check(document, admissible=False)
+            self.check(document, admissible=False)
 
 
 class TestOmissionsTest:
@@ -300,10 +301,11 @@ class TestDeclaredPackagesTest:
         )
 
 
+@pytest.mark.usefixtures("_set_up_test_generate_test")
 class TestGenerateTest:
     """The arithmetic the repository is not allowed to do for itself."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_generate_test(self) -> None:
         """Generate against the real org config and the real tables."""
         self.org = org_config()
@@ -329,8 +331,7 @@ class TestGenerateTest:
         """The measured half: only "none" changes anything under preset all."""
         for domain in DELIVERED.identity:
             if domain != "react":
-                with self.subTest(domain=domain):
-                    assert self.written[domain] == "none"
+                assert self.written[domain] == "none"
 
     @pytest.mark.parametrize("domain", DELIVERED.org)
     def test_org_domains_are_all_whatever_the_repository_said(
@@ -418,6 +419,7 @@ class TestContradictionTest:
         assert complexity == named
 
 
+@pytest.mark.usefixtures("_set_up_test_file_override_test")
 class TestFileOverrideTest:
     """The one `overrides` entry the org delivers (#783, #804, #2117).
 
@@ -449,7 +451,7 @@ class TestFileOverrideTest:
         ("style", "noMagicNumbers"),
     }
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_file_override_test(self) -> None:
         """Read the delivered config, not a copy of it."""
         self.org = org_config()
@@ -480,8 +482,7 @@ class TestFileOverrideTest:
         """Asserted against "off" itself; a mutant value must not survive."""
         rules = table(self.entry(), "linter", "rules")
         for group, rule in sorted(self.SILENCED):
-            with self.subTest(rule=rule):
-                assert table(rules, group)[rule] == "off"
+            assert table(rules, group)[rule] == "off"
 
     def test_the_override_silences_those_four_rules_and_no_others(self) -> None:
         """A fifth rule arriving here is a decision, not a drive-by."""
@@ -508,8 +509,7 @@ class TestFileOverrideTest:
         top = table(self.org, "linter", "rules")
         assert top["preset"] == "all"
         for group, rule in sorted(self.SILENCED):
-            with self.subTest(rule=rule):
-                assert rule not in table_or_empty(top, group)
+            assert rule not in table_or_empty(top, group)
 
     def test_the_other_two_structural_rules_stay_on_in_tests(self) -> None:
         """#804 turns off the line-count rule only.
@@ -632,6 +632,7 @@ class TestAwaitInLoopsUnderBiomeTest:
         assert self.reported() == source
 
 
+@pytest.mark.usefixtures("_set_up_test_conditional_expect_test")
 class TestConditionalExpectTest:
     """The one nursery rule the org switches off by name (#788).
 
@@ -643,7 +644,7 @@ class TestConditionalExpectTest:
 
     RULE = "noConditionalExpect"
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_conditional_expect_test(self) -> None:
         """Read the delivered config, not a copy of it."""
         self.org = org_config()
@@ -672,15 +673,14 @@ class TestConditionalExpectTest:
         """The generator only ever writes "off"; assert it never writes "on"."""
         for claimed in (*CLAIMS, set(DELIVERED.identity)):
             names = sorted(claimed)
-            with self.subTest(claimed=names):
-                config, _silenced = biome_config.generate(
-                    self.org,
-                    claimed,
-                    DELIVERED,
-                    NURSERY,
-                )
-                rule = table(config, "linter", "rules", "nursery")[self.RULE]
-                assert rule == "off"
+            config, _silenced = biome_config.generate(
+                self.org,
+                claimed,
+                DELIVERED,
+                NURSERY,
+            )
+            rule = table(config, "linter", "rules", "nursery")[self.RULE]
+            assert rule == "off"
 
     def test_it_is_not_in_the_test_file_override(self) -> None:
         """The reason it is off org-wide: one of the eight is production code.
@@ -690,9 +690,8 @@ class TestConditionalExpectTest:
         """
         for item in decoded.as_array(self.org["overrides"], "overrides"):
             entry = decoded.as_object(item, "an override")
-            with self.subTest(includes=entry["includes"]):
-                rules = table_or_empty(table_or_empty(entry, "linter"), "rules")
-                assert self.RULE not in table_or_empty(rules, "nursery")
+            rules = table_or_empty(table_or_empty(entry, "linter"), "rules")
+            assert self.RULE not in table_or_empty(rules, "nursery")
 
 
 class TestNurseryTableTest:
@@ -1042,19 +1041,17 @@ class TestNodeOverridesTest:
         """Absent `types` is not Node, whatever the compiler would load."""
         documents: tuple[object, ...] = ({"compilerOptions": {"strict": True}}, {})
         for document in documents:
-            with self.subTest(document=document):
-                project = {"apps/a/tsconfig.json": document}
-                entries = biome_config.node_overrides(project)
-                assert entries == NO_ENTRIES
+            project = {"apps/a/tsconfig.json": document}
+            entries = biome_config.node_overrides(project)
+            assert entries == NO_ENTRIES
 
     def test_a_types_entry_that_only_resembles_node_is_not_node(self) -> None:
         """The entry is "node" exactly; `@types/node`-ish names are not it."""
         shapes: tuple[object, ...] = (["node-fetch"], ["nodes"], [], "node")
         for types in shapes:
-            with self.subTest(types=types):
-                project = {"a/tsconfig.json": self.resolved(types)}
-                entries = biome_config.node_overrides(project)
-                assert entries == NO_ENTRIES
+            project = {"a/tsconfig.json": self.resolved(types)}
+            entries = biome_config.node_overrides(project)
+            assert entries == NO_ENTRIES
 
     def test_a_resolved_document_that_is_not_an_object_is_refused(self) -> None:
         """A shape the belt does not read is named, never read as "not Node"."""
@@ -1104,20 +1101,19 @@ class TestNodeOverridesTest:
             {"overrides": [{"includes": ["apps/a/**"], "linter": NODE_OFF}]},
         )
         for document in stated:
-            with self.subTest(document=document):
-                tree = Path(tempfile.mkdtemp())
-                text = declaration(document)
-                (tree / "biome.json").write_text(text, encoding="utf-8")
-                resolved = tree / "resolved.json"
-                node = json.dumps(self.resolved(["node"]))
-                resolved.write_text(node, encoding="utf-8")
-                out = tree / "generated.json"
-                done = generate_main(
-                    tree, out, "--tsconfig", "apps/a/tsconfig.json", str(resolved)
-                )
-                assert done.returncode == 1
-                assert "says more than a repository may say" in done.stderr
-                assert not out.exists()
+            tree = Path(tempfile.mkdtemp())
+            text = declaration(document)
+            (tree / "biome.json").write_text(text, encoding="utf-8")
+            resolved = tree / "resolved.json"
+            node = json.dumps(self.resolved(["node"]))
+            resolved.write_text(node, encoding="utf-8")
+            out = tree / "generated.json"
+            done = generate_main(
+                tree, out, "--tsconfig", "apps/a/tsconfig.json", str(resolved)
+            )
+            assert done.returncode == 1
+            assert "says more than a repository may say" in done.stderr
+            assert not out.exists()
 
     def test_a_resolved_file_that_is_not_json_is_refused_by_its_tsconfig(self) -> None:
         """The task hands over tsc's output; garbage there is named, not crashed on."""

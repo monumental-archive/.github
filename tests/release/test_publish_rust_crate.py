@@ -494,26 +494,25 @@ class TestPublishMintsItsOwnToken:
             (b'{"value": 1}', "the runner's OIDC token answer's value is not a string"),
         ]
         for body, said in rows:
-            with self.subTest(body=body):
 
-                def fetch(
-                    method: str,
-                    url: str,
-                    headers: Mapping[str, str],
-                    data: bytes | None = None,
-                    body: bytes = body,
-                ) -> publish_crates.Response:
-                    del method, url, headers, data
-                    return publish_crates.Response(200, body)
+            def fetch(
+                method: str,
+                url: str,
+                headers: Mapping[str, str],
+                data: bytes | None = None,
+                body: bytes = body,
+            ) -> publish_crates.Response:
+                del method, url, headers, data
+                return publish_crates.Response(200, body)
 
-                env = {
-                    "ACTIONS_ID_TOKEN_REQUEST_URL": OIDC_URL,
-                    "ACTIONS_ID_TOKEN_REQUEST_TOKEN": "t",
-                    "ORG_USER_AGENT": USER_AGENT,
-                }
-                with pytest.raises(publish_crates.RefusalError) as refused:
-                    publish_crates.exchange_token(env, fetch)
-                assert str(refused.value).startswith(said), refused.value
+            env = {
+                "ACTIONS_ID_TOKEN_REQUEST_URL": OIDC_URL,
+                "ACTIONS_ID_TOKEN_REQUEST_TOKEN": "t",
+                "ORG_USER_AGENT": USER_AGENT,
+            }
+            with pytest.raises(publish_crates.RefusalError) as refused:
+                publish_crates.exchange_token(env, fetch)
+            assert str(refused.value).startswith(said), refused.value
 
     def test_an_exchange_answer_with_no_token_is_refused(self) -> None:
         """The exchange's answer must hold its token as a string (#1682)."""

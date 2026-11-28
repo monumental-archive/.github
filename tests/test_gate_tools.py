@@ -705,7 +705,7 @@ class TestTable:
         Read alone, the helper names no yq; the table's yq row would be
         stale and a consumer's gate would lack the parser.
         """
-        text = '"${ORG_PYTHON}" "${ORG_BELT_DIR}/embedded_shell.py" ${files}'
+        text = '"${ORG_PYTHON}" -I "${ORG_BELT_ROOT}/belt" embedded-shell ${files}'
         assert "workflow_yaml.py" in belt_imports("embedded_shell.py")
         assert first_call(expand(text, set()), ["yq"]) == 1
 
@@ -793,25 +793,24 @@ class TestTable:
         names the mutation scripts and runs none.
         """
         for helper in ("rust_lint.py", "pg_clippy.py"):
-            with self.subTest(helper=helper):
-                reached: set[str] = {
-                    name
-                    for module in belt_imports(helper)
-                    for name in python_code(module).scripts
-                }
-                assert {"clippy-ladder.sh", "pgrx-env.sh"} <= reached
-                lines = expand(f'"${{ORG_PYTHON}}" "${{ORG_BELT_DIR}}/{helper}"', set())
-                assert first_call(lines, ["jq"]) is not None
+            reached: set[str] = {
+                name
+                for module in belt_imports(helper)
+                for name in python_code(module).scripts
+            }
+            assert {"clippy-ladder.sh", "pgrx-env.sh"} <= reached
+            lines = expand(f'"${{ORG_PYTHON}}" "${{ORG_BELT_DIR}}/{helper}"', set())
+            assert first_call(lines, ["jq"]) is not None
         none: list[str] = []
         assert none == python_code("testing_adoption.py").scripts
         adoption = expand(
-            '"${ORG_PYTHON}" "${ORG_BELT_DIR}/testing_adoption.py"', set()
+            '"${ORG_PYTHON}" -I "${ORG_BELT_ROOT}/belt" testing-adoption', set()
         )
         assert first_call(adoption, ["cargo-mutants", "cosmic-ray"]) is None
 
     def test_the_venv_check_uses_its_command(self) -> None:
         """`tool_python.py LABEL COMMAND` uses COMMAND's tool (#1788)."""
-        run = '"${ORG_PYTHON}" "${belt}/tool_python.py"'
+        run = '"${ORG_PYTHON}" -I "${ORG_BELT_ROOT}/belt" tool-python'
         for text, used in (
             (f'v=$({run} "${{label}}" hypothesis) || exit 1', True),
             (f"{run} x hypothesis --site hypothesis > /dev/null || exit 1", True),
@@ -822,9 +821,8 @@ class TestTable:
             (f"{run} --site=x y hypothesis", True),
             (f"{run} x coverage", False),
         ):
-            with self.subTest(text=text):
-                at = first_call(expand(text, set()), ["hypothesis"])
-                assert (1 if used else None) == at
+            at = first_call(expand(text, set()), ["hypothesis"])
+            assert (1 if used else None) == at
         # A shell operator ends the arguments: the words after it are
         # another command's, not a COMMAND.
         assert venv_command(f"v=$({run} x) || y hypothesis") is None
@@ -1110,11 +1108,10 @@ class TestRefusals:
             ('[tools.x]\nrun = [""," ", 2]\n', "tools.x.run is not a list of strings"),
         ]
         for text, message in rows:
-            with self.subTest(text=text):
-                status, err, table = self.run_main(text, "[tools]\n")
-                assert status == 1
-                assert err.startswith(f"::error::{STEP}: {table}: "), err
-                assert message in err
+            status, err, table = self.run_main(text, "[tools]\n")
+            assert status == 1
+            assert err.startswith(f"::error::{STEP}: {table}: "), err
+            assert message in err
 
     def test_belt_tools_not_a_table(self) -> None:
         """The belt config's [tools] is read through the same decoder."""

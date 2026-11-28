@@ -108,10 +108,11 @@ def refused(file: Path, stderr: str) -> None:
     assert f"{TASK}: {got[0]['message']}\n" in stderr
 
 
+@pytest.mark.usefixtures("_set_up_test_adapter")
 class TestAdapter:
     """The adapter over a stub lychee."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_adapter(self, tmp_path: Path) -> None:
         """Lay out a stub lychee, its log, and the findings file."""
         self.dir = Path(str(tmp_path))
@@ -258,10 +259,11 @@ class TestAdapter:
         refused(self.file, done.stderr)
 
 
+@pytest.mark.usefixtures("_set_up_test_task")
 class TestTask:
     """audit:links' body under the belt's pinned lychee, offline by planting."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_task(self, tmp_path: Path) -> None:
         """Plant a tracked tree with one markdown file linking `other.md`."""
         if hermetic.optional_tool("lychee") is None:

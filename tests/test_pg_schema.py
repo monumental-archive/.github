@@ -285,10 +285,11 @@ def git(root: Path, *args: str) -> None:
     )
 
 
+@pytest.mark.usefixtures("_set_up_test_in_repo")
 class TestInRepo:
     """A fresh git repository as the working directory for each row."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_in_repo(
         self, tmp_path: Path, request: pytest.FixtureRequest
     ) -> None:
@@ -519,6 +520,7 @@ def task_body(name: str) -> str:
     )
 
 
+@pytest.mark.usefixtures("_set_up_test_sql_skips_owned_snapshots")
 class TestSqlSkipsOwnedSnapshots:
     """lint:sql and fix:sql leave the belt's snapshots to pg-schema (#1240).
 
@@ -534,7 +536,7 @@ class TestSqlSkipsOwnedSnapshots:
     reds 1; a root crate's path left as `./schema.snapshot.sql` reds 1.
     """
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_sql_skips_owned_snapshots(
         self, tmp_path: Path, request: pytest.FixtureRequest
     ) -> None:

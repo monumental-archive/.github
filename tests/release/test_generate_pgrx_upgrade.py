@@ -358,10 +358,11 @@ def releases(name: str) -> list[Release]:
     return out
 
 
+@pytest.mark.usefixtures("_set_up_test_needs_jq")
 class TestNeedsJq:
     """Rows that drive the gh stub, which jq answers; no rows of its own."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_needs_jq(self) -> None:
         """Skip the row where jq is missing."""
         if not JQ:
@@ -499,10 +500,11 @@ class TestAFailedControlListingIsNotAbsence:
 INNER_RUN = "PGRX_HARNESS_INNER_RUN"
 
 
+@pytest.mark.usefixtures("_set_up_test_leaves_the_callers_git_alone")
 class TestLeavesTheCallersGitAlone(TestNeedsJq):
     """#857, planted: the hazard itself, run for real on every gate."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_leaves_the_callers_git_alone(self) -> None:
         """Skip the row in the inner run, which this row spawned."""
         if os.environ.get(INNER_RUN):
@@ -1100,17 +1102,15 @@ class TestInstallsHeadersAtTheImagesServer:
         """Each site names the pinned headers and the unchanged check."""
         for site in (SCRIPT, BUILD_ROOT):
             text = site.read_text()
-            with self.subTest(site=site.name):
-                block = "\n".join(header_install(text))
-                assert HEADER_PIN in block
-                assert SERVER_UNCHANGED in block
-                assert '"postgresql-server-dev-${PG}" ' not in text
+            block = "\n".join(header_install(text))
+            assert HEADER_PIN in block
+            assert SERVER_UNCHANGED in block
+            assert '"postgresql-server-dev-${PG}" ' not in text
         # The image the remedy names reaches each container: the build
         # leg's docker run is release/pgrx/build-in-container.sh (#1660).
         container = CANON / "release" / "pgrx" / "build-in-container.sh"
         for site in (SCRIPT, container):
-            with self.subTest(env=site.name):
-                assert "--env BUILD_IMAGE" in site.read_text()
+            assert "--env BUILD_IMAGE" in site.read_text()
 
     def test_the_two_sites_are_textually_identical(self) -> None:
         """They cannot share a script; they must not drift apart."""
@@ -1238,13 +1238,13 @@ class TestFloorTemplateShape:
         """Each placeholder is there, and none survives the fill."""
         template = floor_template()
         for field in ("@NUM@", "@XY@", "@EXT@", "@VERSION@"):
-            with self.subTest(field=field):
-                assert field in template
+            assert field in template
         assert template.startswith("DO $pgrx_floor$\n")
         assert template.endswith("\n$pgrx_floor$;")
         assert "@" not in fill(template, 180007, "18.7")
 
 
+@pytest.mark.usefixtures("_set_up_test_live_server")
 class TestLiveServer:
     """A throwaway server from the gate's own Postgres, shared by the rows.
 
@@ -1302,7 +1302,7 @@ class TestLiveServer:
         cls.version = cls.psql("SHOW server_version").stdout.strip()
         cls.running = True
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_live_server(self) -> None:
         """Skip the row where this machine has no Postgres to start."""
         if not self.running:
@@ -1664,8 +1664,7 @@ class TestProofReadsBeforeItCompares:
         _, calls = self.run_proof(ROW_A + ROW_B, ROW_A + ROW_B)
         assert len(calls) == 7, calls
         for call in calls:
-            with self.subTest(call=call):
-                assert call.startswith("-v ON_ERROR_STOP=1 "), call
+            assert call.startswith("-v ON_ERROR_STOP=1 "), call
 
 
 def expected_inner_skips() -> int:

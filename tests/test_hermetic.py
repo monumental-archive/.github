@@ -716,8 +716,7 @@ class TestEnv:
             hermetic.patch_env(patched, planted)
             base = set(hermetic.env())
             for tool, names in hermetic.TOOLS.items():
-                with self.subTest(tool=tool):
-                    assert set(names) - base == set(hermetic.env(tools=(tool,))) - base
+                assert set(names) - base == set(hermetic.env(tools=(tool,))) - base
 
     def test_an_unknown_tool_is_refused(self) -> None:
         """A tool nobody measured has no extension to borrow."""
@@ -736,10 +735,11 @@ class TestEnv:
         assert writer.is_file()
 
 
+@pytest.mark.usefixtures("_set_up_test_tracked")
 class TestTracked:
     """hermetic.tracked, in a checkout (#1618)."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_tracked(self, tmp_path: Path) -> None:
         """Plant a repository with tracked files in and out of `vendor/`."""
         self.root = tmp_path
@@ -780,10 +780,11 @@ def on_path(path: str) -> AbstractContextManager[object]:
     return mock.patch.dict(os.environ, values)
 
 
+@pytest.mark.usefixtures("_set_up_test_tool")
 class TestTool:
     """hermetic.tool and hermetic.optional_tool (#1684)."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_tool(self, tmp_path: Path) -> None:
         """Plant a directory holding one executable, `planted-tool`."""
         self.bin = tmp_path
@@ -855,21 +856,21 @@ class TestRustc:
         stub = str(hermetic.rustc(bin_dir))
         rows = (("", "stable"), ("nightly-2026-07-20", "nightly-2026-07-20"))
         for given, toolchain in rows:
-            with self.subTest(toolchain=toolchain):
-                env = hermetic.env()
-                env.pop("RUSTUP_TOOLCHAIN", None)
-                if given:
-                    env["RUSTUP_TOOLCHAIN"] = given
-                done = subprocess.run(
-                    [stub, "-vV"], env=env, capture_output=True, text=True, check=True
-                )
-                assert hermetic.rustc_verbose(toolchain) == done.stdout
+            env = hermetic.env()
+            env.pop("RUSTUP_TOOLCHAIN", None)
+            if given:
+                env["RUSTUP_TOOLCHAIN"] = given
+            done = subprocess.run(
+                [stub, "-vV"], env=env, capture_output=True, text=True, check=True
+            )
+            assert hermetic.rustc_verbose(toolchain) == done.stdout
 
 
+@pytest.mark.usefixtures("_set_up_test_belt")
 class TestBelt:
     """hermetic.belt and hermetic.canon (#1714)."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_belt(self, tmp_path: Path) -> None:
         """Give each row a scratch directory."""
         self.tmp = tmp_path
@@ -951,8 +952,7 @@ class TestBelt:
             "release/caller_pins.py",
             "security/identity.toml",
         ):
-            with self.subTest(name):
-                assert CANON / name == (tree / name).readlink()
+            assert CANON / name == (tree / name).readlink()
         assert not (tree / "slsa").exists()
         assert not (tree / "release" / "planted.py").is_symlink()
 
@@ -1010,8 +1010,7 @@ class TestTheLaw:
             "os.exec": [2, 3],
         }
         for name, source in refused.items():
-            with self.subTest(name):
-                assert lines[name] == Environments(source).built_by_hand()
+            assert lines[name] == Environments(source).built_by_hand()
 
         allowed = {
             "the call": head + "subprocess.run(a, env=hermetic.env(A='1'))\n",
@@ -1033,8 +1032,7 @@ class TestTheLaw:
             "not a process": "f(env={'A': '1'})\n",
         }
         for name, source in allowed.items():
-            with self.subTest(name):
-                assert Environments(source).built_by_hand() == NOTHING
+            assert Environments(source).built_by_hand() == NOTHING
 
     def test_every_spelling_of_a_process_start_is_judged(self) -> None:
         """Planted: each import form and each starter, refused at its line."""
@@ -1062,16 +1060,14 @@ class TestTheLaw:
             ),
         }
         for name, source in refused.items():
-            with self.subTest(name):
-                assert Environments(source).built_by_hand() == LINE_TWO
+            assert Environments(source).built_by_hand() == LINE_TWO
         allowed = {
             "import as": "import subprocess as sp\nsp.run(a, env=hermetic.env())\n",
             "posix_spawn": "import os\nos.posix_spawn(p, a, hermetic.env())\n",
             "a local run": "def run(a, env):\n    pass\nrun(a, env={'A': '1'})\n",
         }
         for name, source in allowed.items():
-            with self.subTest(name):
-                assert Environments(source).built_by_hand() == NOTHING
+            assert Environments(source).built_by_hand() == NOTHING
 
     def test_every_spelling_of_a_copy_is_found(self) -> None:
         """Planted: each way to read the environment whole, at its line."""
@@ -1130,8 +1126,7 @@ class TestTheLaw:
             "name = os.environ": [3],
         }
         for name, source in planted.items():
-            with self.subTest(name):
-                assert lines[name] == copies(source)
+            assert lines[name] == copies(source)
 
     def test_a_single_read_is_not_a_copy(self) -> None:
         """One variable, or a replacement of the whole, is allowed."""
@@ -1146,8 +1141,7 @@ class TestTheLaw:
             "set one": "import os\nos.environ['A'] = '1'\n",
         }
         for name, source in allowed.items():
-            with self.subTest(name):
-                assert copies(source) == NOTHING
+            assert copies(source) == NOTHING
 
     def test_no_test_file_looks_a_tool_up_itself(self) -> None:
         """Every lookup is hermetic.tool or hermetic.optional_tool (#1684)."""
@@ -1189,8 +1183,7 @@ class TestTheLaw:
             "in a decorator": [3],
         }
         for name, source in planted.items():
-            with self.subTest(name):
-                assert lines[name] == which_calls(source)
+            assert lines[name] == which_calls(source)
 
     def test_the_fixture_lookup_is_allowed(self) -> None:
         """The fixture's lookups, a patched `which`, and another `which` pass."""
@@ -1205,8 +1198,7 @@ class TestTheLaw:
             "a local which": "def which(x):\n    return x\nX = which('git')\n",
         }
         for name, source in allowed.items():
-            with self.subTest(name):
-                assert list[int]() == which_calls(source)
+            assert list[int]() == which_calls(source)
 
     def test_no_test_file_plants_the_belt_or_canon_itself(self) -> None:
         """Every planted belt or canon is hermetic.belt or hermetic.canon (#1714)."""
@@ -1250,8 +1242,7 @@ class TestTheLaw:
             ),
         }
         for name, (source, lines) in planted.items():
-            with self.subTest(name):
-                assert lines == plants_from_tree(source)
+            assert lines == plants_from_tree(source)
 
     def test_the_fixture_and_the_tests_own_files_are_allowed(self) -> None:
         """The fixture's planting, a file the row wrote, a fixture, a tool."""
@@ -1272,8 +1263,7 @@ class TestTheLaw:
             ),
         }
         for name, source in allowed.items():
-            with self.subTest(name):
-                assert list[int]() == plants_from_tree(source)
+            assert list[int]() == plants_from_tree(source)
 
     def test_no_test_file_asks_git_for_a_plain_listing(self) -> None:
         """Every listing of what a tree tracks goes through tracked (#1618)."""
@@ -1299,8 +1289,7 @@ class TestTheLaw:
         }
         lines = {"a parameter": [2], "a scratch tree": [2]}
         for name, source in refused.items():
-            with self.subTest(name):
-                assert lines.get(name, [1]) == plain_listings(source)
+            assert lines.get(name, [1]) == plain_listings(source)
         allowed = {
             "another question": (
                 'run([GIT, "ls-files", "--others", "--modified",'
@@ -1311,8 +1300,7 @@ class TestTheLaw:
             "text": 'X = "git ls-files"\n',
         }
         for name, source in allowed.items():
-            with self.subTest(name):
-                assert list[int]() == plain_listings(source)
+            assert list[int]() == plain_listings(source)
 
 
 def _echo_main(argv: list[str]) -> int:

@@ -31,10 +31,13 @@ if TYPE_CHECKING:
 TASK = "lint:rust"
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def _task(as_task: Callable[[str], None]) -> None:
     """Run every row as the task does, recording no finding."""
     as_task(TASK)
+
+
+pytestmark = pytest.mark.usefixtures("_task")
 
 
 HELPER = hermetic.MISE / "rust_suppressions.py"
@@ -175,9 +178,8 @@ class TestGroups:
                 "split.rs": ("#![allow(x,\n  clippy::pedantic)]\n", False),
             }
             for name, (text, want) in cases.items():
-                with self.subTest(name=name):
-                    (root / name).write_text(text)
-                    assert want == rsup.group_suppressed(root / name)
+                (root / name).write_text(text)
+                assert want == rsup.group_suppressed(root / name)
             assert not rsup.group_suppressed(root / "Cargo.toml")
             assert not rsup.group_suppressed(root / "gone.rs")
 

@@ -81,10 +81,11 @@ def pin(key: str) -> str:
     return decoded.as_str(tools[key.strip('"')], f"the belt's {key} pin")
 
 
+@pytest.mark.usefixtures("_set_up_test_locked_from_the_linked_lock")
 class TestLockedFromTheLinkedLock:
     """Each row: which locks hold which tool, and what a locked install says."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_locked_from_the_linked_lock(self, tmp_path: Path) -> None:
         """Plant the cache tree, the linked clone and its root lock.
 

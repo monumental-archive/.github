@@ -166,10 +166,11 @@ def vitest_key(path: str) -> str:
     return hashlib.sha1(f"/{path}".encode(), usedforsecurity=False).hexdigest()
 
 
+@pytest.mark.usefixtures("_set_up_test_runner")
 class TestRunner:
     """A stand-in on PATH, the adapter run against it shard by shard."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture
     def _set_up_test_runner(
         self, tmp_path: Path, call_main: Callable[..., Called]
     ) -> None:
