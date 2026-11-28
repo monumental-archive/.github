@@ -14,10 +14,9 @@ under `/bin/sh` and under `dash`, each against its own measured table,
 and skip by name where that shell is absent or is neither.
 """
 
-import io
+import itertools
 import re
 import subprocess
-from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
@@ -84,30 +83,46 @@ SH_IS_32 = bash_version(SH).startswith("3.2")
 SH_IS_DASH = SH.is_file() and Path(SH).resolve().name == "dash"
 
 
-def lint(*named: tuple[str, str]) -> tuple[int, list[str], bool]:
-    """Run the lint over planted files, the way the task does.
+@fixture
+def plant(tmp_path: Path) -> Callable[..., list[str]]:
+    """Plant named files for the lint, the way the task lists them.
 
     Returns:
-        The exit status; the finding lines, with the temporary directory
-        stripped so the rows read as relative paths; and whether the
-        shape to paste was printed.
+        A function that writes `(name, text)` pairs into a fresh
+        directory and returns their paths.
 
     """
-    with TemporaryDirectory() as scratch:
+    made = itertools.count()
+
+    def lay_out(*named: tuple[str, str]) -> list[str]:
+        scratch = tmp_path / f"planted{next(made)}"
+        scratch.mkdir()
         paths = []
         for name, text in named:
-            path = Path(scratch) / name
+            path = scratch / name
             path.write_text(text, encoding="utf-8")
             paths.append(str(path))
-        err = io.StringIO()
-        with redirect_stdout(io.StringIO()), redirect_stderr(err):
-            status = et.main(paths)
-        lines = [
-            line.removeprefix(f"{TASK}: {scratch}/")
-            for line in err.getvalue().splitlines()
-            if line.startswith(f"{TASK}: ")
-        ]
-        return status, lines, SHAPE_LINE in err.getvalue()
+        return paths
+
+    return lay_out
+
+
+def said(err: str, paths: list[str]) -> tuple[list[str], bool]:
+    """Read the lint's stderr over planted paths.
+
+    Returns:
+        The finding lines, with the planted directory stripped so the
+        rows read as relative paths; and whether the shape to paste was
+        printed.
+
+    """
+    scratch = Path(paths[0]).parent if paths else Path()
+    lines = [
+        line.removeprefix(f"{TASK}: {scratch}/")
+        for line in err.splitlines()
+        if line.startswith(f"{TASK}: ")
+    ]
+    return lines, SHAPE_LINE in err
 
 
 def script(*body: str, shebang: str = "#!/usr/bin/env bash") -> str:
@@ -138,48 +153,66 @@ SHEBANGS = [
 
 
 # The rule over planted scripts and task bodies.
-def test_unguarded_trap_reds_both_ways() -> None:
+def test_unguarded_trap_reds_both_ways(
+    capfd: pytest.CaptureFixture[str], plant: Callable[..., list[str]]
+) -> None:
     """A bare trap owes the guard, and the mark it reads."""
-    status, lines, shaped = lint(("a.sh", script("tmp=$(mktemp)", BARE, "echo ok")))
+    paths = plant(("a.sh", script("tmp=$(mktemp)", BARE, "echo ok")))
+    status = et.main(paths)
+    lines, shaped = said(capfd.readouterr().err, paths)
     assert (status, shaped) == (1, True)
     want: list[str] = [f"a.sh:4: {NOT_GUARDED}", f"a.sh:5: {NOT_MARKED}"]
     assert lines == want
 
 
-def test_guarded_without_the_mark_reds() -> None:
+def test_guarded_without_the_mark_reds(
+    capfd: pytest.CaptureFixture[str], plant: Callable[..., list[str]]
+) -> None:
     """The guard alone turns every clean run into a failure."""
-    status, lines, shaped = lint((
-        "a.sh",
-        script("tmp=$(mktemp)", GUARDED, "echo ok"),
-    ))
+    paths = plant(
+        (
+            "a.sh",
+            script("tmp=$(mktemp)", GUARDED, "echo ok"),
+        )
+    )
+    status = et.main(paths)
+    lines, shaped = said(capfd.readouterr().err, paths)
     assert (status, shaped) == (1, True)
     want: list[str] = [f"a.sh:5: {NOT_MARKED}"]
     assert lines == want
 
 
-def test_mark_not_last_reds() -> None:
+def test_mark_not_last_reds(
+    capfd: pytest.CaptureFixture[str], plant: Callable[..., list[str]]
+) -> None:
     """A mark followed by more script is not the last statement."""
-    status, lines, shaped = lint(
-        ("a.sh", script(GUARDED, "org_done=1", 'exit "${status}"')),
-    )
+    paths = plant(("a.sh", script(GUARDED, "org_done=1", 'exit "${status}"')))
+    status = et.main(paths)
+    lines, shaped = said(capfd.readouterr().err, paths)
     assert (status, shaped) == (1, True)
     want: list[str] = [f"a.sh:5: {NOT_MARKED}"]
     assert lines == want
 
 
-def test_guard_on_a_combined_signal_list_reds() -> None:
+def test_guard_on_a_combined_signal_list_reds(
+    capfd: pytest.CaptureFixture[str], plant: Callable[..., list[str]]
+) -> None:
     """The shape is EXIT alone; `EXIT INT` is a different trap."""
-    status, lines, shaped = lint(
-        ("a.sh", script(GUARDED.replace("' EXIT", "' EXIT INT"), "org_done=1")),
+    paths = plant(
+        ("a.sh", script(GUARDED.replace("' EXIT", "' EXIT INT"), "org_done=1"))
     )
+    status = et.main(paths)
+    lines, shaped = said(capfd.readouterr().err, paths)
     assert (status, shaped) == (1, True)
     want: list[str] = [f"a.sh:3: {NOT_GUARDED}"]
     assert lines == want
 
 
-def test_guarded_and_marked_is_clean() -> None:
+def test_guarded_and_marked_is_clean(
+    capfd: pytest.CaptureFixture[str], plant: Callable[..., list[str]]
+) -> None:
     """The two lines, with comments and blanks after the mark."""
-    status, lines, shaped = lint(
+    paths = plant(
         (
             "a.sh",
             script(
@@ -191,12 +224,16 @@ def test_guarded_and_marked_is_clean() -> None:
                 "",
                 "# trailing prose",
             ),
-        ),
+        )
     )
+    status = et.main(paths)
+    lines, shaped = said(capfd.readouterr().err, paths)
     assert (status, lines, shaped) == (0, [], False)
 
 
-def test_each_form_under_each_shebang() -> None:
+def test_each_form_under_each_shebang(
+    capfd: pytest.CaptureFixture[str], plant: Callable[..., list[str]]
+) -> None:
     """POSIX is clean anywhere; `[[ ]]` only under a bash shebang."""
     for shebang, is_bash in SHEBANGS:
         body = script(
@@ -213,7 +250,9 @@ def test_each_form_under_each_shebang() -> None:
             (GUARDED, []),
             (BASH_GUARDED, [] if is_bash else [f"a.sh:{line}: {NOT_BASH}"]),
         ):
-            status, lines, shaped = lint(("a.sh", body.format(guard=guard)))
+            paths = plant(("a.sh", body.format(guard=guard)))
+            status = et.main(paths)
+            lines, shaped = said(capfd.readouterr().err, paths)
             assert (status, lines, shaped) == (
                 1 if want else 0,
                 want,
@@ -221,17 +260,21 @@ def test_each_form_under_each_shebang() -> None:
             )
 
 
-def test_bare_trap_under_sh_reds_as_unguarded() -> None:
+def test_bare_trap_under_sh_reds_as_unguarded(
+    capfd: pytest.CaptureFixture[str], plant: Callable[..., list[str]]
+) -> None:
     """Under `#!/bin/sh` a bare trap owes the guard as anywhere."""
-    status, lines, shaped = lint(
-        ("a.sh", script(BARE, "org_done=1", shebang="#!/bin/sh")),
-    )
+    paths = plant(("a.sh", script(BARE, "org_done=1", shebang="#!/bin/sh")))
+    status = et.main(paths)
+    lines, shaped = said(capfd.readouterr().err, paths)
     assert (status, shaped) == (1, True)
     want: list[str] = [f"a.sh:3: {NOT_GUARDED}"]
     assert lines == want
 
 
-def test_task_body_takes_either_form() -> None:
+def test_task_body_takes_either_form(
+    capfd: pytest.CaptureFixture[str], plant: Callable[..., list[str]]
+) -> None:
     """A task body runs under the belt's bash: both forms are clean."""
     config = (
         '[tasks."lint:a"]\n'
@@ -243,19 +286,27 @@ def test_task_body_takes_either_form() -> None:
         f"{et.PREASSIGN}\n{BASH_GUARDED}\norg_done=1\n"
         "'''\n"
     )
-    assert lint(("mise.toml", config)) == (0, [], False)
+    paths = plant(("mise.toml", config))
+    status = et.main(paths)
+    assert (status, *said(capfd.readouterr().err, paths)) == (0, [], False)
 
 
-def test_no_trap_and_reset_owe_nothing() -> None:
+def test_no_trap_and_reset_owe_nothing(
+    capfd: pytest.CaptureFixture[str], plant: Callable[..., list[str]]
+) -> None:
     """No EXIT trap, a comment naming one, and `trap - EXIT`."""
-    status, lines, shaped = lint(
+    paths = plant(
         ("a.sh", script("echo ok")),
         ("b.sh", script(f"# {BARE}", "trap - EXIT", "echo ok")),
     )
+    status = et.main(paths)
+    lines, shaped = said(capfd.readouterr().err, paths)
     assert (status, lines, shaped) == (0, [], False)
 
 
-def test_task_body_points_at_the_config_line() -> None:
+def test_task_body_points_at_the_config_line(
+    capfd: pytest.CaptureFixture[str], plant: Callable[..., list[str]]
+) -> None:
     """Each body is its own script; findings carry the file line."""
     config = (
         '[tasks."lint:a"]\n'
@@ -270,7 +321,9 @@ def test_task_body_points_at_the_config_line() -> None:
         "org_done=1\n"
         "'''\n"
     )
-    status, lines, shaped = lint(("mise.toml", config))
+    paths = plant(("mise.toml", config))
+    status = et.main(paths)
+    lines, shaped = said(capfd.readouterr().err, paths)
     assert (status, shaped) == (1, True)
     want: list[str] = [
         f"mise.toml:4: task lint:a: {NOT_GUARDED}",
@@ -279,11 +332,13 @@ def test_task_body_points_at_the_config_line() -> None:
     assert lines == want
 
 
-def test_one_line_body_is_its_run_line() -> None:
+def test_one_line_body_is_its_run_line(
+    capfd: pytest.CaptureFixture[str], plant: Callable[..., list[str]]
+) -> None:
     """A `run = "…"` body starts on the `run =` line itself."""
-    status, lines, shaped = lint(
-        ("mise.toml", "[tasks.a]\nrun = \"trap 'rm -f x' EXIT\"\n"),
-    )
+    paths = plant(("mise.toml", "[tasks.a]\nrun = \"trap 'rm -f x' EXIT\"\n"))
+    status = et.main(paths)
+    lines, shaped = said(capfd.readouterr().err, paths)
     assert (status, shaped) == (1, True)
     want: list[str] = [
         f"mise.toml:2: task a: {NOT_GUARDED}",

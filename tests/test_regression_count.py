@@ -6,8 +6,6 @@ is git history, so a hand-written diff would test a parser of a format
 git never produces.
 """
 
-import contextlib
-import io
 import os
 import pathlib
 import subprocess
@@ -396,18 +394,6 @@ def test_root_commit_is_classified() -> None:
 class Report(RepoCase):
     """The printed lists, the ratio, and the job summary."""
 
-    def run_main(self, *args: str) -> tuple[int, str]:
-        """Run main() against the row's repository.
-
-        Returns:
-            (exit status, stdout).
-
-        """
-        out = io.StringIO()
-        with contextlib.redirect_stdout(out):
-            status = rc.main(["--repo", str(self.repo.root), *args])
-        return status, out.getvalue()
-
 
 @fixture
 def report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, env: support.Env) -> Report:
@@ -415,10 +401,13 @@ def report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, env: support.Env) ->
     return Report(tmp_path, monkeypatch, env=env)
 
 
-def test_empty_range_prints_no_fixes(report: Report) -> None:
+def test_empty_range_prints_no_fixes(
+    report: Report, capfd: pytest.CaptureFixture[str]
+) -> None:
     """A window with no fix commits says so and exits 0."""
     report.repo.commit("feat: something", {"a.py": "1\n"})
-    status, out = report.run_main("--since", "2999-01-01")
+    status = rc.main(["--repo", str(report.repo.root), "--since", "2999-01-01"])
+    out = capfd.readouterr().out
     assert status == 0
     assert "test added / (test added + no test) = no fixes" in out
 
@@ -434,13 +423,14 @@ def test_branch_with_no_commits(capfd: pytest.CaptureFixture[str]) -> None:
     assert "= no fixes" in out
 
 
-def test_lists_and_ratio(report: Report) -> None:
+def test_lists_and_ratio(report: Report, capfd: pytest.CaptureFixture[str]) -> None:
     """Every class is printed with its members, and the ratio below."""
     report.repo.commit("fix: a", {"a.py": "1\n", "test_a.py": "1\n"})
     report.repo.commit("fix: b", {"b.py": "1\n"})
     report.repo.commit("fix: c", {"c.py": "1\n"})
     report.repo.commit("fix: d", {"d.md": "1\n"})
-    status, out = report.run_main()
+    status = rc.main(["--repo", str(report.repo.root)])
+    out = capfd.readouterr().out
     assert status == 0
     assert "== test added: 1\n" in out
     assert "== no test: 2\n" in out
@@ -460,13 +450,17 @@ def test_summary_lists_only_recent_no_test(
     report.repo.commit("fix: tested", {"t.py": "1\n", "test_t.py": "1\n"})
     with tempfile.TemporaryDirectory() as tmp:
         summary = pathlib.Path(tmp) / "summary.md"
-        status, _ = report.run_main(
-            "--since",
-            "2019-01-01",
-            "--recent",
-            "2021-01-01",
-            "--summary",
-            str(summary),
+        status = rc.main(
+            [
+                "--repo",
+                str(report.repo.root),
+                "--since",
+                "2019-01-01",
+                "--recent",
+                "2021-01-01",
+                "--summary",
+                str(summary),
+            ]
         )
         text = summary.read_text(encoding="utf-8")
     assert status == 0

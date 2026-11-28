@@ -7,9 +7,6 @@ one of the pair was never caught; and a `deny` entry for the crate was
 dropped beside its skip.
 """
 
-import contextlib
-import io
-import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -56,30 +53,35 @@ skip = [
 """
 
 
-def variants(text: str) -> list[tuple[str, dict[str, object]]]:
-    """Run the helper on a deny.toml.
+@fixture
+def deny(tmp_path: Path) -> Callable[[str], Path]:
+    """Write a row's deny.toml for the helper.
+
+    Returns:
+        A function that writes `text` and returns the file's path.
+
+    """
+
+    def write(text: str) -> Path:
+        path = tmp_path / "deny.toml"
+        path.write_text(text, encoding="utf-8")
+        return path
+
+    return write
+
+
+def variants(out: str) -> list[tuple[str, dict[str, object]]]:
+    """Read the helper's stdout: one spec and variant file per line.
 
     Returns:
         Each printed spec with its variant's `[bans]` table.
 
-    Raises:
-        AssertionError: the helper refused the file.
-
     """
-    with tempfile.TemporaryDirectory() as scratch:
-        path = Path(scratch) / "deny.toml"
-        path.write_text(text, encoding="utf-8")
-        out = io.StringIO()
-        with contextlib.redirect_stdout(out):
-            status = ds.main([str(path)])
-        if status != 0:
-            msg = f"deny_skips.py exited {status}"
-            raise AssertionError(msg)
-        found: list[tuple[str, dict[str, object]]] = []
-        for line in out.getvalue().splitlines():
-            spec, variant = line.split("\t")
-            config = decoded.load_toml(Path(variant).read_text("utf-8"))
-            found.append((spec, decoded.as_object(config["bans"], "[bans]")))
+    found: list[tuple[str, dict[str, object]]] = []
+    for line in out.splitlines():
+        spec, variant = line.split("\t")
+        config = decoded.load_toml(Path(variant).read_text("utf-8"))
+        found.append((spec, decoded.as_object(config["bans"], "[bans]")))
     return found
 
 
@@ -97,9 +99,14 @@ def crates(bans: dict[str, object], key: str) -> list[str]:
 
 
 # Each variant is missing its own entry and nothing else.
-def test_two_versions_of_one_crate_are_two_variants() -> None:
+def test_two_versions_of_one_crate_are_two_variants(
+    capfd: pytest.CaptureFixture[str], deny: Callable[[str], Path]
+) -> None:
     """Each version's variant keeps the other version's skip."""
-    got = variants(TWO_VERSIONS)
+    status = ds.main([str(deny(TWO_VERSIONS))])
+    out = capfd.readouterr().out
+    assert status == 0, out
+    got = variants(out)
     skipped = [(spec, crates(bans, "skip")) for spec, bans in got]
     want: list[tuple[str, list[str]]] = [
         ("windows-sys@0.48", ["windows-sys@0.52"]),
@@ -108,9 +115,14 @@ def test_two_versions_of_one_crate_are_two_variants() -> None:
     assert skipped == want
 
 
-def test_a_deny_entry_for_the_crate_is_kept() -> None:
+def test_a_deny_entry_for_the_crate_is_kept(
+    capfd: pytest.CaptureFixture[str], deny: Callable[[str], Path]
+) -> None:
     """Only the skip goes; the deny entry stays."""
-    [(spec, bans)] = variants(DENIED_TOO)
+    status = ds.main([str(deny(DENIED_TOO))])
+    out = capfd.readouterr().out
+    assert status == 0, out
+    [(spec, bans)] = variants(out)
     assert spec == "openssl@0.10"
     none: list[object] = []
     assert bans["skip"] == none
@@ -119,22 +131,6 @@ def test_a_deny_entry_for_the_crate_is_kept() -> None:
 
 
 # A deny.toml the helper cannot read is refused by name.
-def refused(text: str) -> tuple[int, str, str]:
-    """Run the helper on a deny.toml, capturing both streams.
-
-    Returns:
-        The status, stdout, and stderr with the path written PATH.
-
-    """
-    with tempfile.TemporaryDirectory() as scratch:
-        path = Path(scratch) / "deny.toml"
-        path.write_text(text, encoding="utf-8")
-        out, err = io.StringIO(), io.StringIO()
-        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            status = ds.main([str(path)])
-        return status, out.getvalue(), err.getvalue().replace(str(path), "PATH")
-
-
 @pytest.mark.parametrize(
     ("text", "said"),
     [
@@ -147,8 +143,13 @@ def refused(text: str) -> tuple[int, str, str]:
         ),
     ],
 )
-def test_each_wrong_document_is_named(text: object, said: object) -> None:
+def test_each_wrong_document_is_named(
+    text: str, said: str, deny: Callable[[str], Path], capfd: pytest.CaptureFixture[str]
+) -> None:
     """Not TOML, `bans` not a table, a skip key not an array."""
-    status, out, err = refused(text)
+    path = deny(text)
+    status = ds.main([str(path)])
+    out, err = capfd.readouterr()
+    err = err.replace(str(path), "PATH")
     assert (status, out) == (1, "")
     assert err.startswith(said), err

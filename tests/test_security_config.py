@@ -27,10 +27,8 @@ own case, because it is a real finding and not a fixture artefact.
 """
 
 import copy
-import io
-import subprocess
+import itertools
 import tempfile
-from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -159,23 +157,13 @@ def field(value: object, *path: str) -> object:
     return value
 
 
-def run(live: Live, recs: sc.Records) -> tuple[int, str, str]:
-    """Judge and report.
-
-    Returns:
-        (exit status, stdout, stderr).
-
-    """
-    out, err = io.StringIO(), io.StringIO()
-    with redirect_stdout(out), redirect_stderr(err):
-        rc = sc.report(sc.Audit(OWNER, recs, live).run())
-    return rc, out.getvalue(), err.getvalue()
-
-
 # Agreement passes; each single disagreement reds by name.
-def test_agreement_passes_with_a_line_per_repository() -> None:
+def test_agreement_passes_with_a_line_per_repository(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """The live answers against the tree's records agree."""
-    rc, out, err = run(Live(), records())
+    rc = sc.report(sc.Audit(OWNER, records(), Live()).run())
+    out, err = capfd.readouterr()
     assert rc == 0, err
     assert err == ""
     assert (
@@ -203,11 +191,12 @@ def test_agreement_passes_with_a_line_per_repository() -> None:
     ) in out
 
 
-def test_changed_record_field_reds() -> None:
+def test_changed_record_field_reds(capfd: pytest.CaptureFixture[str]) -> None:
     """A record value that differs from live names both values."""
     recs = records()
     recs.public["secret_scanning_validity_checks"] = OFF
-    rc, _, err = run(Live(), recs)
+    rc = sc.report(sc.Audit(OWNER, recs, Live()).run())
+    err = capfd.readouterr().err
     assert rc == 1
     assert (
         'org-default.json states secret_scanning_validity_checks="disabled"; '
@@ -215,11 +204,12 @@ def test_changed_record_field_reds() -> None:
     ) in err
 
 
-def test_unstated_live_field_reds() -> None:
+def test_unstated_live_field_reds(capfd: pytest.CaptureFixture[str]) -> None:
     """A live field the record does not state is red."""
     recs = records()
     del recs.public["secret_scanning_generic_secrets_push_protection"]
-    rc, _, err = run(Live(), recs)
+    rc = sc.report(sc.Audit(OWNER, recs, Live()).run())
+    err = capfd.readouterr().err
     assert rc == 1
     assert (
         "configuration 265775 sets "
@@ -228,14 +218,17 @@ def test_unstated_live_field_reds() -> None:
     ) in err
 
 
-def test_server_and_own_fields_are_not_findings() -> None:
+def test_server_and_own_fields_are_not_findings(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """id, url, timestamps, target_type, name and description are excepted."""
-    _, _, err = run(Live(), records())
+    sc.report(sc.Audit(OWNER, records(), Live()).run())
+    err = capfd.readouterr().err
     for key in sorted(sc.SERVER_FIELDS | sc.OWN_FIELDS):
         assert f"sets {key}=" not in err
 
 
-def test_unattached_public_repository_reds() -> None:
+def test_unattached_public_repository_reds(capfd: pytest.CaptureFixture[str]) -> None:
     """A public roster member missing from the attachment list is named."""
     live = Live()
     ep = ATTACHED
@@ -244,7 +237,8 @@ def test_unattached_public_repository_reds() -> None:
         200,
         [r for r in rows if field(r, "repository", "name") != "stele"],
     )
-    rc, _, err = run(live, records())
+    rc = sc.report(sc.Audit(OWNER, records(), live).run())
+    err = capfd.readouterr().err
     assert rc == 1
     assert (
         "audit:security-config: stele: public and not attached to "
@@ -252,7 +246,7 @@ def test_unattached_public_repository_reds() -> None:
     ) in err
 
 
-def test_unenforced_public_repository_reds() -> None:
+def test_unenforced_public_repository_reds(capfd: pytest.CaptureFixture[str]) -> None:
     """Attached but not enforced is red with its status."""
     live = Live()
     ep = ATTACHED
@@ -261,7 +255,8 @@ def test_unenforced_public_repository_reds() -> None:
         if field(r, "repository", "name") == "edtf":
             decoded.as_object(r, "a row")["status"] = "failed"
     live.answers[ep] = (200, rows)
-    rc, _, err = run(live, records())
+    rc = sc.report(sc.Audit(OWNER, records(), live).run())
+    err = capfd.readouterr().err
     assert rc == 1
     assert (
         "edtf: public and attached to configuration 265775 "
@@ -269,7 +264,9 @@ def test_unenforced_public_repository_reds() -> None:
     ) in err
 
 
-def test_private_repository_with_secret_scanning_on_reds() -> None:
+def test_private_repository_with_secret_scanning_on_reds(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """The metered product switched on by one click is named."""
     live = Live()
     ep = PRIVATE
@@ -277,7 +274,8 @@ def test_private_repository_with_secret_scanning_on_reds() -> None:
     scanning = field(body, "security_and_analysis", "secret_scanning")
     decoded.as_object(scanning, "secret_scanning")["status"] = "enabled"
     live.answers[ep] = (200, body)
-    rc, _, err = run(live, records())
+    rc = sc.report(sc.Audit(OWNER, records(), live).run())
+    err = capfd.readouterr().err
     assert rc == 1
     assert (
         "monumental-archive: secret_scanning: org-private.json states "
@@ -285,9 +283,12 @@ def test_private_repository_with_secret_scanning_on_reds() -> None:
     ) in err
 
 
-def test_live_private_security_updates_disagree_with_the_record() -> None:
+def test_live_private_security_updates_disagree_with_the_record(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """The tree's record against the live answer as fetched."""
-    rc, _, err = run(Live(), records(agreeing_private=False))
+    rc = sc.report(sc.Audit(OWNER, records(agreeing_private=False), Live()).run())
+    err = capfd.readouterr().err
     assert rc == 1
     assert (
         "monumental-archive: dependabot_security_updates: org-private.json "
@@ -295,37 +296,46 @@ def test_live_private_security_updates_disagree_with_the_record() -> None:
     ) in err
 
 
-def test_private_repository_attached_to_public_shape_reds() -> None:
+def test_private_repository_attached_to_public_shape_reds(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """A private member on the public configuration bills, and is named."""
     live = Live()
     ep = ATTACHED
     rows = rows_of(live, ep)
-    rows.append({
-        "status": "enforced",
-        "repository": {"name": "monumental-archive", "private": True},
-    })
+    rows.append(
+        {
+            "status": "enforced",
+            "repository": {"name": "monumental-archive", "private": True},
+        }
+    )
     live.answers[ep] = (200, rows)
-    rc, _, err = run(live, records())
+    rc = sc.report(sc.Audit(OWNER, records(), live).run())
+    err = capfd.readouterr().err
     assert rc == 1
     assert (
         "monumental-archive: private and attached to the public configuration 265775"
     ) in err
 
 
-def test_private_alerts_off_reds() -> None:
+def test_private_alerts_off_reds(capfd: pytest.CaptureFixture[str]) -> None:
     """A 404 from vulnerability-alerts reads as disabled."""
     live = Live()
     live.answers[ALERTS] = (404, None)
-    rc, _, err = run(live, records())
+    rc = sc.report(sc.Audit(OWNER, records(), live).run())
+    err = capfd.readouterr().err
     assert rc == 1
     assert "dependabot_alerts: org-private.json states enabled;" in err
 
 
-def test_org_403_is_cannot_judge_naming_the_grant() -> None:
+def test_org_403_is_cannot_judge_naming_the_grant(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """A refused org read is never a pass, and names the grant."""
     live = Live()
     live.answers[DEFAULTS] = (403, None)
-    rc, out, err = run(live, records())
+    rc = sc.report(sc.Audit(OWNER, records(), live).run())
+    out, err = capfd.readouterr()
     assert rc == 1
     assert "public, attached" not in out
     assert (
@@ -334,14 +344,17 @@ def test_org_403_is_cannot_judge_naming_the_grant() -> None:
     ) in err
 
 
-def test_hidden_security_and_analysis_is_cannot_judge() -> None:
+def test_hidden_security_and_analysis_is_cannot_judge(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """Without admin GitHub omits the block; that is blind, not clean."""
     live = Live()
     ep = PRIVATE
     body = body_of(live, ep)
     del body["security_and_analysis"]
     live.answers[ep] = (200, body)
-    rc, out, err = run(live, records())
+    rc = sc.report(sc.Audit(OWNER, records(), live).run())
+    out, err = capfd.readouterr()
     assert rc == 1
     assert "monumental-archive: private" not in out
     assert (
@@ -350,25 +363,29 @@ def test_hidden_security_and_analysis_is_cannot_judge() -> None:
     ) in err
 
 
-def test_no_public_default_reds() -> None:
+def test_no_public_default_reds(capfd: pytest.CaptureFixture[str]) -> None:
     """With no default for new public repositories there is nothing to describe."""
     live = Live()
     ep = DEFAULTS
     rows = rows_of(live, ep)
     decoded.as_object(rows[0], "[0]")["default_for_new_repos"] = "private_and_internal"
     live.answers[ep] = (200, rows)
-    rc, _, err = run(live, records())
+    rc = sc.report(sc.Audit(OWNER, records(), live).run())
+    err = capfd.readouterr().err
     assert rc == 1
     assert "0 configurations are the default for new public repositories" in err
 
 
-def test_roster_member_missing_from_listing_reds() -> None:
+def test_roster_member_missing_from_listing_reds(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """A roster repository the listing lacks is named."""
     live = Live()
     ep = LISTING
     rows = rows_of(live, ep)
     live.answers[ep] = (200, [r for r in rows if field(r, "name") != "signer"])
-    rc, _, err = run(live, records())
+    rc = sc.report(sc.Audit(OWNER, records(), live).run())
+    err = capfd.readouterr().err
     assert rc == 1
     assert "signer: in the roster and not in the org listing" in err
 
@@ -468,17 +485,36 @@ def test_live_answers(endpoint: str, body: object, message: str) -> None:
     assert str(cm.value) == message
 
 
+@fixture
+def gh_answers(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> Callable[[str], None]:
+    """Stand a stub `gh` in for the real one, printing a row's answer.
+
+    Returns:
+        A function that makes the stub print `stdout` and exit 0.
+
+    """
+    made = itertools.count()
+
+    def answer(stdout: str) -> None:
+        stub = tmp_path / f"gh{next(made)}"
+        stub.write_text(f"#!/bin/sh\nprintf '%s' '{stdout}'\n", encoding="utf-8")
+        stub.chmod(0o755)
+        monkeypatch.setattr(sc, "GH", str(stub))
+
+    return answer
+
+
 def test_gh_reads_strictly_and_names_the_endpoint(
-    monkeypatch: pytest.MonkeyPatch,
+    gh_answers: Callable[[str], None],
 ) -> None:
     """A duplicate key in gh's output is refused with the endpoint."""
-    done = subprocess.CompletedProcess([], 0, stdout='{"a": 1, "a": 2}', stderr="")
+    gh_answers('{"a": 1, "a": 2}')
     with pytest.raises(decoded.UndecodableError) as cm:
-        monkeypatch.setattr(subprocess, "run", lambda *_args, **_kwargs: done)
         sc.gh_fetch("x/y")
     assert str(cm.value) == 'x/y: duplicate key "a"'
-    pages = subprocess.CompletedProcess([], 0, stdout="[[1], [2]]", stderr="")
-    monkeypatch.setattr(subprocess, "run", lambda *_args, **_kwargs: pages)
+    gh_answers("[[1], [2]]")
     assert sc.gh_fetch("x/y", paginate=True) == (200, [1, 2])
 
 

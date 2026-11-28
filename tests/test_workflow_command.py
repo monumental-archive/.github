@@ -19,7 +19,6 @@ import io
 import re
 import sys
 import tempfile
-from contextlib import redirect_stdout
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -29,7 +28,7 @@ from belt import workflow_command
 from tests import support
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    pass
 
 
 from belt.release import pgrx_images
@@ -41,19 +40,6 @@ COMMAND = re.compile(r"::[A-Za-z][A-Za-z0-9_-]*(::| )")
 MODULE = Path("mise/workflow_command.py")
 # Directories the walk never enters: tool state, vendored trees, caches.
 SKIP = {"vendor", "testdata"}
-
-
-def written(call: Callable[[], None]) -> str:
-    """Capture what one writer call prints to stdout.
-
-    Returns:
-        The output.
-
-    """
-    out = io.StringIO()
-    with redirect_stdout(out):
-        call()
-    return out.getvalue()
 
 
 def command_strings(source: str) -> list[int]:
@@ -122,61 +108,60 @@ def findings(root: Path) -> list[str]:
 
 
 # What the writer prints, one line each time.
-def test_a_newline_cannot_begin_a_second_command() -> None:
+def test_a_newline_cannot_begin_a_second_command(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """#1660's row: a message with a newline and a command is one line."""
-    assert (
-        written(lambda: workflow_command.error("a\n::error::b"))
-        == "::error::a%0A::error::b\n"
-    )
+    workflow_command.error("a\n::error::b")
+    assert capfd.readouterr().out == "::error::a%0A::error::b\n"
 
 
-def test_cr_and_percent_are_escaped_percent_first() -> None:
+def test_cr_and_percent_are_escaped_percent_first(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """`%0A` written as text stays text: `%` is escaped before the rest."""
-    assert (
-        written(lambda: workflow_command.warning("50%\r%0A"))
-        == "::warning::50%25%0D%250A\n"
-    )
+    workflow_command.warning("50%\r%0A")
+    assert capfd.readouterr().out == "::warning::50%25%0D%250A\n"
 
 
-def test_plain_text_is_unchanged() -> None:
+def test_plain_text_is_unchanged(capfd: pytest.CaptureFixture[str]) -> None:
     """Text with no `%`, CR or LF goes out as it was."""
-    assert (
-        written(lambda: workflow_command.notice("published v1.2.3 — done"))
-        == "::notice::published v1.2.3 — done\n"
-    )
+    workflow_command.notice("published v1.2.3 — done")
+    assert capfd.readouterr().out == "::notice::published v1.2.3 — done\n"
 
 
-def test_properties_also_escape_colon_and_comma() -> None:
+def test_properties_also_escape_colon_and_comma(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """file, line and title, in that order, each value escaped."""
-    assert (
-        written(lambda: workflow_command.error("m", file="a:b,c", line=3, title="t\n%"))
-        == "::error file=a%3Ab%2Cc,line=3,title=t%0A%25::m\n"
-    )
+    workflow_command.error("m", file="a:b,c", line=3, title="t\n%")
+    assert capfd.readouterr().out == "::error file=a%3Ab%2Cc,line=3,title=t%0A%25::m\n"
 
 
-def test_a_masked_value_with_a_newline_is_one_line() -> None:
+def test_a_masked_value_with_a_newline_is_one_line(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """The whole value is masked: one line, read back whole.
 
     Unescaped, the runner masked only up to the newline.
     """
-    out = written(lambda: workflow_command.mask("abc\ndef%"))
+    workflow_command.mask("abc\ndef%")
+    out = capfd.readouterr().out
     assert out == "::add-mask::abc%0Adef%25\n"
     assert (
-        out
-        .removeprefix("::add-mask::")
+        out.removeprefix("::add-mask::")
         .removesuffix("\n")
         .replace("%0A", "\n")
         .replace("%25", "%")
     ) == "abc\ndef%"
 
 
-def test_a_group_title_is_escaped_and_closed() -> None:
+def test_a_group_title_is_escaped_and_closed(capfd: pytest.CaptureFixture[str]) -> None:
     """The group title is escaped, and endgroup is the bare command."""
-    assert (
-        written(lambda: workflow_command.group("log\n::error::x"))
-        == "::group::log%0A::error::x\n"
-    )
-    assert written(lambda: workflow_command.endgroup(stream=None)) == "::endgroup::\n"
+    workflow_command.group("log\n::error::x")
+    assert capfd.readouterr().out == "::group::log%0A::error::x\n"
+    workflow_command.endgroup(stream=None)
+    assert capfd.readouterr().out == "::endgroup::\n"
 
 
 def test_group_then_endgroup_in_process(capfd: pytest.CaptureFixture[str]) -> None:
@@ -187,10 +172,11 @@ def test_group_then_endgroup_in_process(capfd: pytest.CaptureFixture[str]) -> No
     assert out == "::group::npm debug log%0A::error::x\n::endgroup::\n"
 
 
-def test_the_stream_is_the_callers() -> None:
+def test_the_stream_is_the_callers(capfd: pytest.CaptureFixture[str]) -> None:
     """stream= takes the line, and stdout gets nothing."""
     err = io.StringIO()
-    assert written(lambda: workflow_command.notice("x", stream=err)) == ""
+    workflow_command.notice("x", stream=err)
+    assert capfd.readouterr().out == ""
     assert err.getvalue() == "::notice::x\n"
 
 
@@ -208,13 +194,15 @@ def test_the_refusal_is_one_line(
         monkeypatch.setenv("MISE_TASK_NAME", "")
         monkeypatch.setenv("ORG_FINDINGS", "")
         monkeypatch.setattr(sys, "argv", ["pgrx_images.py"])
-        code = pgrx_images.main([
-            "base-image",
-            "--pg",
-            "a\n::error::b",
-            "--table",
-            str(table),
-        ])
+        code = pgrx_images.main(
+            [
+                "base-image",
+                "--pg",
+                "a\n::error::b",
+                "--table",
+                str(table),
+            ]
+        )
         err = capfd.readouterr().err
     assert code == 1
     assert err == (
