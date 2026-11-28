@@ -37,21 +37,23 @@ the caller's real index when the suite runs from pre-push.
 """
 
 import functools
-import io
 import json
 import os
 import re
 import shutil
 import subprocess
 import tempfile
-from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from belt import decoded, pg_schema
 from belt.typed_pytest import fixture
 from tests import support
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 normalise = pg_schema.normalise
 
@@ -227,25 +229,8 @@ def add_argument(text: str) -> str:
     return text.replace(before, after)
 
 
-def run_main(argv: list[str]) -> tuple[int, str, str]:
-    """Call the entry point the task calls, capturing both streams.
-
-    Returns:
-        The exit status, stdout and stderr.
-
-    """
-    out, err = io.StringIO(), io.StringIO()
-    # check is lint:pg-schema's call, write fix:pg-schema's (#1934).
-    task = "fix:pg-schema" if argv[:1] == ["write"] else "lint:pg-schema"
-    with (
-        pytest.MonkeyPatch.context() as patched,
-        redirect_stdout(out),
-        redirect_stderr(err),
-    ):
-        patched.setenv("MISE_TASK_NAME", task)
-        patched.setenv("ORG_FINDINGS", "")
-        status = pg_schema.main(argv)
-    return status, out.getvalue(), err.getvalue()
+# check is lint:pg-schema's call, write fix:pg-schema's (#1934).
+LINT, FIX = "lint:pg-schema", "fix:pg-schema"
 
 
 def write(text: str) -> str:
@@ -382,16 +367,24 @@ def test_volatility_change_diffs() -> None:
     assert normalise(changed) != normalise(RAW)
 
 
-def test_tracked_matching_snapshot_passes(in_repo: InRepo) -> None:
+def test_tracked_matching_snapshot_passes(
+    in_repo: InRepo, capfd: pytest.CaptureFixture[str], as_task: Callable[[str], None]
+) -> None:
     """The green path: nothing printed, status 0."""
     in_repo.track(EDTF_SNAPSHOT)
-    assert run_main(["check", write(RAW), SNAPSHOT]) == (0, "", "")
+    as_task(LINT)
+    status = pg_schema.main(["check", write(RAW), SNAPSHOT])
+    assert (status, *capfd.readouterr()) == (0, "", "")
 
 
 @pytest.mark.usefixtures("in_repo")
-def test_absent_snapshot_is_red_naming_file_and_fixer() -> None:
+def test_absent_snapshot_is_red_naming_file_and_fixer(
+    capfd: pytest.CaptureFixture[str], as_task: Callable[[str], None]
+) -> None:
     """An extension with no snapshot is red, never a skip (#896)."""
-    status, out, err = run_main(["check", write(RAW), SNAPSHOT])
+    as_task(LINT)
+    status = pg_schema.main(["check", write(RAW), SNAPSHOT])
+    out, err = capfd.readouterr()
     assert (status, out) == (1, "")
     assert err == (
         f"lint:pg-schema: no snapshot tracked at {SNAPSHOT}\n"
@@ -400,25 +393,37 @@ def test_absent_snapshot_is_red_naming_file_and_fixer() -> None:
 
 
 @pytest.mark.usefixtures("in_repo")
-def test_absent_snapshot_is_red_before_reading_the_generation() -> None:
+def test_absent_snapshot_is_red_before_reading_the_generation(
+    capfd: pytest.CaptureFixture[str], as_task: Callable[[str], None]
+) -> None:
     """The task's pre-build shortcut passes /dev/null; same message."""
-    status, _, err = run_main(["check", os.devnull, SNAPSHOT])
+    as_task(LINT)
+    status = pg_schema.main(["check", os.devnull, SNAPSHOT])
+    err = capfd.readouterr().err
     assert status == 1
     assert f"no snapshot tracked at {SNAPSHOT}" in err
 
 
-def test_untracked_file_on_disk_is_the_same_red(in_repo: InRepo) -> None:
+def test_untracked_file_on_disk_is_the_same_red(
+    in_repo: InRepo, capfd: pytest.CaptureFixture[str], as_task: Callable[[str], None]
+) -> None:
     """A snapshot written and never committed guards nothing in CI."""
     (in_repo.root / SNAPSHOT).write_text(EDTF_SNAPSHOT, encoding="utf-8")
-    status, _, err = run_main(["check", write(RAW), SNAPSHOT])
+    as_task(LINT)
+    status = pg_schema.main(["check", write(RAW), SNAPSHOT])
+    err = capfd.readouterr().err
     assert status == 1
     assert f"no snapshot tracked at {SNAPSHOT}" in err
 
 
-def test_surface_change_is_red_with_the_diff_and_read_it_first(in_repo: InRepo) -> None:
+def test_surface_change_is_red_with_the_diff_and_read_it_first(
+    in_repo: InRepo, capfd: pytest.CaptureFixture[str], as_task: Callable[[str], None]
+) -> None:
     """The diff is the review; the fixer is named after it."""
     in_repo.track(EDTF_SNAPSHOT)
-    status, out, err = run_main(["check", write(add_argument(RAW)), SNAPSHOT])
+    as_task(LINT)
+    status = pg_schema.main(["check", write(add_argument(RAW)), SNAPSHOT])
+    out, err = capfd.readouterr()
     assert status == 1
     assert '-CREATE FUNCTION "edtf_level"( "input" TEXT )' in out
     assert '+CREATE FUNCTION "edtf_level"( "input" TEXT, "_strict"' in out
@@ -432,57 +437,89 @@ def test_surface_change_is_red_with_the_diff_and_read_it_first(in_repo: InRepo) 
     )
 
 
-def test_line_shift_passes_end_to_end(in_repo: InRepo) -> None:
+def test_line_shift_passes_end_to_end(
+    in_repo: InRepo, as_task: Callable[[str], None]
+) -> None:
     """The normalisation property, through the judging entry point."""
     in_repo.track(EDTF_SNAPSHOT)
-    status, _, _ = run_main(["check", write(shift_lines(RAW, 1)), SNAPSHOT])
+    as_task(LINT)
+    status = pg_schema.main(["check", write(shift_lines(RAW, 1)), SNAPSHOT])
     assert status == 0
 
 
-def test_comment_only_output_is_red_not_an_empty_match(in_repo: InRepo) -> None:
+def test_comment_only_output_is_red_not_an_empty_match(
+    in_repo: InRepo, capfd: pytest.CaptureFixture[str], as_task: Callable[[str], None]
+) -> None:
     """The header block alone is a broken generation, never a match."""
     in_repo.track("")
     header = RAW.split(BLOCK, 2)[1]
-    status, out, err = run_main(["check", write(BLOCK + header), SNAPSHOT])
+    as_task(LINT)
+    status = pg_schema.main(["check", write(BLOCK + header), SNAPSHOT])
+    out, err = capfd.readouterr()
     assert (status, out) == (1, "")
     assert "normalised to nothing" in err
 
 
-def test_missing_generation_is_red(in_repo: InRepo) -> None:
+def test_missing_generation_is_red(
+    in_repo: InRepo, capfd: pytest.CaptureFixture[str], as_task: Callable[[str], None]
+) -> None:
     """A generation that wrote nothing is named, not skipped."""
     in_repo.track(EDTF_SNAPSHOT)
     missing = str(Path(tempfile.mkdtemp()) / "absent.sql")
-    status, _, err = run_main(["check", missing, SNAPSHOT])
+    as_task(LINT)
+    status = pg_schema.main(["check", missing, SNAPSHOT])
+    err = capfd.readouterr().err
     assert status == 1
     assert "cannot read the generated schema" in err
 
 
 def test_written_snapshot_is_what_check_passes(
-    in_repo: InRepo, env: support.Env
+    in_repo: InRepo,
+    env: support.Env,
+    capfd: pytest.CaptureFixture[str],
+    as_task: Callable[[str], None],
 ) -> None:
     """Absent, written, tracked, green: the fixer's whole contract."""
     raw = write(RAW)
-    assert run_main(["check", raw, SNAPSHOT])[0] == 1
-    status, out, err = run_main(["write", raw, SNAPSHOT])
+    as_task(LINT)
+    assert pg_schema.main(["check", raw, SNAPSHOT]) == 1
+    capfd.readouterr()
+    as_task(FIX)
+    status = pg_schema.main(["write", raw, SNAPSHOT])
+    out, err = capfd.readouterr()
     assert (status, out, err) == (0, f"fix:pg-schema: wrote {SNAPSHOT}\n", "")
     assert (in_repo.root / SNAPSHOT).read_text(encoding="utf-8") == EDTF_SNAPSHOT
     git(in_repo.root, "add", SNAPSHOT, env=env)
-    assert run_main(["check", raw, SNAPSHOT]) == (0, "", "")
+    as_task(LINT)
+    status = pg_schema.main(["check", raw, SNAPSHOT])
+    assert (status, *capfd.readouterr()) == (0, "", "")
 
 
-def test_rewrite_after_a_surface_change_turns_the_lint_green(in_repo: InRepo) -> None:
+def test_rewrite_after_a_surface_change_turns_the_lint_green(
+    in_repo: InRepo, capfd: pytest.CaptureFixture[str], as_task: Callable[[str], None]
+) -> None:
     """The intended-change path: red, write, green."""
     in_repo.track(EDTF_SNAPSHOT)
     raw = write(add_argument(RAW))
-    assert run_main(["check", raw, SNAPSHOT])[0] == 1
-    assert run_main(["write", raw, SNAPSHOT])[0] == 0
-    assert run_main(["check", raw, SNAPSHOT]) == (0, "", "")
+    as_task(LINT)
+    assert pg_schema.main(["check", raw, SNAPSHOT]) == 1
+    capfd.readouterr()
+    as_task(FIX)
+    assert pg_schema.main(["write", raw, SNAPSHOT]) == 0
+    capfd.readouterr()
+    as_task(LINT)
+    status = pg_schema.main(["check", raw, SNAPSHOT])
+    assert (status, *capfd.readouterr()) == (0, "", "")
 
 
-def test_empty_generation_writes_nothing(in_repo: InRepo) -> None:
+def test_empty_generation_writes_nothing(
+    in_repo: InRepo, capfd: pytest.CaptureFixture[str], as_task: Callable[[str], None]
+) -> None:
     """An unusable generation must not overwrite a good snapshot."""
     in_repo.track(EDTF_SNAPSHOT)
-    status, _, err = run_main(["write", write(""), SNAPSHOT])
+    as_task(FIX)
+    status = pg_schema.main(["write", write(""), SNAPSHOT])
+    err = capfd.readouterr().err
     assert status == 1
     assert "fix:pg-schema: the generated schema normalised" in err
     assert (in_repo.root / SNAPSHOT).read_text(encoding="utf-8") == EDTF_SNAPSHOT
@@ -823,9 +860,13 @@ def test_fix_leaves_the_snapshot_byte_for_byte(
 @pytest.mark.parametrize(
     "argv", [[], ["check", "a"], ["check", "a", "b", "c"], ["diff", "a", "b"]]
 )
-def test_wrong_arguments_are_red(argv: object) -> None:
+def test_wrong_arguments_are_red(
+    argv: object, capfd: pytest.CaptureFixture[str], as_task: Callable[[str], None]
+) -> None:
     """The task passes a mode and exactly two paths."""
-    status, out, err = run_main(argv)
+    as_task(FIX if argv[:1] == ["write"] else LINT)
+    status = pg_schema.main(argv)
+    out, err = capfd.readouterr()
     assert (status, out) == (1, "")
     assert "usage:" in err
 

@@ -14,14 +14,18 @@ time, so each ignored difference and each kept one is planted alone.
 
 import io
 import json
-from contextlib import redirect_stdout
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from belt import bestpractices_owner as owner
 from belt import decoded
+from belt.typed_pytest import fixture
 from tests import support
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 HERE = support.MISE
 
@@ -46,19 +50,19 @@ DB_WEARER = "https://github.com/monumental-archive/monumental-archive-db"
 CANON_WEARER = "https://github.com/monumental-archive/.github"
 
 
-def run(entry: object, wearer: str) -> tuple[int, str]:
-    """Run the CLI on one entry.
+@fixture
+def fed(monkeypatch: pytest.MonkeyPatch) -> Callable[[object], None]:
+    """Feed the helper one project's entry on stdin, as the leg pipes it.
 
     Returns:
-        The exit status and what it printed.
+        A function that puts an entry, as JSON, on stdin.
 
     """
-    out = io.StringIO()
-    stdin = io.StringIO(json.dumps(entry))
-    with pytest.MonkeyPatch.context() as patched, redirect_stdout(out):
-        patched.setattr("sys.stdin", stdin)
-        status = owner.main([wearer])
-    return status, out.getvalue()
+
+    def feed(doc: object) -> None:
+        monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(doc)))
+
+    return feed
 
 
 def entry(repo_url: str) -> dict[str, object]:
@@ -72,9 +76,13 @@ def entry(repo_url: str) -> dict[str, object]:
 
 
 # The two entries as the issuer serves them.
-def test_13998_is_not_monumental_archive_dbs() -> None:
+def test_13998_is_not_monumental_archive_dbs(
+    capfd: pytest.CaptureFixture[str], fed: Callable[[object], None]
+) -> None:
     """The defect as measured: red, naming both URLs."""
-    status, said = run(DB, DB_WEARER)
+    fed(DB)
+    status = owner.main([DB_WEARER])
+    said = capfd.readouterr().out
     assert status == 1
     assert said == (
         "project 13998's repo_url is "
@@ -84,49 +92,81 @@ def test_13998_is_not_monumental_archive_dbs() -> None:
     )
 
 
-def test_14058_is_the_canons() -> None:
+def test_14058_is_the_canons(
+    capfd: pytest.CaptureFixture[str], fed: Callable[[object], None]
+) -> None:
     """The canon's own entry passes, silently."""
-    assert run(CANON, CANON_WEARER) == (0, "")
+    fed(CANON)
+    status = owner.main([CANON_WEARER])
+    assert (status, capfd.readouterr().out) == (0, "")
 
 
 # Case, one trailing slash and one trailing .git; nothing else.
-def test_case_is_ignored() -> None:
+def test_case_is_ignored(
+    capfd: pytest.CaptureFixture[str], fed: Callable[[object], None]
+) -> None:
     """GitHub owners are case-insensitive."""
     shouted = entry("https://github.com/Monumental-Archive/.GitHub")
-    assert run(shouted, CANON_WEARER)[0] == 0
+    fed(shouted)
+    assert owner.main([CANON_WEARER]) == 0
+    capfd.readouterr()
 
 
-def test_a_trailing_slash_is_ignored() -> None:
+def test_a_trailing_slash_is_ignored(
+    capfd: pytest.CaptureFixture[str], fed: Callable[[object], None]
+) -> None:
     """A slash on either side."""
-    assert run(entry(CANON_WEARER + "/"), CANON_WEARER)[0] == 0
-    assert run(CANON, CANON_WEARER + "/")[0] == 0
+    fed(entry(CANON_WEARER + "/"))
+    assert owner.main([CANON_WEARER]) == 0
+    capfd.readouterr()
+    fed(CANON)
+    assert owner.main([CANON_WEARER + "/"]) == 0
+    capfd.readouterr()
 
 
-def test_a_trailing_git_is_ignored() -> None:
+def test_a_trailing_git_is_ignored(
+    capfd: pytest.CaptureFixture[str], fed: Callable[[object], None]
+) -> None:
     """The clone URL form."""
-    assert run(entry(CANON_WEARER + ".git"), CANON_WEARER)[0] == 0
-    assert run(entry(CANON_WEARER + ".git/"), CANON_WEARER)[0] == 0
+    fed(entry(CANON_WEARER + ".git"))
+    assert owner.main([CANON_WEARER]) == 0
+    capfd.readouterr()
+    fed(entry(CANON_WEARER + ".git/"))
+    assert owner.main([CANON_WEARER]) == 0
+    capfd.readouterr()
 
 
-def test_an_old_owner_is_still_a_mismatch() -> None:
+def test_an_old_owner_is_still_a_mismatch(
+    capfd: pytest.CaptureFixture[str], fed: Callable[[object], None]
+) -> None:
     """A redirect from a renamed owner is not followed."""
     moved = entry("https://github.com/CarlAllenn/.github")
-    status, said = run(moved, CANON_WEARER)
+    fed(moved)
+    status = owner.main([CANON_WEARER])
+    said = capfd.readouterr().out
     assert status == 1
     assert "https://github.com/CarlAllenn/.github" in said
     assert CANON_WEARER in said
 
 
-def test_another_host_is_a_mismatch() -> None:
+def test_another_host_is_a_mismatch(
+    capfd: pytest.CaptureFixture[str], fed: Callable[[object], None]
+) -> None:
     """Only the three named differences fold."""
     elsewhere = entry("https://gitlab.com/monumental-archive/.github")
-    assert run(elsewhere, CANON_WEARER)[0] == 1
+    fed(elsewhere)
+    assert owner.main([CANON_WEARER]) == 1
+    capfd.readouterr()
 
 
-def test_a_missing_repo_url_is_red() -> None:
+def test_a_missing_repo_url_is_red(
+    capfd: pytest.CaptureFixture[str], fed: Callable[[object], None]
+) -> None:
     """An entry naming no repository binds to none."""
     entry = {k: v for k, v in CANON.items() if k != "repo_url"}
-    status, said = run(entry, CANON_WEARER)
+    fed(entry)
+    status = owner.main([CANON_WEARER])
+    said = capfd.readouterr().out
     assert status == 1
     assert said == (
         "project 14058 names no repo_url, so nothing binds it to "
@@ -148,6 +188,10 @@ def test_a_process_with_no_stdin_is_red_by_name(
     )
 
 
-def test_a_non_object_answer_is_red() -> None:
+def test_a_non_object_answer_is_red(
+    capfd: pytest.CaptureFixture[str], fed: Callable[[object], None]
+) -> None:
     """A list is not a project."""
-    assert run([CANON], CANON_WEARER)[0] == 1
+    fed([CANON])
+    assert owner.main([CANON_WEARER]) == 1
+    capfd.readouterr()

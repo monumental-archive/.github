@@ -5,10 +5,7 @@ The script rows live beside their scripts (`test_citation.py`,
 the reader in process for the branches neither script row reaches.
 """
 
-import contextlib
-import io
 import subprocess
-import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -38,44 +35,50 @@ HERE = support.MISE
 GIT = support.tool("git")
 
 
-def run(
-    files: dict[str, str], argv: list[str] | None = None, *, env: support.Env
-) -> tuple[int, str, str]:
-    """Plant files and run the reader's main in that directory.
+@fixture
+def repo(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, env: support.Env
+) -> Callable[[dict[str, str]], None]:
+    """Stand each row in a repository of its own, its files tracked.
+
+    The reader asks git whether `.badge-states` is tracked (#2013).
 
     Returns:
-        The exit status, stdout and stderr.
+        A function that writes and tracks the files and steps in.
 
     """
-    with tempfile.TemporaryDirectory() as scratch:
-        root = Path(scratch)
+
+    def tree(files: dict[str, str]) -> None:
         for name, text in files.items():
-            (root / name).write_text(text, encoding="utf-8")
-        # The reader asks git whether `.badge-states` is tracked (#2013).
-        environ = env(root / ".home")
+            (tmp_path / name).write_text(text, encoding="utf-8")
+        environ = env(tmp_path / ".home")
         for step in (["init", "-q"], ["add", "-A"]):
-            subprocess.run([GIT, *step], cwd=root, env=environ, check=True)
-        out, err = io.StringIO(), io.StringIO()
-        with (
-            contextlib.chdir(root),
-            contextlib.redirect_stdout(out),
-            contextlib.redirect_stderr(err),
-        ):
-            status = pl.main(["fix:test"] if argv is None else argv)
-        return status, out.getvalue(), err.getvalue()
+            subprocess.run([GIT, *step], cwd=tmp_path, env=environ, check=True)
+        monkeypatch.chdir(tmp_path)
+
+    return tree
 
 
 # The reader's own branches.
-def test_one_expression_is_printed(env: support.Env) -> None:
+def test_one_expression_is_printed(
+    capfd: pytest.CaptureFixture[str], repo: Callable[[dict[str, str]], None]
+) -> None:
     """No declaration needed where the tree says one thing."""
     reuse = '[[annotations]]\nSPDX-License-Identifier = "0BSD"\n'
-    assert run({"REUSE.toml": reuse}, env=env) == (0, "0BSD\n", "")
+    repo({"REUSE.toml": reuse})
+    status = pl.main(["fix:test"])
+    out, err = capfd.readouterr()
+    assert (status, out, err) == (0, "0BSD\n", "")
 
 
-def test_a_list_value_is_read_whole(env: support.Env) -> None:
+def test_a_list_value_is_read_whole(
+    capfd: pytest.CaptureFixture[str], repo: Callable[[dict[str, str]], None]
+) -> None:
     """SPDX-License-Identifier may be a list; each entry counts."""
     reuse = '[[annotations]]\nSPDX-License-Identifier = ["0BSD", "MIT"]\n'
-    status, out, err = run({"REUSE.toml": reuse}, env=env)
+    repo({"REUSE.toml": reuse})
+    status = pl.main(["fix:test"])
+    out, err = capfd.readouterr()
     assert (status, out) == (1, "")
     assert err == (
         "fix:test: REUSE.toml names several licence expressions:\n"
@@ -83,9 +86,14 @@ def test_a_list_value_is_read_whole(env: support.Env) -> None:
     )
 
 
-def test_no_expression_prints_nothing(env: support.Env) -> None:
+def test_no_expression_prints_nothing(
+    capfd: pytest.CaptureFixture[str], repo: Callable[[dict[str, str]], None]
+) -> None:
     """The caller words its own refusal; the reader stays silent."""
-    assert run({"REUSE.toml": "version = 1\n"}, env=env) == (0, "", "")
+    repo({"REUSE.toml": "version = 1\n"})
+    status = pl.main(["fix:test"])
+    out, err = capfd.readouterr()
+    assert (status, out, err) == (0, "", "")
 
 
 def test_comments_and_other_keys_are_not_the_licence_line() -> None:
@@ -95,9 +103,13 @@ def test_comments_and_other_keys_are_not_the_licence_line() -> None:
     assert pl.declared("reuse registered\n") == ""
 
 
-def test_an_unparsable_file_is_red_by_name(env: support.Env) -> None:
+def test_an_unparsable_file_is_red_by_name(
+    capfd: pytest.CaptureFixture[str], repo: Callable[[dict[str, str]], None]
+) -> None:
     """A REUSE.toml that is not TOML is named, never read as empty."""
-    status, out, err = run({"REUSE.toml": "[[annotations]\n"}, env=env)
+    repo({"REUSE.toml": "[[annotations]\n"})
+    status = pl.main(["fix:test"])
+    out, err = capfd.readouterr()
     assert (status, out) == (1, "")
     assert err.startswith("fix:test: REUSE.toml does not parse: "), err
 
@@ -117,15 +129,24 @@ def test_an_unparsable_file_is_red_by_name(env: support.Env) -> None:
     ],
 )
 def test_a_wrong_shape_is_red_by_where(
-    reuse: object, where: object, env: support.Env
+    reuse: object,
+    where: object,
+    capfd: pytest.CaptureFixture[str],
+    repo: Callable[[dict[str, str]], None],
 ) -> None:
     """An annotation of the wrong shape is refused, naming where."""
-    status, out, err = run({"REUSE.toml": reuse}, env=env)
+    repo({"REUSE.toml": reuse})
+    status = pl.main(["fix:test"])
+    out, err = capfd.readouterr()
     assert (1, "", f"fix:test: REUSE.toml: {where}\n") == (status, out, err)
 
 
-def test_usage(env: support.Env) -> None:
+def test_usage(
+    capfd: pytest.CaptureFixture[str], repo: Callable[[dict[str, str]], None]
+) -> None:
     """No caller is a usage error, not a pass."""
-    status, out, err = run({}, [], env=env)
+    repo({})
+    status = pl.main([])
+    out, err = capfd.readouterr()
     usage = f"{TASK}: usage: belt project-licence <caller>\n"
     assert (2, "", usage) == (status, out, err)

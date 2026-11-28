@@ -7,10 +7,8 @@ that defect a machine can hold. Every red row asserts its message, so
 a row cannot pass on a different failure.
 """
 
-import contextlib
 import io
 import sys
-import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -56,30 +54,25 @@ SPDX-License-Identifier = "MIT OR Apache-2.0"
 """
 
 
-def run(files: dict[str, str]) -> tuple[int, str]:
-    """Plant files, list them all as tracked, and run the helper's main.
+@fixture
+def listed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Callable[[dict[str, str]], None]:
+    """Stand each row in a tree of its own, its files listed on stdin.
 
     Returns:
-        The exit status and stderr.
+        A function that writes the files and steps into the tree.
 
     """
-    with tempfile.TemporaryDirectory() as scratch:
-        root = Path(scratch)
+
+    def tree(files: dict[str, str]) -> None:
         for name, text in files.items():
-            (root / name).parent.mkdir(parents=True, exist_ok=True)
-            (root / name).write_text(text, encoding="utf-8")
-        err = io.StringIO()
-        stdin = sys.stdin
-        with (
-            contextlib.chdir(root),
-            contextlib.redirect_stderr(err),
-        ):
-            sys.stdin = io.StringIO("\0".join(files) + "\0")
-            try:
-                status = lt.main([])
-            finally:
-                sys.stdin = stdin
-        return status, err.getvalue()
+            (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+            (tmp_path / name).write_text(text, encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(sys, "stdin", io.StringIO("\0".join(files) + "\0"))
+
+    return tree
 
 
 # An expression splits into the identifiers whose texts it needs.
@@ -116,12 +109,16 @@ def test_a_list_of_expressions_is_read_whole() -> None:
 
 
 # Every identifier a tracked REUSE.toml names has its tracked text.
-def test_an_identifier_with_no_text_is_red_by_name() -> None:
+def test_an_identifier_with_no_text_is_red_by_name(
+    capfd: pytest.CaptureFixture[str], listed: Callable[[dict[str, str]], None]
+) -> None:
     """A missing text names the identifier and the file naming it."""
-    status, err = run({
+    listed({
         "REUSE.toml": '[[annotations]]\nSPDX-License-Identifier = "MIT"\n',
         "LICENSES/0BSD.txt": "0BSD\n",
     })
+    status = lt.main([])
+    err = capfd.readouterr().err
     assert status == 1
     assert (
         err
@@ -129,13 +126,17 @@ def test_an_identifier_with_no_text_is_red_by_name() -> None:
     )
 
 
-def test_an_or_expression_needs_both_texts() -> None:
+def test_an_or_expression_needs_both_texts(
+    capfd: pytest.CaptureFixture[str], listed: Callable[[dict[str, str]], None]
+) -> None:
     """One text of a dual licence is not enough: the other is named."""
-    status, err = run({
+    listed({
         "REUSE.toml": FIXTURE_ENTRY,
         "LICENSES/0BSD.txt": "0BSD\n",
         "LICENSES/MIT.txt": "MIT\n",
     })
+    status = lt.main([])
+    err = capfd.readouterr().err
     assert status == 1
     assert err == (
         "lint:licence: REUSE.toml names Apache-2.0,"
@@ -143,12 +144,16 @@ def test_an_or_expression_needs_both_texts() -> None:
     )
 
 
-def test_main_with_the_relabel_and_no_texts_is_red() -> None:
+def test_main_with_the_relabel_and_no_texts_is_red(
+    capfd: pytest.CaptureFixture[str], listed: Callable[[dict[str, str]], None]
+) -> None:
     """Main's tree after item 1 alone: both new texts named (fails before)."""
-    status, err = run({
+    listed({
         "REUSE.toml": FIXTURE_ENTRY,
         "LICENSES/0BSD.txt": "0BSD\n",
     })
+    status = lt.main([])
+    err = capfd.readouterr().err
     assert status == 1
     assert err == (
         "lint:licence: REUSE.toml names MIT,"
@@ -158,37 +163,49 @@ def test_main_with_the_relabel_and_no_texts_is_red() -> None:
     )
 
 
-def test_every_text_present_is_green() -> None:
+def test_every_text_present_is_green(
+    capfd: pytest.CaptureFixture[str], listed: Callable[[dict[str, str]], None]
+) -> None:
     """The dual-licensed fixture entry with all three texts passes."""
-    status, err = run({
+    listed({
         "REUSE.toml": FIXTURE_ENTRY,
         "LICENSES/0BSD.txt": "0BSD\n",
         "LICENSES/MIT.txt": "MIT\n",
         "LICENSES/Apache-2.0.txt": "Apache\n",
     })
+    status = lt.main([])
+    err = capfd.readouterr().err
     assert (status, err) == (0, "")
 
 
-def test_a_nested_reuse_toml_is_held_too() -> None:
+def test_a_nested_reuse_toml_is_held_too(
+    capfd: pytest.CaptureFixture[str], listed: Callable[[dict[str, str]], None]
+) -> None:
     """Any tracked REUSE.toml, against the root LICENSES/."""
-    status, err = run({
+    listed({
         "REUSE.toml": '[[annotations]]\nSPDX-License-Identifier = "0BSD"\n',
         "sub/REUSE.toml": '[[annotations]]\nSPDX-License-Identifier = "MIT"\n',
         "LICENSES/0BSD.txt": "0BSD\n",
     })
+    status = lt.main([])
+    err = capfd.readouterr().err
     assert status == 1
     assert err == (
         "lint:licence: sub/REUSE.toml names MIT, and LICENSES/MIT.txt is not tracked\n"
     )
 
 
-def test_a_text_elsewhere_does_not_count() -> None:
+def test_a_text_elsewhere_does_not_count(
+    capfd: pytest.CaptureFixture[str], listed: Callable[[dict[str, str]], None]
+) -> None:
     """A text outside LICENSES/, or not `.txt`, is not REUSE's place."""
-    status, err = run({
+    listed({
         "REUSE.toml": '[[annotations]]\nSPDX-License-Identifier = "MIT"\n',
         "LICENSE-MIT": "MIT\n",
         "LICENSES/MIT.md": "MIT\n",
     })
+    status = lt.main([])
+    err = capfd.readouterr().err
     assert status == 1
     assert (
         err
@@ -196,14 +213,18 @@ def test_a_text_elsewhere_does_not_count() -> None:
     )
 
 
-def test_the_placeholder_is_still_refused() -> None:
+def test_the_placeholder_is_still_refused(
+    capfd: pytest.CaptureFixture[str], listed: Callable[[dict[str, str]], None]
+) -> None:
     """The scaffold's placeholder keeps its message from before (#214)."""
-    status, err = run({
+    listed({
         "REUSE.toml": (
             '[[annotations]]\nSPDX-License-Identifier = "<SPDX expression>"\n'
         ),
         "LICENSES/0BSD.txt": "0BSD\n",
     })
+    status = lt.main([])
+    err = capfd.readouterr().err
     assert status == 1
     assert err == (
         "lint:licence: REUSE.toml still carries the scaffold's"
@@ -211,9 +232,13 @@ def test_the_placeholder_is_still_refused() -> None:
     )
 
 
-def test_a_malformed_file_is_red_by_name() -> None:
+def test_a_malformed_file_is_red_by_name(
+    capfd: pytest.CaptureFixture[str], listed: Callable[[dict[str, str]], None]
+) -> None:
     """A REUSE.toml that is not TOML is named, never read as empty."""
-    status, err = run({"REUSE.toml": "[[annotations]\n"})
+    listed({"REUSE.toml": "[[annotations]\n"})
+    status = lt.main([])
+    err = capfd.readouterr().err
     assert status == 1
     assert err.startswith("lint:licence: REUSE.toml does not parse: "), err
 
@@ -232,16 +257,28 @@ def test_a_malformed_file_is_red_by_name() -> None:
         ),
     ],
 )
-def test_a_wrong_shape_is_red_by_where(reuse: object, where: object) -> None:
+def test_a_wrong_shape_is_red_by_where(
+    reuse: object,
+    where: object,
+    capfd: pytest.CaptureFixture[str],
+    listed: Callable[[dict[str, str]], None],
+) -> None:
     """An annotation of the wrong shape is refused, naming where."""
-    status, err = run({"REUSE.toml": reuse})
+    listed({"REUSE.toml": reuse})
+    status = lt.main([])
+    err = capfd.readouterr().err
     assert status == 1
     assert f"lint:licence: REUSE.toml: {where}\n" == err
 
 
-def test_no_reuse_toml_is_green() -> None:
+def test_no_reuse_toml_is_green(
+    capfd: pytest.CaptureFixture[str], listed: Callable[[dict[str, str]], None]
+) -> None:
     """A repository that has not declared yet has nothing to check."""
-    assert run({"LICENSE": "0BSD\n"}) == (0, "")
+    listed({"LICENSE": "0BSD\n"})
+    status = lt.main([])
+    out, err = capfd.readouterr()
+    assert (status, err) == (0, "")
 
 
 def test_the_canons_own_tree_is_green() -> None:

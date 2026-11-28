@@ -5,8 +5,6 @@ serves: `ed/tf/edtf-core` is release/testdata's captured record, and
 `3/s/syn`, `2/cc`, `1/a` are the host's own short-name buckets.
 """
 
-import io
-from contextlib import redirect_stderr, redirect_stdout
 from typing import TYPE_CHECKING
 
 import pytest
@@ -67,22 +65,11 @@ def test_the_url_is_the_host_and_the_path() -> None:
 
 
 # `crates_index.py url <crate>`, for the shell reader.
-def run_main(*argv: str) -> tuple[int, str, str]:
-    """Run main and capture its streams.
-
-    Returns:
-        The exit code, stdout and stderr.
-
-    """
-    out, err = io.StringIO(), io.StringIO()
-    with redirect_stdout(out), redirect_stderr(err):
-        code = crates_index.main(list(argv))
-    return code, out.getvalue(), err.getvalue()
-
-
-def test_url() -> None:
+def test_url(capfd: pytest.CaptureFixture[str]) -> None:
     """One line, the record's URL."""
-    assert run_main("url", "alpha") == (
+    status = crates_index.main(["url", "alpha"])
+    out, err = capfd.readouterr()
+    assert (status, out, err) == (
         0,
         "https://index.crates.io/al/ph/alpha\n",
         "",
@@ -90,19 +77,23 @@ def test_url() -> None:
 
 
 @pytest.mark.parametrize("argv", [(), ("url",), ("path", "alpha"), ("url", "a", "b")])
-def test_usage(argv: object) -> None:
+def test_usage(argv: tuple[str, ...], capfd: pytest.CaptureFixture[str]) -> None:
     """Anything but `url <crate>` is a usage error."""
-    assert (
+    status = crates_index.main(list(argv))
+    out, err = capfd.readouterr()
+    assert (status, out, err) == (
         2,
         "",
         f"{TASK}: usage: crates_index.py url <crate>\n",
-    ) == run_main(*argv)
+    )
 
 
-def test_an_empty_name() -> None:
+def test_an_empty_name(capfd: pytest.CaptureFixture[str]) -> None:
     """The refusal reaches the caller's stderr by name."""
-    assert (
+    status = crates_index.main(["url", ""])
+    out, err = capfd.readouterr()
+    assert (status, out, err) == (
         2,
         "",
         f"{TASK}: a crate with no name has no index record\n",
-    ) == run_main("url", "")
+    )
