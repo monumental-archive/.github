@@ -316,87 +316,172 @@ class TestTheWiring:
         assert f"  a.py:1: {IGNORED}\n" in done.stderr
 
 
-def seams(text: str) -> support.Called:
+def seams(
+    text: str,
+    *,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> tuple[int, str, str]:
     """Call python_types_seams in-process on one planted `a.py` (#1697).
 
     Returns:
         The status and both streams.
 
     """
-    with tempfile.TemporaryDirectory() as tmp:
-        (Path(tmp) / "a.py").write_text(text, encoding="utf-8")
-        return support.call(lambda: python_types_seams.main(["a.py"]), cwd=tmp)
+    (tmp_path / "a.py").write_text(text, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    status = python_types_seams.main(["a.py"])
+    out, err = capfd.readouterr()
+    return status, out, err
 
 
-def roots(*files: str) -> support.Called:
+def roots(
+    *files: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> tuple[int, str, str]:
     """Call python_roots in-process over planted files, as the script does.
 
     Returns:
         The status and both streams.
 
     """
-    with tempfile.TemporaryDirectory() as tmp:
-        for name in files:
-            (Path(tmp) / name).parent.mkdir(parents=True, exist_ok=True)
-            (Path(tmp) / name).write_text("X = 1\n", encoding="utf-8")
-        return support.call(lambda: python_roots.main([str(BELT), *files]), cwd=tmp)
+    for name in files:
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_text("X = 1\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    status = python_roots.main([str(BELT), *files])
+    out, err = capfd.readouterr()
+    return status, out, err
 
 
 class TestTheHelpers:
     """The seams and the roots, called in the test process (#1697)."""
 
-    def test_a_bare_ignore_is_a_seam(self) -> None:
+    def test_a_bare_ignore_is_a_seam(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capfd: pytest.CaptureFixture[str],
+    ) -> None:
         """`# type: ignore` with no code is named, even at the module's top."""
-        done = seams("# type: ignore\nX: int = 1\n")
-        assert (1, f"a.py:1: {IGNORED}\n") == (done.returncode, done.stdout)
+        status, out, err = seams(
+            "# type: ignore\nX: int = 1\n",
+            tmp_path=tmp_path,
+            monkeypatch=monkeypatch,
+            capfd=capfd,
+        )
+        assert (1, f"a.py:1: {IGNORED}\n") == (status, out)
 
-    def test_an_inline_config_is_a_seam(self) -> None:
+    def test_an_inline_config_is_a_seam(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capfd: pytest.CaptureFixture[str],
+    ) -> None:
         """A `# mypy:` comment lowering its file's level is named."""
-        done = seams("# mypy: ignore-errors\nX: int = 1\n")
-        assert (done.returncode, done.stdout) == (
+        status, out, err = seams(
+            "# mypy: ignore-errors\nX: int = 1\n",
+            tmp_path=tmp_path,
+            monkeypatch=monkeypatch,
+            capfd=capfd,
+        )
+        assert (status, out) == (
             1,
             "a.py:1: an inline `# mypy:` comment sets options for its file\n",
         )
 
-    def test_no_type_check_is_a_seam(self) -> None:
+    def test_no_type_check_is_a_seam(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capfd: pytest.CaptureFixture[str],
+    ) -> None:
         """`typing.no_type_check`, by attribute, is named."""
         text = "import typing\n\n\n@typing.no_type_check\ndef f(x):\n    return x\n"
-        done = seams(text)
-        assert (done.returncode, done.stdout) == (
+        status, out, err = seams(
+            text, tmp_path=tmp_path, monkeypatch=monkeypatch, capfd=capfd
+        )
+        assert (status, out) == (
             1,
             "a.py:4: `no_type_check` skips type checking\n",
         )
 
-    def test_markers_in_strings_are_not_seams(self) -> None:
+    def test_markers_in_strings_are_not_seams(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capfd: pytest.CaptureFixture[str],
+    ) -> None:
         """The same text inside a string is not a finding."""
-        done = seams('S = "# type: ignore  # mypy: ignore-errors  no_type_check"\n')
-        assert (done.returncode, done.stdout) == (0, "")
+        status, out, err = seams(
+            'S = "# type: ignore  # mypy: ignore-errors  no_type_check"\n',
+            tmp_path=tmp_path,
+            monkeypatch=monkeypatch,
+            capfd=capfd,
+        )
+        assert (status, out) == (0, "")
 
-    def test_a_coded_ignore_is_a_seam(self) -> None:
+    def test_a_coded_ignore_is_a_seam(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capfd: pytest.CaptureFixture[str],
+    ) -> None:
         """`# type: ignore[arg-type]` is named: it hides its finding."""
-        done = seams("f(1)  # type: ignore[arg-type]\n")
-        assert (1, f"a.py:1: {IGNORED}\n") == (done.returncode, done.stdout)
+        status, out, err = seams(
+            "f(1)  # type: ignore[arg-type]\n",
+            tmp_path=tmp_path,
+            monkeypatch=monkeypatch,
+            capfd=capfd,
+        )
+        assert (1, f"a.py:1: {IGNORED}\n") == (status, out)
 
-    def test_the_roots_are_printed(self) -> None:
+    def test_the_roots_are_printed(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capfd: pytest.CaptureFixture[str],
+    ) -> None:
         """Each file's root, then the belt's, joined for MYPYPATH."""
-        done = roots("top.py", "a/helper.py")
-        assert (0, f"a:{BELT}\n", "") == (done.returncode, done.stdout, done.stderr)
+        status, out, err = roots(
+            "top.py",
+            "a/helper.py",
+            tmp_path=tmp_path,
+            monkeypatch=monkeypatch,
+            capfd=capfd,
+        )
+        assert (0, f"a:{BELT}\n", "") == (status, out, err)
 
-    def test_two_files_that_are_one_module_are_named(self) -> None:
+    def test_two_files_that_are_one_module_are_named(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capfd: pytest.CaptureFixture[str],
+    ) -> None:
         """Two roots each holding helper.py: a clash, by module name."""
-        done = roots("a/helper.py", "b/helper.py")
-        assert done.returncode == 1
+        status, out, err = roots(
+            "a/helper.py",
+            "b/helper.py",
+            tmp_path=tmp_path,
+            monkeypatch=monkeypatch,
+            capfd=capfd,
+        )
+        assert status == 1
         assert (
             f"{TASK}: these tracked files would be one module, so an import"
             " of that name reaches only one of them:\n  helper: a/helper, b/helper\n"
-        ) == done.stderr
+        ) == err
 
-    def test_too_few_arguments_is_a_usage_error(self) -> None:
+    def test_too_few_arguments_is_a_usage_error(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """No belt or no file: exit 2 with the usage."""
-        done = support.call(lambda: python_roots.main([str(BELT)]))
-        assert (2, f"{TASK}: usage: belt python-roots <belt-root> <file>...\n") == (
-            done.returncode,
-            done.stderr,
+        assert python_roots.main([str(BELT)]) == 2
+        assert capfd.readouterr().err == (
+            f"{TASK}: usage: belt python-roots <belt-root> <file>...\n"
         )
 
 

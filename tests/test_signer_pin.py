@@ -206,7 +206,9 @@ class TestBranches:
             self.git("add", "--", name)
         return name
 
-    def helper(self, *argv: str) -> support.Called:
+    def helper(
+        self, *argv: str, capfd: pytest.CaptureFixture[str]
+    ) -> tuple[int, str, str]:
         """Call the helper's main in the planted tree.
 
         Returns:
@@ -214,42 +216,52 @@ class TestBranches:
 
         """
         args = list(argv)
-        return support.call(lambda: signer_pin.main(args), env=self.env, cwd=self.tree)
+        with pytest.MonkeyPatch.context() as patched:
+            for name, value in self.env.items():
+                patched.setenv(name, value)
+            patched.chdir(self.tree)
+            status = signer_pin.main(args)
+        out, err = capfd.readouterr()
+        return status, out, err
 
-    def check(self, *files: str) -> support.Called:
+    def check(
+        self, *files: str, capfd: pytest.CaptureFixture[str]
+    ) -> tuple[int, str, str]:
         """Call the helper on these workflows with the real signer.
 
         Returns:
             The status and what it printed.
 
         """
-        return self.helper(CANON_NAME, signer(), *files)
+        return self.helper(CANON_NAME, signer(), *files, capfd=capfd)
 
-    def test_agreeing_references_pass(self) -> None:
+    def test_agreeing_references_pass(self, capfd: pytest.CaptureFixture[str]) -> None:
         """Every reference at one digest, across files: ok, the digest named."""
         one = self.plant("a.yml", workflow())
         two = self.plant("b.yaml", workflow(f"  x:\n    uses: {signer()}@{SHA}\n"))
-        done = self.check(one, two)
-        assert done.returncode == 0, done.stderr
+        status, out, err = self.check(one, two, capfd=capfd)
+        assert status == 0, err
         want = [f"lint:signer-pin: all signer references agree on {SHA}"]
-        assert want == done.stdout.splitlines()
-        assert done.stderr == ""
+        assert want == out.splitlines()
+        assert err == ""
 
-    def test_no_reference_is_skipped_by_name(self) -> None:
+    def test_no_reference_is_skipped_by_name(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """No signer reference, and its dots are literal: skipped."""
         near = signer().replace(".github", "xgithub", 1)
         rel = self.plant("a.yml", f"x: {near}@{SHA}\n")
-        done = self.check(rel)
-        assert done.returncode == 0, done.stderr
+        status, out, err = self.check(rel, capfd=capfd)
+        assert status == 0, err
         want = ["lint:signer-pin: no signer references, skipped"]
-        assert want == done.stdout.splitlines()
+        assert want == out.splitlines()
 
-    def test_two_digests_are_red(self) -> None:
+    def test_two_digests_are_red(self, capfd: pytest.CaptureFixture[str]) -> None:
         """Two digests, even on one line: each named once, sorted."""
         line = f"x: {signer()}@{SHA} {signer()}@{OTHER} {signer()}@{SHA}\n"
         rel = self.plant("a.yml", line)
-        done = self.check(rel)
-        assert done.returncode == signer_pin.EXIT_RED
+        status, out, err = self.check(rel, capfd=capfd)
+        assert status == signer_pin.EXIT_RED
         want = [
             (
                 "lint:signer-pin: sign.yml pinned at more than one digest — a tree"
@@ -262,32 +274,36 @@ class TestBranches:
                 " uses: line together"
             ),
         ]
-        assert want == done.stderr.splitlines()
+        assert want == err.splitlines()
 
-    def test_a_literal_in_one_file_is_red_without_its_name(self) -> None:
+    def test_a_literal_in_one_file_is_red_without_its_name(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """One file searched: grep -n's `line:text`, no file name."""
         rel = self.plant("a.yml", f"a\n  run: v --signer-digest  {SHA}")
-        done = self.check(rel)
-        assert done.returncode == signer_pin.EXIT_RED
+        status, out, err = self.check(rel, capfd=capfd)
+        assert status == signer_pin.EXIT_RED
         found = f"2:  run: v --signer-digest  {SHA}"
-        assert literal_message(found) == done.stderr.splitlines()
+        assert literal_message(found) == err.splitlines()
 
-    def test_literals_in_two_files_are_red_with_their_names(self) -> None:
+    def test_literals_in_two_files_are_red_with_their_names(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Two files searched: `file:line:text`, ahead of the pin file."""
         one = self.plant("a.yml", workflow())
         two = self.plant("b.yml", f"x: --signer-digest\t{OTHER}\n")
         self.plant(signer_pin.PIN_FILE, f"{SHA}\n")
-        done = self.check(one, two)
-        assert done.returncode == signer_pin.EXIT_RED
+        status, out, err = self.check(one, two, capfd=capfd)
+        assert status == signer_pin.EXIT_RED
         found = f"{two}:1:x: --signer-digest\t{OTHER}"
-        assert literal_message(found) == done.stderr.splitlines()
+        assert literal_message(found) == err.splitlines()
 
-    def test_the_pin_file_is_red(self) -> None:
+    def test_the_pin_file_is_red(self, capfd: pytest.CaptureFixture[str]) -> None:
         """The pin file back, agreeing or not: red, the split explained."""
         rel = self.plant("a.yml", workflow())
         self.plant(signer_pin.PIN_FILE, f"{SHA}\n")
-        done = self.check(rel)
-        assert done.returncode == signer_pin.EXIT_RED
+        status, out, err = self.check(rel, capfd=capfd)
+        assert status == signer_pin.EXIT_RED
         want = [
             (
                 "lint:signer-pin: security/signer.pin exists — the second copy of"
@@ -306,24 +322,26 @@ class TestBranches:
                 " two-branch split)"
             ),
         ]
-        assert want == done.stderr.splitlines()
+        assert want == err.splitlines()
 
-    def test_an_untracked_pin_file_is_no_second_copy(self) -> None:
+    def test_an_untracked_pin_file_is_no_second_copy(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """On disk and untracked, the pin states nothing: green (#2013)."""
         rel = self.plant("a.yml", workflow())
         self.plant(signer_pin.PIN_FILE, f"{SHA}\n", track=False)
-        done = self.check(rel)
-        assert done.returncode == 0, done.stderr
+        status, out, err = self.check(rel, capfd=capfd)
+        assert status == 0, err
         want = [f"lint:signer-pin: all signer references agree on {SHA}"]
-        assert want == done.stdout.splitlines()
+        assert want == out.splitlines()
 
-    def test_readers_are_red_and_named(self) -> None:
+    def test_readers_are_red_and_named(self, capfd: pytest.CaptureFixture[str]) -> None:
         """Readers on non-comment lines named; a comment is not a reader."""
         one = self.plant("a.yml", workflow("      - run: cat security/signer.pin\n"))
         prose = self.plant("b.yml", workflow("# security/signer.pin is gone\n"))
         two = self.plant("c.yml", "x: security/signer.pin\n")
-        done = self.check(one, prose, two)
-        assert done.returncode == signer_pin.EXIT_RED
+        status, out, err = self.check(one, prose, two, capfd=capfd)
+        assert status == signer_pin.EXIT_RED
         want = [
             (
                 "lint:signer-pin: workflows read security/signer.pin (on a"
@@ -331,18 +349,16 @@ class TestBranches:
                 f" derive from the sign.yml uses: pin instead:{one}\\n{two}"
             ),
         ]
-        assert want == done.stderr.splitlines()
+        assert want == err.splitlines()
 
-    def test_not_utf8_is_an_error(self) -> None:
+    def test_not_utf8_is_an_error(self, capfd: pytest.CaptureFixture[str]) -> None:
         """A workflow that is not UTF-8 is refused by name, exit 2."""
         rel = self.plant("bad.yml", b"on: \xff\n")
-        done = self.check(rel)
-        assert done.returncode == signer_pin.EXIT_ERROR
-        assert done.stderr.startswith(
-            f"lint:signer-pin: {rel}: cannot be read as UTF-8:"
-        ), done.stderr
+        status, out, err = self.check(rel, capfd=capfd)
+        assert status == signer_pin.EXIT_ERROR
+        assert err.startswith(f"lint:signer-pin: {rel}: cannot be read as UTF-8:"), err
 
-    def test_usage_errors(self) -> None:
+    def test_usage_errors(self, capfd: pytest.CaptureFixture[str]) -> None:
         """No workflow, an empty owner, repo or signer: the usage line."""
         usage = [
             (
@@ -358,6 +374,6 @@ class TestBranches:
             "no signer": [CANON_NAME, "", "a.yml"],
         }
         for row, argv in rows.items():
-            done = self.helper(*argv)
-            assert done.returncode == signer_pin.EXIT_ERROR
-            assert usage == done.stderr.splitlines()
+            status, out, err = self.helper(*argv, capfd=capfd)
+            assert status == signer_pin.EXIT_ERROR
+            assert usage == err.splitlines()

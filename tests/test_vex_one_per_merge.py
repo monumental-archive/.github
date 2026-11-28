@@ -13,7 +13,6 @@ scored on exit alone can pass for the wrong reason.
 """
 
 import subprocess
-import sys
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -103,18 +102,20 @@ class Tree:
         """Point origin/main at HEAD: everything so far is the default branch."""
         self.git("update-ref", "refs/remotes/origin/main", "HEAD")
 
-    def listing(self) -> support.Called:
+    def listing(self, *, capfd: pytest.CaptureFixture[str]) -> tuple[int, str, str]:
         """List the decisions ahead of origin/main, as vex-attest.yml asks.
 
         Returns:
             The status and both streams, from an in-process call (#1697).
 
         """
-        return support.call(
-            lambda: vex_one_per_merge.main(["--list", "origin/main.."]),
-            env=self.env,
-            cwd=self.dir,
-        )
+        with pytest.MonkeyPatch.context() as patched:
+            for name, value in self.env.items():
+                patched.setenv(name, value)
+            patched.chdir(self.dir)
+            status = vex_one_per_merge.main(["--list", "origin/main.."])
+        out, err = capfd.readouterr()
+        return status, out, err
 
     def task_env(self, event: str) -> dict[str, str]:
         """Build the environment the task hands the helper.
@@ -129,7 +130,9 @@ class Tree:
             **({"GITHUB_EVENT_NAME": event} if event else {}),
         }
 
-    def run(self, event: str = "") -> support.Called:
+    def run(
+        self, event: str = "", *, capfd: pytest.CaptureFixture[str]
+    ) -> tuple[int, str, str]:
         """Call the task's helper in the tree, as the CI event `event`.
 
         The task's body is the one line that starts the helper with no
@@ -140,162 +143,154 @@ class Tree:
             The status and both streams.
 
         """
-        return support.call(
-            lambda: vex_one_per_merge.main([]), env=self.task_env(event), cwd=self.dir
-        )
+        with pytest.MonkeyPatch.context() as patched:
+            for name, value in (self.task_env(event)).items():
+                patched.setenv(name, value)
+            patched.chdir(self.dir)
+            status = vex_one_per_merge.main([])
+        out, err = capfd.readouterr()
+        return status, out, err
 
-    def start(self, event: str = "") -> subprocess.CompletedProcess[str]:
-        """Start the helper as a process, as the task does: the contract.
-
-        Returns:
-            The finished process, output captured.
-
-        """
-        return subprocess.run(
-            [sys.executable, str(HELPER)],
-            cwd=self.dir,
-            env=self.task_env(event),
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-
-
-@pytest.mark.usefixtures("_set_up_test_one_per_merge")
-class TestOnePerMerge:
-    """The commits ahead of origin/main change at most one decision."""
-
-    @pytest.fixture
     def _set_up_test_one_per_merge(self, tmp_path: Path) -> None:
         """Plant a tree whose default branch holds one decision."""
         self.tree = Tree(Path(str(tmp_path)))
         self.tree.commit(A, README)
         self.tree.mark_main()
 
-    def test_one_changed_decision_passes(self) -> None:
+    def test_one_changed_decision_passes(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A new decision alone is green and counted."""
         self.tree.commit(B)
-        done = self.tree.run()
-        assert done.returncode == 0, done.stderr
-        assert "1 VEX decision(s) changed ahead of origin/main" in done.stdout
+        status, out, err = self.tree.run(capfd=capfd)
+        assert status == 0, err
+        assert "1 VEX decision(s) changed ahead of origin/main" in out
 
-    def test_two_are_red_naming_both(self) -> None:
+    def test_two_are_red_naming_both(self, capfd: pytest.CaptureFixture[str]) -> None:
         """Two decisions over two commits: red, with the sentence and both files."""
         self.tree.commit(B)
         self.tree.commit(A)
-        done = self.tree.run()
-        assert done.returncode == 1, done.stdout
-        assert f"{TASK}: {SENTENCE}:" in done.stderr
-        assert f"  {A}\n" in done.stderr
-        assert f"  {B}\n" in done.stderr
+        status, out, err = self.tree.run(capfd=capfd)
+        assert status == 1, out
+        assert f"{TASK}: {SENTENCE}:" in err
+        assert f"  {A}\n" in err
+        assert f"  {B}\n" in err
 
-    def test_the_script_contract(self) -> None:
-        """Started as a process, it reads the tree and exits 1, naming both."""
-        self.tree.commit(B)
-        self.tree.commit(A)
-        done = self.tree.start()
-        assert done.returncode == 1, done.stdout
-        assert f"{TASK}: {SENTENCE}:" in done.stderr
-        assert f"  {A}\n" in done.stderr
-        assert f"  {B}\n" in done.stderr
-
-    def test_a_non_decision_file_is_not_counted(self) -> None:
+    def test_a_non_decision_file_is_not_counted(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """The README beside one decision changes nothing about the count."""
         self.tree.commit(B, README)
-        done = self.tree.run()
-        assert done.returncode == 0, done.stderr
-        assert "1 VEX decision(s) changed" in done.stdout
+        status, out, err = self.tree.run(capfd=capfd)
+        assert status == 0, err
+        assert "1 VEX decision(s) changed" in out
 
-    def test_a_deletion_is_not_counted(self) -> None:
+    def test_a_deletion_is_not_counted(self, capfd: pytest.CaptureFixture[str]) -> None:
         """Removing a decision signs nothing, so it does not count."""
         self.tree.commit(remove=(A,))
         self.tree.commit(B)
-        done = self.tree.run()
-        assert done.returncode == 0, done.stderr
-        assert "1 VEX decision(s) changed" in done.stdout
+        status, out, err = self.tree.run(capfd=capfd)
+        assert status == 0, err
+        assert "1 VEX decision(s) changed" in out
 
-    def test_a_rename_is_counted_at_its_new_name(self) -> None:
+    def test_a_rename_is_counted_at_its_new_name(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A decision moved to a new name, beside another, is two."""
         self.tree.git("mv", A, C)
         self.tree.commit(B)
-        done = self.tree.run()
-        assert done.returncode == 1, done.stdout
-        assert f"  {B}\n" in done.stderr
-        assert f"  {C}\n" in done.stderr
+        status, out, err = self.tree.run(capfd=capfd)
+        assert status == 1, out
+        assert f"  {B}\n" in err
+        assert f"  {C}\n" in err
 
-    def test_main_moving_on_is_not_counted(self) -> None:
+    def test_main_moving_on_is_not_counted(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A decision main gained after the branch point is not the branch's."""
         self.tree.commit(B)
         self.tree.git("switch", "-q", "-c", "main", "origin/main")
         self.tree.commit(C)
         self.tree.mark_main()
         self.tree.git("switch", "-q", "feature")
-        done = self.tree.run()
-        assert done.returncode == 0, done.stderr
-        assert "1 VEX decision(s) changed" in done.stdout
+        status, out, err = self.tree.run(capfd=capfd)
+        assert status == 0, err
+        assert "1 VEX decision(s) changed" in out
 
-    def test_a_merge_commit_reads_its_second_parent(self) -> None:
+    def test_a_merge_commit_reads_its_second_parent(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """On a pull request's synthetic merge, the branch's commits are judged."""
         self.tree.commit(B)
         self.tree.commit(C)
         self.tree.git("switch", "-q", "--detach", "origin/main")
         self.tree.git("merge", "-q", "--no-ff", "-m", "merge", "feature")
-        done = self.tree.run()
-        assert done.returncode == 1, done.stdout
-        assert f"  {B}\n" in done.stderr
-        assert f"  {C}\n" in done.stderr
+        status, out, err = self.tree.run(capfd=capfd)
+        assert status == 1, out
+        assert f"  {B}\n" in err
+        assert f"  {C}\n" in err
 
-    def test_the_default_branch_itself_skips_by_name(self) -> None:
+    def test_the_default_branch_itself_skips_by_name(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Nothing ahead of origin/main skips, whatever main holds."""
         self.tree.commit(B, C)
         self.tree.mark_main()
-        done = self.tree.run()
-        assert done.returncode == 0, done.stderr
+        status, out, err = self.tree.run(capfd=capfd)
+        assert status == 0, err
         skipped = "nothing ahead of origin/main (the default branch itself), skipped"
-        assert f"{TASK}: {skipped}" in done.stdout
+        assert f"{TASK}: {skipped}" in out
 
-    def test_a_merge_group_skips_by_name(self) -> None:
+    def test_a_merge_group_skips_by_name(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A group's range holds the entries queued ahead, so it is not judged."""
         self.tree.commit(B)
         self.tree.commit(C)
-        done = self.tree.run("merge_group")
-        assert done.returncode == 0, done.stderr
+        status, out, err = self.tree.run("merge_group", capfd=capfd)
+        assert status == 0, err
         assert (
             f"{TASK}: judged on the pull request: a merge group's range also"
             " holds the entries queued ahead of it, skipped"
-        ) in done.stdout
+        ) in out
 
-    def test_the_same_tree_is_red_on_a_pull_request(self) -> None:
+    def test_the_same_tree_is_red_on_a_pull_request(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """The tree the merge-group row skips is red as a pull request."""
         self.tree.commit(B)
         self.tree.commit(C)
-        done = self.tree.run("pull_request")
-        assert done.returncode == 1, done.stdout
-        assert f"{TASK}: {SENTENCE}:" in done.stderr
-        assert f"  {B}\n" in done.stderr
-        assert f"  {C}\n" in done.stderr
+        status, out, err = self.tree.run("pull_request", capfd=capfd)
+        assert status == 1, out
+        assert f"{TASK}: {SENTENCE}:" in err
+        assert f"  {B}\n" in err
+        assert f"  {C}\n" in err
 
-    def test_no_origin_main_skips_by_name(self) -> None:
+    def test_no_origin_main_skips_by_name(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A clone with no default branch to diverge from skips."""
         self.tree.git("update-ref", "-d", "refs/remotes/origin/main")
-        done = self.tree.run()
-        assert done.returncode == 0, done.stderr
-        assert f"{TASK}: no origin/main, skipped" in done.stdout
+        status, out, err = self.tree.run(capfd=capfd)
+        assert status == 0, err
+        assert f"{TASK}: no origin/main, skipped" in out
 
 
 class TestNoneTracked:
     """A tree that keeps no decisions has nothing to judge."""
 
-    def test_none_tracked_skips_by_name(self) -> None:
+    def test_none_tracked_skips_by_name(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Only a README under security/vex/ skips, by name."""
         with tempfile.TemporaryDirectory() as tmp:
             tree = Tree(Path(tmp))
             tree.commit(README)
             tree.mark_main()
             tree.commit(README)
-            done = tree.run()
-            assert done.returncode == 0, done.stderr
-            assert f"{TASK}: no VEX decisions tracked, skipped" in done.stdout
+            status, out, err = tree.run(capfd=capfd)
+            assert status == 0, err
+            assert f"{TASK}: no VEX decisions tracked, skipped" in out
 
 
 @pytest.mark.usefixtures("_set_up_test_listing")
@@ -309,45 +304,49 @@ class TestListing:
         self.tree.commit(A, B, README)
         self.tree.mark_main()
 
-    def listed(self) -> list[str]:
+    def listed(self, *, capfd: pytest.CaptureFixture[str]) -> list[str]:
         """Run the listing and require it to succeed.
 
         Returns:
             The decisions it printed, one per line.
 
         """
-        done = self.tree.listing()
-        assert done.returncode == 0, done.stderr
-        return done.stdout.splitlines()
+        status, out, err = self.tree.listing(capfd=capfd)
+        assert status == 0, err
+        return out.splitlines()
 
-    def test_a_rename_with_an_edit_is_listed_at_its_new_name(self) -> None:
+    def test_a_rename_with_an_edit_is_listed_at_its_new_name(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Moved and edited: new bytes at a new name, so it is signed."""
         self.tree.git("mv", A, C)
         self.tree.commit(C)
         want: list[str] = [C]
-        assert self.listed() == want
+        assert self.listed(capfd=capfd) == want
 
-    def test_a_pure_rename_is_listed(self) -> None:
+    def test_a_pure_rename_is_listed(self, capfd: pytest.CaptureFixture[str]) -> None:
         """Moved alone: listed, and the store decides if its bytes are held."""
         self.tree.git("mv", A, C)
         self.tree.commit()
         want: list[str] = [C]
-        assert self.listed() == want
+        assert self.listed(capfd=capfd) == want
 
-    def test_a_deletion_is_not_listed(self) -> None:
+    def test_a_deletion_is_not_listed(self, capfd: pytest.CaptureFixture[str]) -> None:
         """Removed: nothing to sign."""
         self.tree.commit(remove=(A,))
         none: list[str] = []
-        assert self.listed() == none
+        assert self.listed(capfd=capfd) == none
 
-    def test_the_count_and_the_listing_agree(self) -> None:
+    def test_the_count_and_the_listing_agree(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Two changed: the gate reds on two, and the listing names the two."""
         self.tree.commit(A, B)
         want: list[str] = [A, B]
-        assert self.listed() == want
-        done = self.tree.run()
-        assert done.returncode == 1, done.stdout
-        assert f"  {A}\n  {B}\n" in done.stderr
+        assert self.listed(capfd=capfd) == want
+        status, out, err = self.tree.run(capfd=capfd)
+        assert status == 1, out
+        assert f"  {A}\n  {B}\n" in err
 
 
 class TestWorkflow:
@@ -364,7 +363,7 @@ class TestWorkflow:
         script = (CANON / "mise/vex-decisions.sh").read_text(encoding="utf-8")
         assert ".org-canon/mise/vex-decisions.sh" in step
         assert (
-            '"${ORG_PYTHON}" "${here}/vex_one_per_merge.py" --list "${BEFORE}.."'
+            '"${ORG_PYTHON}" -I "${here}/../belt" vex-one-per-merge --list "${BEFORE}.."'
             in script
         )
         assert "git diff" not in step

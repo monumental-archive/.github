@@ -29,7 +29,6 @@ caller's index when this suite runs from the pre-push hook.
 import json
 import os
 import subprocess
-import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -844,14 +843,16 @@ class TestBuildGo:
         assert mutants_go.older("devel +abc123", "go1.27.4")
 
 
-def call(argv: list[str]) -> support.Called:
+def call(argv: list[str], *, capfd: pytest.CaptureFixture[str]) -> tuple[int, str, str]:
     """Call the helper's `main` in this process (#1696).
 
     Returns:
         The status `main` returned and what it wrote to each stream.
 
     """
-    return support.call(lambda: mutants_go.main(argv))
+    status = mutants_go.main(argv)
+    out, err = capfd.readouterr()
+    return status, out, err
 
 
 @pytest.mark.usefixtures("_set_up_test_main")
@@ -900,27 +901,30 @@ class TestMain:
         }
         self.write("reports/1.json", json.dumps(body))
 
-    def judge(self) -> support.Called:
+    def judge(self, *, capfd: pytest.CaptureFixture[str]) -> tuple[int, str, str]:
         """Call main as the shell half does, its summary directory planted.
 
         Returns:
             What main returned and wrote.
 
         """
-        return call([
-            "--label",
-            LABEL,
-            "--where",
-            "",
-            "--shard",
-            "whole",
-            "--root",
-            str(self.root),
-            "--scratch",
-            str(self.scratch),
-            "--summary-dir",
-            str(self.summary),
-        ])
+        return call(
+            [
+                "--label",
+                LABEL,
+                "--where",
+                "",
+                "--shard",
+                "whole",
+                "--root",
+                str(self.root),
+                "--scratch",
+                str(self.scratch),
+                "--summary-dir",
+                str(self.summary),
+            ],
+            capfd=capfd,
+        )
 
     @staticmethod
     def line(*counts: int) -> str:
@@ -936,35 +940,43 @@ class TestMain:
             f" {uncovered} not covered, {viable} not viable, {excluded} excluded\n"
         )
 
-    def test_a_clean_shard_is_green_and_writes_its_counts(self) -> None:
+    def test_a_clean_shard_is_green_and_writes_its_counts(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Every mutant killed: exit 0, the summary, go.tsv."""
         self.results(("KILLED", 4, "arithmetic"), ("TIMED_OUT", 5, "branch"))
-        assert self.judge() == support.Called(0, self.line(2, 2, 0, 0, 0, 0), "")
+        assert self.judge(capfd=capfd) == (0, self.line(2, 2, 0, 0, 0, 0), "")
         assert (self.summary / "go.tsv").read_text(
             encoding="utf-8"
         ) == "whole\t2\t2\t0\t0\twhole\n"
 
-    def test_a_covered_survivor_and_an_uncovered_one_are_red(self) -> None:
+    def test_a_covered_survivor_and_an_uncovered_one_are_red(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Survived on line 4 is a survivor; on line 9 it is not covered."""
         self.results(("SURVIVED", 4, "arithmetic"), ("SURVIVED", 9, "return"))
-        done = self.judge()
-        assert done.returncode == 1
-        assert done.stdout == (
+        status, out, err = self.judge(capfd=capfd)
+        assert status == 1
+        assert out == (
             f"{LABEL}: survived: a/a.go:4:9 arithmetic\n"
             f"{LABEL}: not covered: a/a.go:9:9 return\n" + self.line(2, 0, 1, 1, 0, 0)
         )
-        assert done.stderr == RED_TAIL
+        assert err == RED_TAIL
 
-    def test_a_record_at_the_site_explains_its_survivor(self) -> None:
+    def test_a_record_at_the_site_explains_its_survivor(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A sound record of the survivor's type, trailing its line, is excluded."""
         self.results(("SURVIVED", 4, "arithmetic"), ("KILLED", 5, "branch"))
         self.write(
             "records.txt",
             "a/a.go:4:\treturn x + y //mutants:equivalent arithmetic same value\n",
         )
-        assert self.judge() == support.Called(0, self.line(2, 1, 0, 0, 0, 1), "")
+        assert self.judge(capfd=capfd) == (0, self.line(2, 1, 0, 0, 0, 1), "")
 
-    def test_a_malformed_and_a_stale_record_are_red_by_name(self) -> None:
+    def test_a_malformed_and_a_stale_record_are_red_by_name(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """No reason is malformed; a sound record over nothing is stale."""
         self.results(("KILLED", 4, "arithmetic"))
         self.write(
@@ -972,42 +984,49 @@ class TestMain:
             "a/a.go:3://mutants:equivalent arithmetic\n"
             "a/a.go:5:\tx++ //mutants:equivalent branch why\n",
         )
-        done = self.judge()
-        assert done.returncode == 1
-        assert done.stderr == (
+        status, out, err = self.judge(capfd=capfd)
+        assert status == 1
+        assert err == (
             f"{LABEL}: a/a.go:3: //mutants:equivalent arithmetic gives no reason\n"
             f"{LABEL}: a/a.go:5: //mutants:equivalent branch is stale: nothing"
             " survives at line 5 — delete it\n" + RED_TAIL
         )
 
-    def test_a_skipped_file_and_a_failed_run_are_not_judged(self) -> None:
+    def test_a_skipped_file_and_a_failed_run_are_not_judged(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """The skip line gomu printed and the shell's failed-run line, each named."""
         self.results(("KILLED", 4, "arithmetic"))
         self.write("gomu.log", "  a.go (error: no package)\n")
         self.write("runs.log", "a/a.go: gomu exited 2\n")
-        done = self.judge()
-        assert done.returncode == 1
-        assert done.stderr == (
+        status, out, err = self.judge(capfd=capfd)
+        assert status == 1
+        assert err == (
             f"{LABEL}: not judged: a.go (error: no package)\n"
             f"{LABEL}: not judged: a/a.go: gomu exited 2\n" + RED_TAIL
         )
         assert not (self.summary / "go.tsv").exists()
 
-    def test_build_go_refuses_an_older_gomu(self) -> None:
+    def test_build_go_refuses_an_older_gomu(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """`build-go` names the gomu, both Go releases and the rebuild."""
-        done = call([
-            "build-go",
-            "--label",
-            LABEL,
-            "--gomu",
-            "/bin/gomu",
-            "--built",
-            "go1.24.13",
-            "--running",
-            "go1.27.4",
-        ])
-        assert done.returncode == 1
-        assert done.stderr == (
+        status, out, err = call(
+            [
+                "build-go",
+                "--label",
+                LABEL,
+                "--gomu",
+                "/bin/gomu",
+                "--built",
+                "go1.24.13",
+                "--running",
+                "go1.27.4",
+            ],
+            capfd=capfd,
+        )
+        assert status == 1
+        assert err == (
             f"{LABEL}: /bin/gomu was built with go1.24.13, older than the go1.27.4"
             " it runs under —\n"
             "  it cannot read this toolchain's export data; rebuild it with the"
@@ -1015,33 +1034,9 @@ class TestMain:
             "    mise install go:github.com/sivchari/gomu/cmd/gomu\n"
         )
 
-    def test_build_go_passes_an_equal_gomu_silently(self) -> None:
+    def test_build_go_passes_an_equal_gomu_silently(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """The same release: exit 0, nothing printed."""
         argv = ["build-go", "--label", LABEL, "--gomu", "g", "--built", "go1.27"]
-        assert call([*argv, "--running", "go1.27.0"]) == support.Called(0, "", "")
-
-
-class TestScript:
-    """The one row that starts the helper as a process: the script contract."""
-
-    def test_the_helper_runs_as_a_script(self) -> None:
-        """`build-go` with an equal build: it reads its arguments and exits 0."""
-        done = subprocess.run(
-            [
-                sys.executable,
-                str(BELT / "mutants_go.py"),
-                "build-go",
-                "--label",
-                LABEL,
-                "--gomu",
-                "g",
-                "--built",
-                "go1.27.4",
-                "--running",
-                "go1.27.4",
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        assert (done.returncode, done.stdout, done.stderr) == (0, "", "")
+        assert call([*argv, "--running", "go1.27.0"], capfd=capfd) == (0, "", "")

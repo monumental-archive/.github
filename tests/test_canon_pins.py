@@ -166,7 +166,9 @@ class TestPlanted:
             )
         return rel
 
-    def helper(self, *argv: str) -> support.Called:
+    def helper(
+        self, *argv: str, capfd: pytest.CaptureFixture[str]
+    ) -> tuple[int, str, str]:
         """Call the helper's main in the planted tree.
 
         Returns:
@@ -174,7 +176,13 @@ class TestPlanted:
 
         """
         args = list(argv)
-        return support.call(lambda: canon_pins.main(args), env=self.env, cwd=self.tree)
+        with pytest.MonkeyPatch.context() as patched:
+            for name, value in self.env.items():
+                patched.setenv(name, value)
+            patched.chdir(self.tree)
+            status = canon_pins.main(args)
+        out, err = capfd.readouterr()
+        return status, out, err
 
     def surfaces(
         self,
@@ -182,14 +190,18 @@ class TestPlanted:
         hooks: tuple[str, ...] = (),
         presets: tuple[str, ...] = (),
         flows: tuple[str, ...] = (),
-    ) -> support.Called:
+        *,
+        capfd: pytest.CaptureFixture[str],
+    ) -> tuple[int, str, str]:
         """Call the helper with the four lists.
 
         Returns:
             The status and what it printed.
 
         """
-        return self.helper(CANON, *yml, "--", *hooks, "--", *presets, "--", *flows)
+        return self.helper(
+            CANON, *yml, "--", *hooks, "--", *presets, "--", *flows, capfd=capfd
+        )
 
     def task(self) -> subprocess.CompletedProcess[str]:
         """Run the task body in the planted tree.
@@ -250,15 +262,19 @@ class TestTask(TestPlanted):
 class TestPins(TestPlanted):
     """Workflow pins on any tracked YAML file."""
 
-    def test_versioned_pins_are_counted_clean(self) -> None:
+    def test_versioned_pins_are_counted_clean(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Each versioned pin line counts once."""
         tab = f"  - uses:\t{CANON}/x@{SHA} # v10.0.12\n"
         rel = self.plant("a.yml", steps(PIN, PIN, tab))
-        done = self.surfaces(yml=(rel,))
-        same(done.returncode, 0, done.stderr)
-        same(done.stdout.splitlines(), ok(3))
+        status, out, err = self.surfaces(yml=(rel,), capfd=capfd)
+        same(status, 0, err)
+        same(out.splitlines(), ok(3))
 
-    def test_unversioned_pins_are_each_named(self) -> None:
+    def test_unversioned_pins_are_each_named(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """No comment, a short SHA, a branch, a pre-release, a v-less tag."""
         lines = (
             f"  - uses: {CANON}/x@{SHA}\n",
@@ -268,11 +284,13 @@ class TestPins(TestPlanted):
             f"  - uses: {CANON}/x@{SHA}  # v1.2.3\n",
         )
         rel = self.plant("a.yml", steps(*lines))
-        done = self.surfaces(yml=(rel,))
-        same(done.returncode, canon_pins.EXIT_RED)
-        same(done.stderr.splitlines(), red(*[f"{rel}{UNPINNED}"] * len(lines)))
+        status, out, err = self.surfaces(yml=(rel,), capfd=capfd)
+        same(status, canon_pins.EXIT_RED)
+        same(err.splitlines(), red(*[f"{rel}{UNPINNED}"] * len(lines)))
 
-    def test_comments_and_other_owners_are_not_pins(self) -> None:
+    def test_comments_and_other_owners_are_not_pins(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A commented line, a `#` before uses:, another owner: not counted."""
         lines = (
             f"# uses: {CANON}/x@main\n",
@@ -281,61 +299,69 @@ class TestPins(TestPlanted):
             f"      - uses: {CANON.replace('.', 'x')}/x@main\n",
         )
         rel = self.plant("a.yml", steps(*lines))
-        done = self.surfaces(yml=(rel,))
-        same(done.returncode, 0, done.stderr)
-        same(done.stdout.splitlines(), SKIPPED)
+        status, out, err = self.surfaces(yml=(rel,), capfd=capfd)
+        same(status, 0, err)
+        same(out.splitlines(), SKIPPED)
 
 
 class TestRemotes(TestPlanted):
     """Lefthook remotes and Renovate presets."""
 
-    def test_lefthook_on_a_tag_is_clean(self) -> None:
+    def test_lefthook_on_a_tag_is_clean(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A remote at `ref: v…`: one reference, clean."""
         rel = self.plant("lefthook.yml", hook("v1.76.0"))
-        done = self.surfaces(hooks=(rel,))
-        same(done.returncode, 0, done.stderr)
-        same(done.stdout.splitlines(), ok(1))
+        status, out, err = self.surfaces(hooks=(rel,), capfd=capfd)
+        same(status, 0, err)
+        same(out.splitlines(), ok(1))
 
-    def test_lefthook_on_a_branch_is_red(self) -> None:
+    def test_lefthook_on_a_branch_is_red(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A remote at a branch, or with no ref at all: named."""
         one = self.plant("lefthook.yml", hook("main"))
         two = self.plant("sub/lefthook.yml", f"# github.com/{CANON}\n")
-        done = self.surfaces(hooks=(one, two))
-        same(done.returncode, canon_pins.EXIT_RED)
-        same(done.stderr.splitlines(), red(f"{one}{BRANCH}", f"{two}{BRANCH}"))
+        status, out, err = self.surfaces(hooks=(one, two), capfd=capfd)
+        same(status, canon_pins.EXIT_RED)
+        same(err.splitlines(), red(f"{one}{BRANCH}", f"{two}{BRANCH}"))
 
-    def test_lefthook_without_the_canon_is_not_counted(self) -> None:
+    def test_lefthook_without_the_canon_is_not_counted(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A lefthook config that names no canon remote: nothing."""
         rel = self.plant("lefthook.yml", "pre-commit:\n  jobs: []\n")
-        done = self.surfaces(hooks=(rel,))
-        same(done.returncode, 0, done.stderr)
-        same(done.stdout.splitlines(), SKIPPED)
+        status, out, err = self.surfaces(hooks=(rel,), capfd=capfd)
+        same(status, 0, err)
+        same(out.splitlines(), SKIPPED)
 
-    def test_presets(self) -> None:
+    def test_presets(self, capfd: pytest.CaptureFixture[str]) -> None:
         """Tagged: clean; untagged: named; no canon: not counted."""
         tagged = self.plant("renovate.json", f'["github>{CANON}#v1.2.3"]\n')
         bare = self.plant("a/renovate.json", f'["github>{CANON}:default"]\n')
         other = self.plant(".github/renovate.json", '["github>other/x"]\n')
-        done = self.surfaces(presets=(tagged, other))
-        same(done.returncode, 0, done.stderr)
-        same(done.stdout.splitlines(), ok(1))
-        done = self.surfaces(presets=(tagged, bare))
-        same(done.returncode, canon_pins.EXIT_RED)
-        same(done.stderr.splitlines(), red(f"{bare}{UNTAGGED}"))
+        status, out, err = self.surfaces(presets=(tagged, other), capfd=capfd)
+        same(status, 0, err)
+        same(out.splitlines(), ok(1))
+        status, out, err = self.surfaces(presets=(tagged, bare), capfd=capfd)
+        same(status, canon_pins.EXIT_RED)
+        same(err.splitlines(), red(f"{bare}{UNTAGGED}"))
 
 
 class TestCheckouts(TestPlanted):
     """Canon checkouts in workflows."""
 
-    def test_checkouts_are_counted_and_named(self) -> None:
+    def test_checkouts_are_counted_and_named(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Two checkouts, one with trailing blanks: counted twice, named once."""
         rel = self.plant(".github/workflows/a.yml", steps(checkout(), checkout(" \t")))
-        done = self.surfaces(flows=(rel,))
-        same(done.returncode, canon_pins.EXIT_RED)
+        status, out, err = self.surfaces(flows=(rel,), capfd=capfd)
+        same(status, canon_pins.EXIT_RED)
         named = f"{rel}(2 canon checkout(s) — use $/.github/actions/canon)"
-        same(done.stderr.splitlines(), red(named))
+        same(err.splitlines(), red(named))
 
-    def test_what_is_not_a_checkout(self) -> None:
+    def test_what_is_not_a_checkout(self, capfd: pytest.CaptureFixture[str]) -> None:
         """Commented, followed by more text, or another repository: nothing."""
         lines = (
             f"          # repository: {CANON}\n",
@@ -344,42 +370,48 @@ class TestCheckouts(TestPlanted):
             "          repository: other/.github\n",
         )
         rel = self.plant(".github/workflows/a.yml", steps(*lines))
-        done = self.surfaces(flows=(rel,))
-        same(done.returncode, 0, done.stderr)
-        same(done.stdout.splitlines(), SKIPPED)
+        status, out, err = self.surfaces(flows=(rel,), capfd=capfd)
+        same(status, 0, err)
+        same(out.splitlines(), SKIPPED)
 
 
 class TestCalls(TestPlanted):
     """Reading the files, and the call itself."""
 
-    def test_the_order_is_surface_then_file(self) -> None:
+    def test_the_order_is_surface_then_file(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Offenders surface by surface, files in the order given."""
         bad = steps(f"  - uses: {CANON}/x@main\n")
         one = self.plant("b.yml", bad)
         two = self.plant("a.yml", bad)
         hooks = self.plant("lefthook.yml", hook("main"))
-        done = self.surfaces(yml=(one, two), hooks=(hooks,))
-        same(done.returncode, canon_pins.EXIT_RED)
+        status, out, err = self.surfaces(yml=(one, two), hooks=(hooks,), capfd=capfd)
+        same(status, canon_pins.EXIT_RED)
         expected = red(f"{one}{UNPINNED}", f"{two}{UNPINNED}", f"{hooks}{BRANCH}")
-        same(done.stderr.splitlines(), expected)
+        same(err.splitlines(), expected)
 
-    def test_not_utf8_is_judged_on_its_bytes(self) -> None:
+    def test_not_utf8_is_judged_on_its_bytes(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A file that is not UTF-8 is read as grep reads it: its pin is named."""
         text = f"x: \xff\n  - uses: {CANON}/x@main\n"
         rel = self.plant("a.yml", text.encode("latin-1"))
-        done = self.surfaces(yml=(rel,))
-        same(done.returncode, canon_pins.EXIT_RED)
-        same(done.stderr.splitlines(), red(f"{rel}{UNPINNED}"))
+        status, out, err = self.surfaces(yml=(rel,), capfd=capfd)
+        same(status, canon_pins.EXIT_RED)
+        same(err.splitlines(), red(f"{rel}{UNPINNED}"))
 
-    def test_a_missing_file_is_an_error(self) -> None:
+    def test_a_missing_file_is_an_error(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A named file that is not there is refused by name, exit 2."""
-        done = self.surfaces(presets=("renovate.json",))
-        same(done.returncode, canon_pins.EXIT_ERROR)
-        assert done.stderr.startswith(f"{TASK}: renovate.json: cannot be read:"), (
-            done.stderr
-        )
+        status, out, err = self.surfaces(presets=("renovate.json",), capfd=capfd)
+        same(status, canon_pins.EXIT_ERROR)
+        assert err.startswith(f"{TASK}: renovate.json: cannot be read:"), err
 
-    def test_a_bad_call_is_a_usage_error(self) -> None:
+    def test_a_bad_call_is_a_usage_error(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """No canon, half a canon, or not three separators: exit 2."""
         usage = f"{TASK}: {canon_pins.USAGE}"
         calls: list[list[str]] = [
@@ -390,6 +422,6 @@ class TestCalls(TestPlanted):
             [CANON, "--", "--", "--", "--"],
         ]
         for argv in calls:
-            done = self.helper(*argv)
-            same(done.returncode, canon_pins.EXIT_ERROR)
-            same(done.stderr.splitlines(), [usage])
+            status, out, err = self.helper(*argv, capfd=capfd)
+            same(status, canon_pins.EXIT_ERROR)
+            same(err.splitlines(), [usage])

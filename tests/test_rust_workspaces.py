@@ -12,7 +12,7 @@ physically. A refusing row asserts its message, not only its status
 (#650).
 """
 
-import functools
+import contextlib
 import os
 import subprocess
 import sys
@@ -23,7 +23,6 @@ import pytest
 
 from belt import rust_workspaces
 from tests import support
-import contextlib
 
 BELT = support.MISE
 BASH = support.tool("bash")
@@ -78,11 +77,10 @@ FAILED_MESSAGE = (
 class Planted:
     """A planted two-root tree, the cargo stub, and their environment."""
 
-    def __init__(self, mode: str = "") -> None:
-        """Plant the tree under a fresh directory the case cleans up."""
-        scratch = tempfile.TemporaryDirectory()
-        case.addCleanup(scratch.cleanup)
-        self.base = Path(scratch.name)
+    def __init__(self, base: Path, mode: str = "") -> None:
+        """Plant the tree under `base`, a directory of the row's own."""
+        base.mkdir(parents=True, exist_ok=True)
+        self.base = base
         self.tree = self.base / "repo"
         self.log = self.base / "asked.log"
         self.outside = (self.base / "elsewhere").resolve()
@@ -121,8 +119,13 @@ class Planted:
             return []
         return self.log.read_text(encoding="utf-8").splitlines()
 
-    def main(self) -> support.Called:
-        """Run the `roots` subcommand in this process, in the tree.
+    def call(
+        self,
+        run: Callable[[], int],
+        capfd: pytest.CaptureFixture[str],
+        cwd: Path | None = None,
+    ) -> tuple[int, str, str]:
+        """Call `run` in the tree (or `cwd`), under the planted environment.
 
         Returns:
             The status and both streams.
@@ -130,9 +133,21 @@ class Planted:
         """
         with pytest.MonkeyPatch.context() as patched:
             patched.setattr(rust_workspaces, "CARGO", str(self.cargo))
-            return support.call(
-                lambda: rust_workspaces.main(["roots"]), env=self.env, cwd=self.tree
-            )
+            for name, value in self.env.items():
+                patched.setenv(name, value)
+            patched.chdir(cwd or self.tree)
+            status = run()
+        out, err = capfd.readouterr()
+        return status, out, err
+
+    def main(self, capfd: pytest.CaptureFixture[str]) -> tuple[int, str, str]:
+        """Run the `roots` subcommand in this process, in the tree.
+
+        Returns:
+            The status and both streams.
+
+        """
+        return self.call(lambda: rust_workspaces.main(["roots"]), capfd)
 
     def read(self, shell: str) -> subprocess.CompletedProcess[str]:
         """Run `org_rust_workspace_roots` and print what it filled.
@@ -165,12 +180,14 @@ class Planted:
 class TestRoots:
     """roots(): the distinct workspaces, the top one first."""
 
-    def test_two_roots_top_first_vendor_never_asked(self) -> None:
+    def test_two_roots_top_first_vendor_never_asked(
+        self, tmp_path: Path, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Cargo.toml, then fuzz/Cargo.toml; the member folds into the top."""
-        planted = Planted(self)
-        done = planted.main()
-        assert (done.returncode, done.stderr) == (0, "")
-        assert done.stdout == "Cargo.toml\0fuzz/Cargo.toml\0"
+        planted = Planted(tmp_path)
+        status, out, err = planted.main(capfd)
+        assert (status, err) == (0, "")
+        assert out == "Cargo.toml\0fuzz/Cargo.toml\0"
         asked: list[str] = sorted(planted.asked())
         want = ["Cargo.toml", "crates/a/Cargo.toml", "fuzz/Cargo.toml"]
         assert want == asked
@@ -182,85 +199,82 @@ class TestRoots:
         assert bare == rust_workspaces.ordered({"b", "a"})
         assert topped == rust_workspaces.ordered({"z", "Cargo.toml", "a"})
 
-    def test_a_root_outside_the_tree_is_red_by_name(self) -> None:
+    def test_a_root_outside_the_tree_is_red_by_name(
+        self, tmp_path: Path, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """fuzz/Cargo.toml resolved outside: the message and remedy, exact."""
-        planted = Planted(self, "outside")
-        done = planted.main()
-        assert (done.returncode, done.stdout) == (1, "")
+        planted = Planted(tmp_path / "outside", "outside")
+        status, out, err = planted.main(capfd)
+        assert (status, out) == (1, "")
         want = OUTSIDE_MESSAGE.format(root=planted.outside / "Cargo.toml")
-        assert want == done.stderr
+        assert want == err
 
-    def test_a_failing_locate_project_carries_cargos_text(self) -> None:
+    def test_a_failing_locate_project_carries_cargos_text(
+        self, tmp_path: Path, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Cargo exits 101: its own words, and every other manifest still asked."""
-        planted = Planted(self, "fail")
-        done = planted.main()
-        assert (done.returncode, done.stdout) == (1, "")
-        assert done.stderr == FAILED_MESSAGE
+        planted = Planted(tmp_path, "fail")
+        status, out, err = planted.main(capfd)
+        assert (status, out) == (1, "")
+        assert err == FAILED_MESSAGE
         assert len(planted.asked()) == 3
 
-    def test_git_failing_is_red_with_gits_words(self) -> None:
+    def test_git_failing_is_red_with_gits_words(
+        self, tmp_path: Path, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Outside a repository: git's error, never an empty list."""
-        planted = Planted(self)
+        planted = Planted(tmp_path)
         outside = planted.base / "plain"
         outside.mkdir()
-        done = support.call(
-            lambda: rust_workspaces.main(["roots"]), env=planted.env, cwd=outside
+        status, out, err = planted.call(
+            lambda: rust_workspaces.main(["roots"]), capfd, outside
         )
-        assert (done.returncode, done.stdout) == (1, "")
-        assert "lint:rust: git could not name the tree\n" in done.stderr
-        assert "not a git repository" in done.stderr
+        assert (status, out) == (1, "")
+        assert "lint:rust: git could not name the tree\n" in err
+        assert "not a git repository" in err
 
-    def test_resolved_is_the_roots_or_none_having_said_why(self) -> None:
+    def test_resolved_is_the_roots_or_none_having_said_why(
+        self, tmp_path: Path, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """The roots; None on an unresolved manifest; None on git, said."""
-        planted = Planted(self)
+        planted = Planted(tmp_path)
         roots: list[str] = ["Cargo.toml", "fuzz/Cargo.toml"]
-        with pytest.MonkeyPatch.context() as patched:
-            patched.setattr(rust_workspaces, "CARGO", str(planted.cargo))
-            done = support.call(
-                lambda: 0 if rust_workspaces.resolved() == roots else 3,
-                env=planted.env,
-                cwd=planted.tree,
-            )
-        assert (done.returncode, done.stderr) == (0, "")
-        refused = Planted(self, "outside")
-        with pytest.MonkeyPatch.context() as patched:
-            patched.setattr(rust_workspaces, "CARGO", str(refused.cargo))
-            done = support.call(
-                lambda: 0 if rust_workspaces.resolved() is None else 3,
-                env=refused.env,
-                cwd=refused.tree,
-            )
-        assert done.returncode == 0
-        assert "belongs to a workspace outside this tree" in done.stderr
+        status, out, err = planted.call(
+            lambda: 0 if rust_workspaces.resolved() == roots else 3, capfd
+        )
+        assert (status, err) == (0, "")
+        refused = Planted(tmp_path / "outside", "outside")
+        status, out, err = refused.call(
+            lambda: 0 if rust_workspaces.resolved() is None else 3, capfd
+        )
+        assert status == 0
+        assert "belongs to a workspace outside this tree" in err
         outside = planted.base / "plain"
         outside.mkdir()
-        done = support.call(
-            lambda: 0 if rust_workspaces.resolved() is None else 3,
-            env=planted.env,
-            cwd=outside,
+        status, out, err = planted.call(
+            lambda: 0 if rust_workspaces.resolved() is None else 3, capfd, outside
         )
-        assert done.returncode == 0
-        assert "lint:rust: git could not name the tree\n" in done.stderr
+        assert status == 0
+        assert "lint:rust: git could not name the tree\n" in err
 
-    def test_anything_but_roots_is_a_usage_error(self) -> None:
+    @pytest.mark.parametrize("argv", [[], ["root"], ["roots", "x"]])
+    def test_anything_but_roots_is_a_usage_error(
+        self, argv: list[str], capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """No subcommand, or another: exit 2 and the usage line."""
-        argvs: list[list[str]] = [[], ["root"], ["roots", "x"]]
-        for argv in argvs:
-            done = support.call(functools.partial(rust_workspaces.main, argv))
-            assert (done.returncode, done.stdout, done.stderr) == (
-                2,
-                "",
-                "usage: belt rust-workspaces roots\n",
-            )
+        assert rust_workspaces.main(argv) == 2
+        assert capfd.readouterr() == ("", "usage: belt rust-workspaces roots\n")
 
 
 class TestReader:
     """org_rust_workspace_roots fills the array, or fails."""
 
     @pytest.mark.parametrize("shell", SHELLS)
-    def test_the_reader_fills_one_element_per_root(self, shell: object) -> None:
+    def test_the_reader_fills_one_element_per_root(
+        self, shell: object, tmp_path: Path
+    ) -> None:
         """Both roots in order, no empty last element, no file left."""
-        planted = Planted(self)
+        planted = Planted(tmp_path)
         done = planted.read(shell)
         left: list[str] = sorted(p.name for p in planted.base.iterdir())
         assert (done.returncode, done.stdout, done.stderr) == (
@@ -271,9 +285,11 @@ class TestReader:
         assert left == LEFT
 
     @pytest.mark.parametrize("shell", SHELLS)
-    def test_the_reader_fails_when_the_helper_fails(self, shell: object) -> None:
+    def test_the_reader_fails_when_the_helper_fails(
+        self, shell: object, tmp_path: Path
+    ) -> None:
         """A finding: exit 1 under errexit, the message, nothing filled."""
-        planted = Planted(self, "fail")
+        planted = Planted(tmp_path, "fail")
         done = planted.read(shell)
         left: list[str] = sorted(p.name for p in planted.base.iterdir())
         assert (done.returncode, done.stdout) == (1, "")
@@ -281,10 +297,16 @@ class TestReader:
         assert left == LEFT
 
 
+BUILT_AS_HOLDS_THE_FLAGS_AND_PUTS_THEM_BACK_ROWS: list[tuple[dict[str, str], str]] = [
+    ({}, "--cfg fuzzing"),
+    ({"RUSTFLAGS": "-Cx"}, "-Cx --cfg fuzzing"),
+]
+
+
 @pytest.mark.usefixtures("_stack")
 class TestFuzzing:
     """A cargo-fuzz root is built with `--cfg fuzzing`, by its marker (#2093)."""
-    
+
     @pytest.fixture
     def _stack(self, request: pytest.FixtureRequest) -> None:
         """Hold the row's cleanups, undone last first after it ends."""
@@ -347,19 +369,19 @@ class TestFuzzing:
         added = rust_workspaces.rustflags(plain, {"RUSTFLAGS": "-Cx"})
         assert nothing == added
 
-    def test_built_as_holds_the_flags_and_puts_them_back(self) -> None:
+    @pytest.mark.parametrize(
+        ("before", "inside"), BUILT_AS_HOLDS_THE_FLAGS_AND_PUTS_THEM_BACK_ROWS
+    )
+    def test_built_as_holds_the_flags_and_puts_them_back(
+        self, before: dict[str, str], inside: str
+    ) -> None:
         """Set inside, restored after: a value kept, an absent one removed."""
         marked = self.manifest("[package]\nmetadata = { cargo-fuzz = true }\n")
-        rows: list[tuple[dict[str, str], str]] = [
-            ({}, "--cfg fuzzing"),
-            ({"RUSTFLAGS": "-Cx"}, "-Cx --cfg fuzzing"),
-        ]
-        for before, inside in rows:
-            with pytest.MonkeyPatch.context() as patched, self.subTest(before=before):
-                support.patch_env(patched, before, clear=True)
-                with rust_workspaces.built_as(marked):
-                    assert inside == os.environ["RUSTFLAGS"]
-                assert before.get("RUSTFLAGS") == os.environ.get("RUSTFLAGS")
+        with pytest.MonkeyPatch.context() as patched:
+            support.patch_env(patched, before, clear=True)
+            with rust_workspaces.built_as(marked):
+                assert inside == os.environ["RUSTFLAGS"]
+            assert before.get("RUSTFLAGS") == os.environ.get("RUSTFLAGS")
 
     def test_built_as_restores_after_a_raise(self) -> None:
         """An exception inside still puts the environment back."""
