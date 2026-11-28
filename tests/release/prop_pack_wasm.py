@@ -20,7 +20,6 @@ the ordinary suite (`mise run test`) never imports this file.
 import contextlib
 import io
 import json
-import os
 import sys
 import tempfile
 from pathlib import Path
@@ -37,25 +36,6 @@ from belt.typed_hypothesis import given
 OWNER = st.from_regex(r"[A-Za-z0-9][A-Za-z0-9-]{0,10}", fullmatch=True)
 
 
-def as_helper() -> contextlib.ExitStack:
-    """Run the helper as a run outside mise does, recording nothing (#1934).
-
-    The writer names it by its file, whatever task runs this suite.
-
-    Returns:
-        The patches, entered by the caller's `with`.
-
-    """
-    stack = contextlib.ExitStack()
-    named = stack.enter_context(pytest.MonkeyPatch.context())
-    named.setenv("MISE_TASK_NAME", "")
-    named.setenv("ORG_FINDINGS", "")
-    stack.enter_context(pytest.MonkeyPatch.context()).setattr(
-        sys, "argv", ["pack_wasm.py"]
-    )
-    return stack
-
-
 def a_name(name: str) -> bool:
     """Say whether GitHub would keep the name as drawn.
 
@@ -69,18 +49,20 @@ def a_name(name: str) -> bool:
 NAME = st.from_regex(r"[A-Za-z0-9._-]{1,12}", fullmatch=True).filter(a_name)
 CALLER = st.builds("{}/{}".format, OWNER, NAME)
 VERSION = "1.2.3"
-NEAR_MISS = st.sampled_from([
-    "http://github.com/{}",
-    "https://github.com/{}/",
-    "https://www.github.com/{}",
-    "git://github.com/{}.git",
-    "git+ssh://git@github.com/{}.git",
-    "github:{}",
-    "{}",
-    "git+git+https://github.com/{}",
-    "https://github.com/{}.git.git",
-    " https://github.com/{}",
-])
+NEAR_MISS = st.sampled_from(
+    [
+        "http://github.com/{}",
+        "https://github.com/{}/",
+        "https://www.github.com/{}",
+        "git://github.com/{}.git",
+        "git+ssh://git@github.com/{}.git",
+        "github:{}",
+        "{}",
+        "git+git+https://github.com/{}",
+        "https://github.com/{}.git.git",
+        " https://github.com/{}",
+    ]
+)
 SCALAR: st.SearchStrategy[object] = st.one_of(
     st.none(), st.booleans(), st.integers(), st.floats(allow_nan=False), st.text()
 )
@@ -175,44 +157,15 @@ def test_another_repository_is_refused(caller: str, other: str, shape: str) -> N
     assert (refused is None) == (other == caller)
 
 
-def run_step(package_json: str) -> tuple[int, str]:
-    """Run the pack step on a crate whose pkg/package.json is the text.
+def npm(cwd: Path, *_: str) -> str:
+    """Stand an `npm pack` in: one tarball, named.
 
     Returns:
-        The exit status and what it printed, both streams as the job log
-        shows them: a refusal is a finding, on stderr (#1934).
+        The tarball's name.
 
     """
-
-    def npm(cwd: Path, *_: str) -> str:
-        (cwd / "pkg-1.2.3.tgz").write_bytes(b"x")
-        return "pkg-1.2.3.tgz"
-
-    pack.npm = npm
-    here = Path.cwd()
-    with tempfile.TemporaryDirectory() as tmp:
-        (Path(tmp) / "crate" / "pkg").mkdir(parents=True)
-        (Path(tmp) / "crate" / "pkg" / "package.json").write_text(
-            package_json, encoding="utf-8"
-        )
-        env = {
-            "UNTRUSTED_CRATE_DIR": "crate",
-            "UNTRUSTED_VERSION": VERSION,
-            "GITHUB_REPOSITORY": "o/r",
-            "GITHUB_OUTPUT": str(Path(tmp) / "out"),
-        }
-        out = io.StringIO()
-        os.chdir(tmp)
-        try:
-            with (
-                as_helper(),
-                contextlib.redirect_stdout(out),
-                contextlib.redirect_stderr(out),
-            ):
-                code = pack.main(env)
-        finally:
-            os.chdir(here)
-    return code, out.getvalue()
+    (cwd / "pkg-1.2.3.tgz").write_bytes(b"x")
+    return "pkg-1.2.3.tgz"
 
 
 # A package.json shaped like one, with any value where a field goes.
@@ -235,7 +188,30 @@ PACKAGE_JSON: st.SearchStrategy[dict[str, object]] = st.fixed_dictionaries(
 @example('{"repository": "\\n"}')
 def test_packs_or_refuses(package_json: str) -> None:
     """Exit 0, or 1 with one error line; never a raise."""
-    code, out = run_step(package_json)
+    out = io.StringIO()
+    with (
+        tempfile.TemporaryDirectory() as tmp,
+        pytest.MonkeyPatch.context() as patched,
+        contextlib.redirect_stdout(out),
+        contextlib.redirect_stderr(out),
+    ):
+        pkg = Path(tmp) / "crate" / "pkg"
+        pkg.mkdir(parents=True)
+        (pkg / "package.json").write_text(package_json, encoding="utf-8")
+        env = {
+            "UNTRUSTED_CRATE_DIR": "crate",
+            "UNTRUSTED_VERSION": VERSION,
+            "GITHUB_REPOSITORY": "o/r",
+            "GITHUB_OUTPUT": str(Path(tmp) / "out"),
+        }
+        # A run outside mise, recording nothing (#1934): named by its file.
+        patched.setenv("MISE_TASK_NAME", "")
+        patched.setenv("ORG_FINDINGS", "")
+        patched.setattr(sys, "argv", ["pack_wasm.py"])
+        patched.setattr(pack, "npm", npm)
+        patched.chdir(tmp)
+        code = pack.main(env)
+    out = out.getvalue()
     if code != 0:
         assert code == 1
         assert out.startswith("::error::pack_wasm.py: "), out

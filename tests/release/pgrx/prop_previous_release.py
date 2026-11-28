@@ -31,9 +31,7 @@ the ordinary suite (`mise run test`) never imports this file.
 
 import contextlib
 import io
-import os
 import posixpath
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -47,7 +45,7 @@ from belt.release.pgrx import previous_release as previous
 from belt.typed_hypothesis import given
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    pass
 
 # A small pool, so graphs and listings meet: 1.0.10 beside 1.0.2 is the
 # order a string sort gets wrong.
@@ -59,23 +57,17 @@ TAG = st.one_of(
 )
 
 
-def as_helper() -> contextlib.ExitStack:
-    """Run the helper as a run outside mise does, recording nothing (#1934).
+def as_the_step(patched: pytest.MonkeyPatch, tmp: Path) -> None:
+    """Set one example's world: the stand-ins, outside mise, in `tmp`.
 
-    The writer names it by its file, whatever task runs this suite.
-
-    Returns:
-        The patches, entered by the caller's `with`.
-
+    A run outside mise records nothing and is named by its file (#1934).
     """
-    stack = contextlib.ExitStack()
-    named = stack.enter_context(pytest.MonkeyPatch.context())
-    named.setenv("MISE_TASK_NAME", "")
-    named.setenv("ORG_FINDINGS", "")
-    stack.enter_context(pytest.MonkeyPatch.context()).setattr(
-        sys, "argv", ["previous_release.py"]
-    )
-    return stack
+    patched.setenv("MISE_TASK_NAME", "")
+    patched.setenv("ORG_FINDINGS", "")
+    patched.setattr(sys, "argv", ["previous_release.py"])
+    patched.setattr(previous, "GH", str(tmp / ".stubs" / "gh"))
+    patched.setattr(previous, "TAR", str(tmp / ".stubs" / "tar"))
+    patched.chdir(tmp)
 
 
 def not_dots(segment: str) -> bool:
@@ -166,24 +158,25 @@ def lay(sql: Path, name: str, edges: list[tuple[str, str]]) -> None:
         (sql / f"{name}--{frm}--{to}.sql").write_text("", encoding="utf-8")
 
 
-def fake(
-    listing: str, list_rc: int, tar_rc: int = 0, dl_rc: int = 0
-) -> Callable[[list[str]], subprocess.CompletedProcess[str]]:
-    """Answer gh and tar as the row says.
+def stubs(
+    root: Path, listing: str, list_rc: int, tar_rc: int = 0, dl_rc: int = 0
+) -> None:
+    """Stand a `gh` and a `tar` in, answering as the row says.
 
-    Returns:
-        A stand-in for `subprocess.run`.
-
+    `gh api` prints `listing` and exits `list_rc`; any other `gh` call
+    exits `dl_rc`; `tar` exits `tar_rc`. They are written under `root`.
     """
-
-    def run(argv: list[str], **_: object) -> subprocess.CompletedProcess[str]:
-        if argv[0] == previous.TAR:
-            return subprocess.CompletedProcess(argv, tar_rc, stdout="")
-        if "api" in argv:
-            return subprocess.CompletedProcess(argv, list_rc, stdout=listing)
-        return subprocess.CompletedProcess(argv, dl_rc, stdout="")
-
-    return run
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "listing").write_text(listing, encoding="utf-8")
+    gh = (
+        "#!/bin/sh\n"
+        'case " $* " in *" api "*) cat "$(dirname "$0")/listing";'
+        f" exit {list_rc} ;; esac\n"
+        f"exit {dl_rc}\n"
+    )
+    for name, text in (("gh", gh), ("tar", f"#!/bin/sh\nexit {tar_rc}\n")):
+        (root / name).write_text(text, encoding="utf-8")
+        (root / name).chmod(0o755)
 
 
 def served(listing: list[tuple[str, str]]) -> str:
@@ -194,29 +187,6 @@ def served(listing: list[tuple[str, str]]) -> str:
 
     """
     return "".join(f"{tag}\t{asset}\n" for tag, asset in listing)
-
-
-def quietly(
-    run: Callable[[list[str]], subprocess.CompletedProcess[str]],
-    call: Callable[[], int],
-) -> tuple[int, str]:
-    """Run a mode with its output captured, `subprocess.run` faked.
-
-    Returns:
-        Its status and what it printed, both streams as the job log shows
-        them: a refusal is a finding, on stderr (#1934).
-
-    """
-    out = io.StringIO()
-    with (
-        pytest.MonkeyPatch.context() as patched,
-        as_helper(),
-        contextlib.redirect_stdout(out),
-        contextlib.redirect_stderr(out),
-    ):
-        patched.setattr(subprocess, "run", run)
-        code = call()
-    return code, out.getvalue()
 
 
 # V: the predecessor is the definition's, in any order.
@@ -251,22 +221,25 @@ def test_refused_exactly_when_stranded(  # ruff: ignore[too-many-arguments, too-
     """The model's verdict is the guard's."""
     name = posixpath.basename(crate).replace("-", "_")
     listing = data.draw(rows(name))
-    run = fake(served(listing), list_rc)
     rerun = any(a.startswith(f"{name}-{version}-pg") for _, a in listing)
     prev = model(listing, edges, name, version)
-    here = Path.cwd()
-    with tempfile.TemporaryDirectory() as tmp:
-        os.chdir(tmp)
-        try:
-            lay(Path(crate) / "sql", name, edges)
-            script = ""
-            if prev is not None:
-                script = f"{crate}/sql/{name}--{prev[0]}--{version}.sql"
-                if scripted:
-                    Path(script).write_text("", encoding="utf-8")
-            code, out = quietly(run, lambda: previous.guard("o/r", version, crate))
-        finally:
-            os.chdir(here)
+    said = io.StringIO()
+    with (
+        tempfile.TemporaryDirectory() as tmp,
+        pytest.MonkeyPatch.context() as patched,
+        contextlib.redirect_stdout(said),
+        contextlib.redirect_stderr(said),
+    ):
+        stubs(Path(tmp) / ".stubs", served(listing), list_rc)
+        as_the_step(patched, Path(tmp))
+        lay(Path(crate) / "sql", name, edges)
+        script = ""
+        if prev is not None:
+            script = f"{crate}/sql/{name}--{prev[0]}--{version}.sql"
+            if scripted:
+                Path(script).write_text("", encoding="utf-8")
+        code = previous.guard("o/r", version, crate)
+    out = said.getvalue()
     if list_rc:
         want = list_rc
     elif rerun or prev is None or scripted or (prev[0], version) in edges:
@@ -304,26 +277,27 @@ def test_guard_and_fetch_answer(
     listing: str, rc: int, dl_rc: int, tar_rc: int, version: str
 ) -> None:
     """A status, never a raise."""
-    run = fake(listing, rc, tar_rc, dl_rc)
-    here = Path.cwd()
-    with tempfile.TemporaryDirectory() as tmp:
-        os.chdir(tmp)
-        try:
-            lay(Path("crate") / "sql", "crate", [("0.2.0", "1.0.2")])
-            code, _ = quietly(run, lambda: previous.guard("o/r", version, "crate"))
-            guarded: set[int] = {0, 1, rc}
-            assert code in guarded
-            args = previous.Args(
-                repo="o/r",
-                version=version,
-                crate_dir="crate",
-                pg="16",
-                arch="amd64",
-                tarball="prev.tar.gz",
-                dest="prev",
-            )
-            code, _ = quietly(run, lambda: previous.fetch(args))
-            fetched: set[int] = {0, rc, tar_rc}
-            assert code in fetched
-        finally:
-            os.chdir(here)
+    with (
+        tempfile.TemporaryDirectory() as tmp,
+        pytest.MonkeyPatch.context() as patched,
+        contextlib.redirect_stdout(io.StringIO()),
+        contextlib.redirect_stderr(io.StringIO()),
+    ):
+        stubs(Path(tmp) / ".stubs", listing, rc, tar_rc, dl_rc)
+        as_the_step(patched, Path(tmp))
+        lay(Path("crate") / "sql", "crate", [("0.2.0", "1.0.2")])
+        code = previous.guard("o/r", version, "crate")
+        guarded: set[int] = {0, 1, rc}
+        assert code in guarded
+        args = previous.Args(
+            repo="o/r",
+            version=version,
+            crate_dir="crate",
+            pg="16",
+            arch="amd64",
+            tarball="prev.tar.gz",
+            dest="prev",
+        )
+        code = previous.fetch(args)
+        fetched: set[int] = {0, rc, tar_rc}
+        assert code in fetched

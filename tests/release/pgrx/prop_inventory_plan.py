@@ -19,7 +19,6 @@ the ordinary suite (`mise run test`) never imports this file.
 import contextlib
 import io
 import json
-import os
 import sys
 import tempfile
 from pathlib import Path
@@ -39,25 +38,6 @@ PREFIX = st.text(max_size=12)
 SCALAR: st.SearchStrategy[object] = st.one_of(
     st.booleans(), st.integers(), st.text(max_size=8)
 )
-
-
-def as_helper() -> contextlib.ExitStack:
-    """Run the helper as a run outside mise does, recording nothing (#1934).
-
-    The writer names it by its file, whatever task runs this suite.
-
-    Returns:
-        The patches, entered by the caller's `with`.
-
-    """
-    stack = contextlib.ExitStack()
-    named = stack.enter_context(pytest.MonkeyPatch.context())
-    named.setenv("MISE_TASK_NAME", "")
-    named.setenv("ORG_FINDINGS", "")
-    stack.enter_context(pytest.MonkeyPatch.context()).setattr(
-        sys, "argv", ["inventory_plan.py"]
-    )
-    return stack
 
 
 def nested(inner: st.SearchStrategy[object]) -> st.SearchStrategy[object]:
@@ -103,43 +83,6 @@ def toml_value(value: object) -> str:
     return text
 
 
-def run_step(manifest: str, major: str, prefix: str) -> tuple[int, str, object]:
-    """Run the step on a crate whose Cargo.toml is `manifest`.
-
-    Returns:
-        The exit status, what it printed (both streams, as the job log
-        shows them: a refusal is a finding, on stderr, #1934), and the plan
-        written (None when none).
-
-    """
-    here = Path.cwd()
-    saved = os.environ.get("PLAN_DOC_PREFIX")
-    with tempfile.TemporaryDirectory() as tmp:
-        (Path(tmp) / "crate").mkdir()
-        (Path(tmp) / "crate" / "Cargo.toml").write_text(manifest, "utf-8")
-        os.environ["PLAN_DOC_PREFIX"] = prefix
-        os.chdir(tmp)
-        out = io.StringIO()
-        try:
-            with (
-                as_helper(),
-                contextlib.redirect_stdout(out),
-                contextlib.redirect_stderr(out),
-            ):
-                code = inventory.main(["crate", major])
-        finally:
-            os.chdir(here)
-            if saved is None:
-                os.environ.pop("PLAN_DOC_PREFIX", None)
-            else:
-                os.environ["PLAN_DOC_PREFIX"] = saved
-        written = Path(tmp) / "plan" / "plan.json"
-        plan = None
-        if written.is_file():
-            plan = decoded.load_json(written.read_text("utf-8"))
-    return code, out.getvalue(), plan
-
-
 # V: the prefix names the document, never the package.
 @given(CRATE, MAJOR, PREFIX.filter(bool), PREFIX.filter(bool))
 @example("edtf-pg", "16", "pgrx-extension:", "x-")
@@ -172,7 +115,28 @@ def test_prefix_moves_only_the_document(
 @example("edtf", "16")
 def test_plans_or_refuses(package: object, major: str) -> None:
     """Exit 0 with a plan, or 1 with one error line and no plan."""
-    code, out, plan = run_step(f"package = {toml_value(package)}\n", major, "p:")
+    said = io.StringIO()
+    with (
+        tempfile.TemporaryDirectory() as tmp,
+        pytest.MonkeyPatch.context() as patched,
+        contextlib.redirect_stdout(said),
+        contextlib.redirect_stderr(said),
+    ):
+        (Path(tmp) / "crate").mkdir()
+        manifest = f"package = {toml_value(package)}\n"
+        (Path(tmp) / "crate" / "Cargo.toml").write_text(manifest, "utf-8")
+        # A run outside mise, recording nothing (#1934): named by its file.
+        patched.setenv("MISE_TASK_NAME", "")
+        patched.setenv("ORG_FINDINGS", "")
+        patched.setattr(sys, "argv", ["inventory_plan.py"])
+        patched.setenv("PLAN_DOC_PREFIX", "p:")
+        patched.chdir(tmp)
+        code = inventory.main(["crate", major])
+        written = Path(tmp) / "plan" / "plan.json"
+        plan = (
+            decoded.load_json(written.read_text("utf-8")) if written.is_file() else None
+        )
+    out = said.getvalue()
     if code == 0:
         assert isinstance(plan, list)
     else:
