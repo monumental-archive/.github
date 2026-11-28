@@ -536,16 +536,30 @@ def mutation_rows(costs: Costs, counts: Counts, files: list[str]) -> list[Row]:
         The leg's rows, each adopted language in LANGUAGES order.
 
     """
-    shards = costs.languages["mutants"] | counts.languages.get("mutants", {})
     adopted = [n for n in LANGUAGES["mutants"] if mutated(n, files)]
     if not adopted:
         return [{"leg": "mutants", "task": "ci:mutants", "shard": 1, "of": 1}]
     return [
         {"leg": "mutants", "task": "ci:mutants", "language": n, "shard": k, "of": of}
         for n in adopted
-        for of in (shards[n],)
+        for of in (mutation_count(n, costs, counts),)
         for k in range(1, of + 1)
     ]
+
+
+def mutation_count(language: str, costs: Costs, counts: Counts) -> int:
+    """Count one language's rows of the gate's mutation leg.
+
+    THE ONE PLACE the gate leg's count is decided (#1432). Today it is
+    the weekly run's `[mutants]` count, the repository's or the canon's;
+    what the gate leg's count should be is still open on #1432, and is
+    changed here alone.
+
+    Returns:
+        The language's shard count.
+
+    """
+    return (costs.languages["mutants"] | counts.languages.get("mutants", {}))[language]
 
 
 def leg_tasks(

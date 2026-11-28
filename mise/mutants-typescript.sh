@@ -37,9 +37,23 @@
 # after it. The wrapper passes `--inPlace` itself; the repository cannot
 # turn it off through the leg (ruling on #1358).
 #
-# A RUNNER ONLY: refused, by name, where `CI` is unset. In place, every
-# mutant runs with whatever environment the tree holds, so mutated code
-# never runs beside a workstation's live `.env` (ruling on #1358).
+# OFF A RUNNER, IN A CLEAN COPY (`CI` unset; the owner's ruling on
+# #1432, after #1358's): in place, every mutant runs with whatever the
+# tree and the environment hold, so mutated code never runs beside a
+# workstation's live `.env`, its credentials or its home. The leg
+# refuses a dirty tracked tree, clones the committed tree into scratch
+# (tracked files only), and runs ITSELF there, with CI set, under
+# `env -i` and a fixed list: PATH is the belt's Python, the tree's own
+# `mise bin-paths` (the suite's tools, read here, never installed in
+# the copy: a repository's mise hook may write a `.env`), docker's
+# directory and /usr/bin:/bin; HOME is an empty scratch directory; and
+# the leg's own variables. What HOME used to supply is resolved first
+# and passed: pnpm's store and metadata cache, npm's cache. The copy's
+# dependencies come from its lockfile OFFLINE (`pnpm install --offline
+# --frozen-lockfile`, `npm ci --offline`); a lockfile that needs the
+# network is that tool's own red, never a fetch. An untracked `.env*`
+# in the copy, before or after the install, is red by name. Measured on
+# monumental-archive (#1432): copy 0.16 s, offline install 2 s.
 #
 # STRYKERJS EXITS 0 WHATEVER SURVIVES (no `thresholds.break`, which the
 # config may not set), so the verdict is read from its JSON report, never
@@ -126,13 +140,11 @@ if ! org_tracked_has "${adoption}"; then
   exit 0
 fi
 
+belt="${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: lefthook run post-checkout)}"
 if [[ -z ${CI:-} ]]; then
-  org_finding "typescript" "CI is unset — mutants run in place with the tree's own environment," \
-    "so this leg runs on a runner only (repo-mutants.yml), never a workstation"
-  exit 1
+  exec bash "${belt}/mutation-typescript-copy.sh"
 fi
 
-belt="${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: lefthook run post-checkout)}"
 python3 "${belt}/mutants_typescript.py" --label "${label}" config "${adoption}"
 
 stryker=node_modules/.bin/stryker

@@ -41,6 +41,7 @@ belt's pin; the weekly run judges that.
 
     mutants_diff.py scope LANGUAGE OUT   decide, and write OUT/scope,
                                          OUT/lines.tsv and OUT/patch.diff
+    mutants_diff.py base                 print the base, or nothing for none
 
 `OUT/scope` holds `whole` or `diff`; `OUT/lines.tsv` one `path<TAB>line`
 per changed line; `OUT/patch.diff` the diff itself, for a tool that
@@ -64,7 +65,7 @@ import tracked
 GIT = shutil.which("git") or "git"
 ZERO = re.compile(r"^0+$")
 HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
-USAGE = "usage: mutants_diff.py scope <language> <out-dir>"
+USAGE = "usage: mutants_diff.py scope <language> <out-dir> | mutants_diff.py base"
 USAGE_EXIT = 2
 ARGS = 3
 # Every flag that pins what `git diff` prints, where config could change
@@ -392,12 +393,19 @@ def touches(lines: dict[str, set[int]], path: str, first: int, last: int) -> boo
 
 
 def main(argv: list[str]) -> int:
-    """Decide one language's scope and write it.
+    """Decide one language's scope and write it, or print the base.
 
     Returns:
         0, 1 for a base the history does not hold, 2 for a bad command line.
 
     """
+    if argv == ["base"]:
+        try:
+            print(base(dict(os.environ)) or "")
+        except BaseError as error:
+            findings.finding("", str(error))
+            return 1
+        return 0
     if len(argv) != ARGS or argv[0] != "scope" or argv[1] not in ADOPTION:
         print(USAGE, file=sys.stderr)
         return USAGE_EXIT
