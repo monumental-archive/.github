@@ -309,7 +309,7 @@ def main(argv: list[str]) -> int:
 
     """
     if argv:
-        findings.finding("", f"takes no arguments, got {argv!r}")
+        writer.finding("", f"takes no arguments, got {argv!r}")
         return 2
     return check(stdin_paths())
 

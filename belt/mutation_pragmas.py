@@ -108,8 +108,10 @@ def main(argv: list[str]) -> int:
                     f"{name}:{line}",
                     why,
                     [
-                        "an exclusion records a mutant the suite cannot kill;"
-                        " say why at the site"
+                        (
+                            "an exclusion records a mutant the suite cannot kill;"
+                            " say why at the site"
+                        )
                     ],
                 )
                 status = 1

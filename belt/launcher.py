@@ -17,10 +17,20 @@ usage line.
 import importlib
 import importlib.util
 import sys
+from typing import Protocol, runtime_checkable
 
 PACKAGES = ("belt", "belt.release", "belt.release.pgrx", "belt.rekor_monitor")
 USAGE = 'usage: "${ORG_PYTHON}" -I "${ORG_BELT_ROOT}/belt" <command> [<argument>…]'
 EXIT_USAGE = 2
+
+
+@runtime_checkable
+class Command(Protocol):
+    """A command module: what the launcher calls."""
+
+    def main(self, argv: list[str]) -> int:
+        """Run the command."""
+        ...
 
 
 def launch(argv: list[str]) -> int:
@@ -42,12 +52,10 @@ def launch(argv: list[str]) -> int:
         qualified = f"{package}.{name}"
         if importlib.util.find_spec(qualified) is None:
             continue
-        module = importlib.import_module(qualified)
-        run = getattr(module, "main", None)
-        if not callable(run):
+        module: object = importlib.import_module(qualified)
+        if not isinstance(module, Command):
             break
         sys.argv = [command, *rest]
-        status = run(rest)
-        return status if isinstance(status, int) else 0
+        return module.main(rest)
     print(f"belt: unknown command '{command}' — {USAGE}", file=sys.stderr)
     return EXIT_USAGE

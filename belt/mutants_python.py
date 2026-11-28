@@ -1,4 +1,4 @@
-"""The Python leg of `audit:mutants` (#1354, #2177): would the suite fail?
+"""The Python leg of `audit:mutants`: would the suite fail? (#1354, #2177).
 
 mutmut mutates a copy of the repository's package in `mutants/`, keeps
 its own map of which tests reach which function from one baseline run,
@@ -36,9 +36,10 @@ child process runs is the shape #2177 removed; a timeout is red; so is
 every other outcome that is not a kill (`suspicious`, `segfault`, `not
 checked`). The counts are written for the totals job.
 
-SHARDS: MUTANTS_SHARD=k/n (read as ORG_SHARD is, belt/shard.py) takes every n-th of the population's modules,
-sorted, from the k-th, and runs mutmut on those modules' mutants; each
-shard pays the baseline run once. Unset is 1/1, every module.
+SHARDS: MUTANTS_SHARD=k/n (read as ORG_SHARD is, belt/shard.py) takes
+every n-th of the population's modules, sorted, from the k-th, and runs
+mutmut on those modules' mutants; each shard pays the baseline run
+once. Unset is 1/1, every module.
 
     belt mutants-python adopted      `adopted=true|false`, for GITHUB_OUTPUT
     belt mutants-python              run the leg
@@ -52,11 +53,10 @@ import os
 import re
 import shutil
 import subprocess
-import tomllib
 from collections import defaultdict
 from pathlib import Path
 
-from belt import findings, mutation_pragmas, shard, tool_python
+from belt import decoded, findings, mutation_pragmas, shard, tool_python, typed_std
 from belt.tracked import has, tracked
 from belt.tree import MISE
 
@@ -115,14 +115,14 @@ def configuration(root: Path) -> tuple[str, dict[str, str]] | None:
     found: list[tuple[str, dict[str, str]]] = []
     if has(PYPROJECT, root=root):
         try:
-            data = tomllib.loads((root / PYPROJECT).read_text(encoding="utf-8"))
-        except (OSError, tomllib.TOMLDecodeError) as bad:
+            data = decoded.load_toml((root / PYPROJECT).read_bytes())
+        except (OSError, decoded.UndecodableError) as bad:
             msg = f"{PYPROJECT} does not parse: {bad}"
             raise AdoptionError(msg) from bad
-        table = data.get("tool", {})
-        section = table.get("mutmut") if isinstance(table, dict) else None
-        if isinstance(section, dict):
-            found.append((PYPROJECT, {str(k): str(v) for k, v in section.items()}))
+        table = data.get("tool")
+        section = table.get("mutmut") if decoded.is_object(table) else None
+        if decoded.is_object(section):
+            found.append((PYPROJECT, {k: str(v) for k, v in section.items()}))
     if has(SETUP, root=root):
         parser = configparser.ConfigParser()
         try:
@@ -208,10 +208,11 @@ def function_of(name: str) -> tuple[str, str]:
 
     """
     found = MUTANT.fullmatch(name)
-    if found is None:
+    module = typed_std.group(found, "module") if found else None
+    function = typed_std.group(found, "function") if found else None
+    if module is None or function is None:
         return name, ""
-    function = found["function"].lstrip("_ǁ").replace("ǁ", ".")
-    return found["module"], function
+    return module, function.lstrip("_ǁ").replace("ǁ", ".")
 
 
 def results(text: str, modules: list[str]) -> dict[str, str]:
@@ -225,11 +226,12 @@ def results(text: str, modules: list[str]) -> dict[str, str]:
     mine = set(modules)
     for line in text.splitlines():
         found = RESULT.fullmatch(line)
-        if found is None:
+        name = typed_std.group(found, 1) if found else None
+        status = typed_std.group(found, 2) if found else None
+        if name is None or status is None:
             continue
-        name, status = found[1], found[2].strip()
         if function_of(name)[0] in mine:
-            out[name] = status
+            out[name] = status.strip()
     return out
 
 
@@ -314,42 +316,99 @@ def mutmut(venv: str, *args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def run(root: Path, where: str) -> int:
-    """Run the leg on this shard.
+class RefusedError(Exception):
+    """The leg cannot run: its finding's message and detail."""
+
+    def __init__(self, message: str, detail: list[str] | None = None) -> None:
+        """Hold the finding."""
+        super().__init__(message)
+        self.message = message
+        self.detail = detail or []
+
+
+def prepare(root: Path) -> list[str] | None:
+    """Read the adoption and hold it to the leg's rules, before anything runs.
 
     Returns:
-        0 when every mutant of the shard was killed, 1 otherwise.
+        The source paths, or None when the repository adopts nothing.
+
+    Raises:
+        RefusedError: a configuration, a pragma or the tree the leg refuses.
 
     """
     try:
         found = configuration(root)
     except AdoptionError as bad:
-        findings.finding("python", str(bad))
-        return EXIT_RED
+        raise RefusedError(str(bad)) from bad
     if found is None:
-        print(f"{LABEL}: no mutmut configuration tracked ({SETUP} [mutmut]), skipped")
-        summary(where, "skipped")
-        return 0
+        return None
     name, keys = found
     refused = refused_keys(keys)
     if refused:
-        findings.finding(
-            "python",
+        msg = (
             f"{name} [mutmut] holds keys that are the belt's policy, not the"
-            " repository's facts:",
-            [*refused, f"a repository names only {', '.join(ALLOWED)}"],
+            " repository's facts:"
         )
-        return EXIT_RED
+        raise RefusedError(
+            msg, [*refused, f"a repository names only {', '.join(ALLOWED)}"]
+        )
     sources = source_paths(keys)
     if not sources:
-        findings.finding("python", f"{name} [mutmut] names no source_paths")
-        return EXIT_RED
+        msg = f"{name} [mutmut] names no source_paths"
+        raise RefusedError(msg)
     files = tracked(*(f"{s.rstrip('/')}/*.py" for s in sources), root=root)
     if mutation_pragmas.main(files) != 0:
-        return EXIT_RED
+        msg = "a pragma above is refused; nothing was mutated"
+        raise RefusedError(msg)
     if tracked(f"{COPY}/", root=root):
-        findings.finding("python", f"{COPY}/ is tracked; mutmut writes its copy there")
+        msg = f"{COPY}/ is tracked; mutmut writes its copy there"
+        raise RefusedError(msg)
+    return sources
+
+
+def judge(root: Path, venv: str, mine: list[str], where: str) -> int:
+    """Run mutmut on this shard's modules and judge what it found.
+
+    Returns:
+        0 when every mutant was killed, 1 otherwise.
+
+    """
+    shutil.rmtree(root / COPY, ignore_errors=True)
+    cores = str(os.cpu_count() or 1)
+    done = mutmut(venv, "run", "--max-children", cores, *patterns(mine))
+    if done.returncode != 0:
+        findings.finding("python", f"mutmut run exited {done.returncode}; see above")
         return EXIT_RED
+    judged = results(mutmut(venv, "results", "--all", "true").stdout, mine)
+    if not judged:
+        findings.finding("python", "mutmut judged no mutant in this shard's modules")
+        return EXIT_RED
+    killed = sum(1 for s in judged.values() if s == KILLED)
+    summary(where, f"{len(judged)}\t{killed}\t{len(judged) - killed}\t0\tshard")
+    red = verdict(judged)
+    for subject, message, names in red:
+        findings.finding(subject, message, names)
+    print(f"{LABEL}: {len(judged)} mutant(s), {killed} killed, shard {where}")
+    return EXIT_RED if red else 0
+
+
+def run(root: Path, where: str) -> int:
+    """Run the leg on this shard.
+
+    Returns:
+        0 when every mutant of the shard was killed or the leg skips, 1
+        otherwise.
+
+    """
+    try:
+        sources = prepare(root)
+    except RefusedError as bad:
+        findings.finding("python", bad.message, bad.detail)
+        return EXIT_RED
+    if sources is None:
+        print(f"{LABEL}: no mutmut configuration tracked ({SETUP} [mutmut]), skipped")
+        summary(where, "skipped")
+        return 0
     venv = tool_python.check(LABEL, "pytest")
     if venv is None:
         return EXIT_RED
@@ -361,24 +420,7 @@ def run(root: Path, where: str) -> int:
         print(f"{LABEL}: shard {where} holds none of the {len(every)} module(s)")
         summary(where, "0\t0\t0\t0\tshard")
         return 0
-    shutil.rmtree(root / COPY, ignore_errors=True)
-    cores = str(os.cpu_count() or 1)
-    done = mutmut(venv, "run", "--max-children", cores, *patterns(mine))
-    if done.returncode != 0:
-        findings.finding("python", f"mutmut run exited {done.returncode}; see above")
-        return EXIT_RED
-    listed = mutmut(venv, "results", "--all", "true")
-    judged = results(listed.stdout, mine)
-    if not judged:
-        findings.finding("python", "mutmut judged no mutant in this shard's modules")
-        return EXIT_RED
-    killed = sum(1 for s in judged.values() if s == KILLED)
-    summary(where, f"{len(judged)}\t{killed}\t{len(judged) - killed}\t0\tshard")
-    red = verdict(judged)
-    for subject, message, names in red:
-        findings.finding(subject, message, names)
-    print(f"{LABEL}: {len(judged)} mutant(s), {killed} killed, shard {where}")
-    return EXIT_RED if red else 0
+    return judge(root, venv, mine, where)
 
 
 def main(argv: list[str]) -> int:

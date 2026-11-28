@@ -182,6 +182,7 @@ def test_a_pragma_that_is_not_the_reasoned_line_form_is_red(
     assert done.stderr == (
         f"audit:mutants: pkg/calc.py:6: {message}\n"
         "  an exclusion records a mutant the suite cannot kill; say why at the site\n"
+        "audit:mutants: python: a pragma above is refused; nothing was mutated\n"
     )
 
 

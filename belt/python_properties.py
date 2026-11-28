@@ -171,7 +171,6 @@ def refusals(items: list[tuple[str, str, object]], profile: settings) -> list[st
     return out
 
 
-@pytest.hookimpl(trylast=True)
 def pytest_collection_modifyitems(
     session: pytest.Session, config: pytest.Config, items: list[pytest.Item]
 ) -> None:
@@ -184,9 +183,10 @@ def pytest_collection_modifyitems(
     del session
     name: object = config.getoption("hypothesis_profile", None)
     profile = settings.get_profile(name if isinstance(name, str) else "default")
-    found = [
-        (str(item.path), item.nodeid, getattr(item, "obj", None)) for item in items
-    ]
+    found: list[tuple[str, str, object]] = []
+    for item in items:
+        func: object = getattr(item, "obj", None)
+        found.append((str(item.path), item.nodeid, func))
     refused = refusals(found, profile)
     if refused:
         raise pytest.UsageError("\n".join(refused))
