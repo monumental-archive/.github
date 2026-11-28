@@ -197,9 +197,9 @@ CASES: dict[str, tuple[dict[str, str], int, list[str], list[str]]] = {
 }
 
 
-def same[T](case: unittest.TestCase, got: T, want: T, msg: str = "") -> None:
+def same[T](got: T, want: T, msg: str = "") -> None:
     """Assert two values equal, `want` typed by `got` (mypy.ini: no Any)."""
-    case.assertEqual(got, want, msg or None)
+    assert got == want, msg or None
 
 
 def body() -> str:
@@ -276,24 +276,23 @@ class TestColdAttested:
     def test_no_workflows_is_skipped_by_name(self) -> None:
         """No workflow file: the task says it skipped."""
         done = self.task()
-        same(self, done.returncode, 0, done.stderr)
+        same(done.returncode, 0, done.stderr)
         skipped = ["lint:cold-attested: no workflows, skipped"]
-        same(self, done.stdout.splitlines(), skipped)
+        same(done.stdout.splitlines(), skipped)
 
     def test_a_clean_tree_passes_through_the_task(self) -> None:
         """No cache anywhere: green, the summary on stdout."""
         self.plant({"a.yml": HEAD + CHECKOUT})
         done = self.task()
-        same(self, (done.returncode, done.stderr), (0, ""))
-        same(self, done.stdout.splitlines(), CLEAN)
+        same((done.returncode, done.stderr), (0, ""))
+        same(done.stdout.splitlines(), CLEAN)
 
     def test_each_finding_is_its_own_line_through_the_task(self) -> None:
         """A default-cache step and a stray marker: two findings, in order."""
         self.plant({"a.yml": HEAD + MISE + MARK + "\n"})
         done = self.task()
-        same(self, (done.returncode, done.stdout), (1, ""))
+        same((done.returncode, done.stdout), (1, ""))
         same(
-            self,
             done.stderr.splitlines(),
             red(
                 (f"{WF}/a.yml:7", cold_attested.NO_STEP),
@@ -305,10 +304,9 @@ class TestColdAttested:
         """The task body hands the helper every workflow, in glob order."""
         self.plant({"a.yaml": HEAD + CACHE, "b.yml": HEAD + MARK + CACHE})
         done = self.task()
-        same(self, done.returncode, cold_attested.EXIT_RED)
-        same(self, done.stdout, "")
+        same(done.returncode, cold_attested.EXIT_RED)
+        same(done.stdout, "")
         same(
-            self,
             done.stderr.splitlines(),
             red((f"{WF}/a.yaml:6", cold_attested.NO_MARKER)),
         )
@@ -320,16 +318,15 @@ class TestColdAttested:
                 for old in (self.tree / WF).iterdir():
                     old.unlink()
                 done = self.helper(*self.plant(files))
-                same(self, done.returncode, status, done.stderr)
-                same(self, done.stdout.splitlines(), out)
-                same(self, done.stderr.splitlines(), err)
+                same(done.returncode, status, done.stderr)
+                same(done.stdout.splitlines(), out)
+                same(done.stderr.splitlines(), err)
 
     def test_no_workflow_is_a_usage_error(self) -> None:
         """Called with nothing to read: exit 2, saying how to call it."""
         done = self.helper()
-        same(self, done.returncode, cold_attested.EXIT_ERROR)
+        same(done.returncode, cold_attested.EXIT_ERROR)
         same(
-            self,
             done.stderr.splitlines(),
             [f"{TASK}: usage: cold_attested.py WORKFLOW..."],
         )
@@ -337,8 +334,8 @@ class TestColdAttested:
     def test_a_missing_workflow_is_a_read_error(self) -> None:
         """A named file that is not there: exit 2, naming it."""
         done = self.helper(f"{WF}/gone.yml")
-        same(self, done.returncode, cold_attested.EXIT_ERROR)
-        same(self, done.stdout, "")
+        same(done.returncode, cold_attested.EXIT_ERROR)
+        same(done.stdout, "")
         assert done.stderr.startswith(
             f"{TASK}: {WF}/gone.yml: cannot be read as UTF-8: "
         ), done.stderr
@@ -347,8 +344,8 @@ class TestColdAttested:
         """Bytes that are not UTF-8: exit 2, naming the file."""
         (self.tree / WF / "a.yml").write_bytes(b"on: push\n# \xe9\n")
         done = self.helper(f"{WF}/a.yml")
-        same(self, done.returncode, cold_attested.EXIT_ERROR)
-        same(self, done.stdout, "")
+        same(done.returncode, cold_attested.EXIT_ERROR)
+        same(done.stdout, "")
         assert done.stderr.startswith(
             f"{TASK}: {WF}/a.yml: cannot be read as UTF-8: "
         ), done.stderr

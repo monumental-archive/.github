@@ -17,9 +17,7 @@ import re
 import subprocess
 import sys
 import urllib.request
-from pathlib import Path
 from typing import TYPE_CHECKING, Self, override
-from unittest import mock
 
 import pytest
 
@@ -83,15 +81,17 @@ class TestStdinText:
 
     def test_text(self) -> None:
         """Standard input's text, read to its end."""
-        with mock.patch("sys.stdin", io.StringIO("one\ntwo\n")):
+        with pytest.MonkeyPatch.context() as patched:
+            patched.setattr("sys.stdin", io.StringIO("one\ntwo\n"))
             assert typed_std.stdin_text() == "one\ntwo\n"
 
     def test_absent_in_process(self) -> None:
         """No standard input (sys.stdin is None): refused by name."""
         with (
-            mock.patch("sys.stdin", None),
+            pytest.MonkeyPatch.context() as patched,
             pytest.raises(typed_std.NoStdinError) as caught,
         ):
+            patched.setattr("sys.stdin", None)
             typed_std.stdin_text()
         assert (
             str(caught.value)
@@ -202,9 +202,10 @@ class TestUrlopen:
 
         # typed_std's urllib.request is this module: the one urlopen it calls.
         with (
-            mock.patch.object(urllib.request, "urlopen", opened),
+            pytest.MonkeyPatch.context() as patched,
             typed_std.urlopen(urllib.request.Request(URL), timeout=7) as got,
         ):
+            patched.setattr(urllib.request, "urlopen", opened)
             assert (got.status, got.read(), got.getheader("Content-Type")) == (
                 200,
                 b"body",

@@ -111,14 +111,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, Self, override
-from unittest import mock
-
-from belt.release import mint_doi
-
 
 import pytest
 
 from belt import decoded
+from belt.release import mint_doi
 from tests import hermetic
 
 if TYPE_CHECKING:
@@ -167,22 +164,20 @@ esac
 """
 
 
-_NAMED = contextlib.ExitStack()
+@pytest.fixture
+def _outside_mise(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Name the helper by its command, as a run outside mise does (#1934).
 
-
-def setUpModule() -> None:
-    """Name the helper by its file, as a run outside mise does (#1934).
-
-    An in-process call reads argv, whatever task runs this suite.
+    An in-process call reads argv, whatever task runs this suite; an
+    empty ORG_FINDINGS records nothing (unset on a runner records to the
+    job's file, #1976).
     """
-    _NAMED.enter_context(mock.patch.object(sys, "argv", ["mint_doi.py"]))
-    for key in ("MISE_TASK_NAME", "ORG_FINDINGS"):
-        if key in os.environ:
-            _NAMED.callback(os.environ.__setitem__, key, os.environ.pop(key))
-    # Empty, not unset: unset on a runner records to the job's file (#1976).
-    os.environ["ORG_FINDINGS"] = ""
-    _NAMED.callback(os.environ.pop, "ORG_FINDINGS", None)
-    unittest.addModuleCleanup(_NAMED.close)
+    monkeypatch.setattr(sys, "argv", ["mint-doi"])
+    monkeypatch.delenv("MISE_TASK_NAME", raising=False)
+    monkeypatch.setenv("ORG_FINDINGS", "")
+
+
+pytestmark = pytest.mark.usefixtures("_outside_mise")
 
 
 def strings(*items: str) -> list[str]:
@@ -689,10 +684,11 @@ def run_helper(  # ruff: ignore[too-many-arguments] - one knob per row family
             out.write(done.stdout)
         else:
             with (
-                mock.patch.object(mint_doi, "pause", pauses.append),
+                pytest.MonkeyPatch.context() as patched,
                 contextlib.redirect_stdout(out),
                 contextlib.redirect_stderr(out),
             ):
+                patched.setattr(mint_doi, "pause", pauses.append)
                 code = mint_doi.main(["--pipeline", PIPELINE], env)
         text = summary.read_text() if summary.exists() else ""
     return Run(
@@ -851,7 +847,7 @@ class TestTwoIds:
 
 TWO = '["mit","apache-2.0"]'
 SHORT = (
-    "::error::mint_doi.py: the published record's licences read back as"
+    "::error::mint-doi: the published record's licences read back as"
     f' ["mit"], not {TWO} — the DOI 10.5281/zenodo.101 states less than'
     " CITATION.cff"
 )
@@ -874,7 +870,7 @@ class TestThePublishedRecord:
         run = run_helper("MIT OR Apache-2.0", published="fail")
         assert run.returncode == 1, run.stdout
         assert (
-            "::error::mint_doi.py: the published record 101 could not be read back —"
+            "::error::mint-doi: the published record 101 could not be read back —"
             " the"
             " licences of DOI 10.5281/zenodo.101 are unverified"
         ) in run.stdout
@@ -919,7 +915,7 @@ class TestRefusals:
         """WITH refuses, naming the operator."""
         self.assert_refused(
             run_helper("GPL-2.0-only WITH Classpath-exception-2.0"),
-            "::error::mint_doi.py: CITATION.cff license 'GPL-2.0-only WITH"
+            "::error::mint-doi: CITATION.cff license 'GPL-2.0-only WITH"
             " Classpath-exception-2.0'"
             " joins ids with 'WITH'",
         )
@@ -942,7 +938,7 @@ class TestRefusals:
         run = run_helper("MIT OR Not-A-Licence")
         self.assert_refused(
             run,
-            "::error::mint_doi.py: licence id 'not-a-licence' (from CITATION.cff"
+            "::error::mint-doi: licence id 'not-a-licence' (from CITATION.cff"
             " 'MIT OR Not-A-Licence') is not in Zenodo's licence vocabulary",
         )
         assert len(run.made("GET", "/api/vocabularies/licenses/")) == 2
@@ -1399,7 +1395,7 @@ class TestLostPublishResponse:
         run = canon_run(canon_zenodo(publish="fail"))
         assert run.returncode == 1, run.stdout
         assert (
-            "::error::mint_doi.py: publish failed and the concept's latest published"
+            "::error::mint-doi: publish failed and the concept's latest published"
             " version"
             " is not 1.68.5"
         ) in run.stdout
@@ -1477,7 +1473,7 @@ class TestFirstMintGuards:
         run = run_helper("0BSD", zenodo=z, version="1.68.5", repo=CANON_REPO)
         assert run.returncode == 1, run.stdout
         assert (
-            "::error::mint_doi.py: a submitted deposition already bears this title but"
+            "::error::mint-doi: a submitted deposition already bears this title but"
             " CITATION.cff records no concept DOI — record it under identifiers:"
             " before minting again"
         ) in run.stdout
@@ -1497,7 +1493,7 @@ class TestFirstMintGuards:
         )
         assert run.returncode == 1, run.stdout
         assert (
-            "::error::mint_doi.py: a submitted deposition already bears this title"
+            "::error::mint-doi: a submitted deposition already bears this title"
             in run.stdout
         )
         assert run.writes() == NOTHING
@@ -1525,7 +1521,7 @@ class TestFirstMintGuards:
         run = run_helper("0BSD", zenodo=z, version="1.68.5", repo=CANON_REPO)
         assert run.returncode == 1, run.stdout
         assert (
-            "::error::mint_doi.py: a submitted deposition already bears this title"
+            "::error::mint-doi: a submitted deposition already bears this title"
             in run.stdout
         )
         assert len(run.made("GET", f"{DEP}?q=title")) == 2
@@ -1539,7 +1535,7 @@ class TestFirstMintGuards:
         run = run_helper("0BSD", zenodo=z, version="1.68.5", repo=CANON_REPO)
         assert run.returncode == 1, run.stdout
         assert (
-            "::error::mint_doi.py: the deposition listing"
+            "::error::mint-doi: the deposition listing"
             " (q=title:%2522monumental-archive%252F.github%2522) could not be"
             f" read to its end ({mint_doi.LISTING_PAGE} entries read) — a first mint"
             " is never checked against part of it"
@@ -1551,7 +1547,8 @@ class TestFirstMintGuards:
         (draft,) = captured_list("drafts-during")
         z = first_mint_zenodo([])
         z.title_pages = [[draft] * mint_doi.LISTING_PAGE] * 3
-        with mock.patch.object(mint_doi, "LISTING_MAX_PAGES", 3):
+        with pytest.MonkeyPatch.context() as patched:
+            patched.setattr(mint_doi, "LISTING_MAX_PAGES", 3)
             run = run_helper("0BSD", zenodo=z, version="1.68.5", repo=CANON_REPO)
         assert run.returncode == 1, run.stdout
         assert (
@@ -1568,7 +1565,7 @@ class TestFirstMintGuards:
         run = run_helper("0BSD", zenodo=z)
         assert run.returncode == 1, run.stdout
         assert (
-            "::error::mint_doi.py: Zenodo's licence vocabulary answered HTTP 500 for"
+            "::error::mint-doi: Zenodo's licence vocabulary answered HTTP 500 for"
             " '0bsd'"
             " — not minting on an unchecked licence"
         ) in run.stdout
@@ -1585,7 +1582,7 @@ class TestFirstMintGuards:
         run = run_helper("0BSD", cff=cff)
         assert run.returncode == 1, run.stdout
         assert (
-            "::error::mint_doi.py: CITATION.cff carries no authors — the record"
+            "::error::mint-doi: CITATION.cff carries no authors — the record"
             " credits people,"
             " never an account name"
         ) in run.stdout
@@ -1596,7 +1593,7 @@ class TestFirstMintGuards:
         run = run_helper("0BSD", cff="")
         assert run.returncode == 1, run.stdout
         assert (
-            "::error::mint_doi.py: no CITATION.cff at v1.3.5 — a DOI-minting repo"
+            "::error::mint-doi: no CITATION.cff at v1.3.5 — a DOI-minting repo"
             " derives one"
             " from REUSE.toml (fix:citation; lint:citation gates this upstream)"
         ) in run.stdout
@@ -1612,7 +1609,7 @@ class TestFirstMintGuards:
         run = run_helper("0BSD", cff_status=1)
         assert run.returncode == 1, run.stdout
         assert (
-            "::error::mint_doi.py: no CITATION.cff at v1.3.5 — a DOI-minting repo"
+            "::error::mint-doi: no CITATION.cff at v1.3.5 — a DOI-minting repo"
             " derives one"
             " from REUSE.toml (fix:citation; lint:citation gates this upstream)"
         ) in run.stdout
@@ -1623,7 +1620,7 @@ class TestFirstMintGuards:
         run = run_helper("0BSD", concept="10.5281/zenodo.abc")
         assert run.returncode == 1, run.stdout
         assert (
-            "::error::mint_doi.py: CITATION.cff concept DOI '10.5281/zenodo.abc' does"
+            "::error::mint-doi: CITATION.cff concept DOI '10.5281/zenodo.abc' does"
             " not end"
             " in a Zenodo record id"
         ) in run.stdout
@@ -1634,7 +1631,7 @@ class TestFirstMintGuards:
         run = run_helper("0BSD", concept="10.5281/zenodo.555")
         assert run.returncode == 1, run.stdout
         assert (
-            "::error::mint_doi.py: the concept record 555 did not resolve to a latest"
+            "::error::mint-doi: the concept record 555 did not resolve to a latest"
             " published version"
         ) in run.stdout
         assert run.writes() == NOTHING
@@ -1741,9 +1738,10 @@ class TestAnswerShapes:
         url = "https://zenodo.invalid/api/records/1"
         z = mint_doi.Zenodo("https://zenodo.invalid", "t", "a")
         with (
-            mock.patch.object(z._public, "open", return_value=None),  # ruff: ignore[private-member-access] - the opener the row stubs
+            pytest.MonkeyPatch.context() as patched,
             pytest.raises(mint_doi.RefusedError) as caught,
         ):
+            patched.setattr(z._public, "open", hermetic.returning(None))
             z.public(url)
         assert f"{url} answered NoneType, not an HTTP response" == str(caught.value)
 
@@ -1819,7 +1817,7 @@ class TestAnswerShapes:
         run = canon_run(canon_zenodo(newversion_body={"links": {}}))
         assert run.returncode == 1, run.stdout
         assert (
-            "::error::mint_doi.py: the newversion answer's links.latest_draft is not"
+            "::error::mint-doi: the newversion answer's links.latest_draft is not"
             " a string"
         ) in run.stdout
 
@@ -1828,7 +1826,7 @@ class TestAnswerShapes:
         run = canon_run(canon_zenodo(drafts=[1]))
         assert run.returncode == 1, run.stdout
         assert (
-            "::error::mint_doi.py: an entry of the draft listing is not an object"
+            "::error::mint-doi: an entry of the draft listing is not an object"
             in run.stdout
         )
 
@@ -1839,7 +1837,7 @@ class TestAnswerShapes:
         )
         assert run.returncode == 1, run.stdout
         assert (
-            "::error::mint_doi.py: an entry of the deposition listing (q=title:"
+            "::error::mint-doi: an entry of the deposition listing (q=title:"
             in run.stdout
         )
         assert ") is not an object" in run.stdout

@@ -25,8 +25,8 @@ the ordinary suite (`mise run test`) never imports this file.
 
 import tempfile
 from pathlib import Path
-from unittest import mock
 
+import pytest
 from hypothesis import example
 from hypothesis import strategies as st
 
@@ -198,7 +198,8 @@ class TestRewrite:
         with tempfile.TemporaryDirectory() as scratch:
             path = Path(scratch) / "ci.yml"
             path.write_text(text, encoding="utf-8")
-            with mock.patch.object(es, "shfmt", formatter(change=how == "changed")):
+            with pytest.MonkeyPatch.context() as patched:
+                patched.setattr(es, "shfmt", formatter(change=how == "changed"))
                 count = es.rewrite(path)
             after = path.read_text(encoding="utf-8")
             reread = [r.text for r in es.runs(path)]

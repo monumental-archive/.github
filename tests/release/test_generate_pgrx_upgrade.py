@@ -56,7 +56,6 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import ClassVar, NamedTuple, override
 
-
 import pytest
 
 from belt import decoded

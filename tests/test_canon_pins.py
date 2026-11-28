@@ -57,9 +57,9 @@ BRANCH = "(lefthook canon remote must ref a v* tag, not a branch)"
 UNTAGGED = "(preset reference must carry #vX.Y.Z)"
 
 
-def same[T](case: unittest.TestCase, got: T, want: T, msg: str = "") -> None:
+def same[T](got: T, want: T, msg: str = "") -> None:
     """Assert two values equal, `want` typed by `got` (mypy.ini: no Any)."""
-    case.assertEqual(got, want, msg or None)
+    assert got == want, msg or None
 
 
 def body() -> str:
@@ -171,9 +171,7 @@ class TestPlanted:
 
         """
         args = list(argv)
-        return hermetic.call(
-            lambda: canon_pins.main(args), env=self.env, cwd=self.tree
-        )
+        return hermetic.call(lambda: canon_pins.main(args), env=self.env, cwd=self.tree)
 
     def surfaces(
         self,
@@ -215,8 +213,8 @@ class TestTask(TestPlanted):
         """No reference anywhere: the task says it skipped."""
         self.plant(".github/workflows/ci.yml", steps("      - run: true\n"))
         done = self.task()
-        same(self, done.returncode, 0, done.stderr)
-        same(self, done.stdout.splitlines(), SKIPPED)
+        same(done.returncode, 0, done.stderr)
+        same(done.stdout.splitlines(), SKIPPED)
 
     def test_every_surface_through_the_task(self) -> None:
         """Each surface's offender, in surface order, one finding."""
@@ -227,14 +225,14 @@ class TestTask(TestPlanted):
         hooks = self.plant("lefthook.yml", hook("main"))
         preset = self.plant("renovate.json", f'{{"extends": ["github>{CANON}"]}}\n')
         done = self.task()
-        same(self, done.returncode, canon_pins.EXIT_RED)
+        same(done.returncode, canon_pins.EXIT_RED)
         expected = red(
             f"{stub}{UNPINNED}",
             f"{hooks}{BRANCH}",
             f"{preset}{UNTAGGED}",
             f"{flow}(1 canon checkout(s) — use $/.github/actions/canon)",
         )
-        same(self, done.stderr.splitlines(), expected)
+        same(done.stderr.splitlines(), expected)
 
     def test_untracked_files_are_never_read(self) -> None:
         """A tracked versioned pin, and offenders git does not track: clean."""
@@ -242,8 +240,8 @@ class TestTask(TestPlanted):
         self.plant("lefthook.yml", hook("main"), track=False)
         self.plant(".github/workflows/x.yml", steps(checkout()), track=False)
         done = self.task()
-        same(self, done.returncode, 0, done.stderr)
-        same(self, done.stdout.splitlines(), ok(1))
+        same(done.returncode, 0, done.stderr)
+        same(done.stdout.splitlines(), ok(1))
 
 
 class TestPins(TestPlanted):
@@ -254,8 +252,8 @@ class TestPins(TestPlanted):
         tab = f"  - uses:\t{CANON}/x@{SHA} # v10.0.12\n"
         rel = self.plant("a.yml", steps(PIN, PIN, tab))
         done = self.surfaces(yml=(rel,))
-        same(self, done.returncode, 0, done.stderr)
-        same(self, done.stdout.splitlines(), ok(3))
+        same(done.returncode, 0, done.stderr)
+        same(done.stdout.splitlines(), ok(3))
 
     def test_unversioned_pins_are_each_named(self) -> None:
         """No comment, a short SHA, a branch, a pre-release, a v-less tag."""
@@ -268,8 +266,8 @@ class TestPins(TestPlanted):
         )
         rel = self.plant("a.yml", steps(*lines))
         done = self.surfaces(yml=(rel,))
-        same(self, done.returncode, canon_pins.EXIT_RED)
-        same(self, done.stderr.splitlines(), red(*[f"{rel}{UNPINNED}"] * len(lines)))
+        same(done.returncode, canon_pins.EXIT_RED)
+        same(done.stderr.splitlines(), red(*[f"{rel}{UNPINNED}"] * len(lines)))
 
     def test_comments_and_other_owners_are_not_pins(self) -> None:
         """A commented line, a `#` before uses:, another owner: not counted."""
@@ -281,8 +279,8 @@ class TestPins(TestPlanted):
         )
         rel = self.plant("a.yml", steps(*lines))
         done = self.surfaces(yml=(rel,))
-        same(self, done.returncode, 0, done.stderr)
-        same(self, done.stdout.splitlines(), SKIPPED)
+        same(done.returncode, 0, done.stderr)
+        same(done.stdout.splitlines(), SKIPPED)
 
 
 class TestRemotes(TestPlanted):
@@ -292,23 +290,23 @@ class TestRemotes(TestPlanted):
         """A remote at `ref: v…`: one reference, clean."""
         rel = self.plant("lefthook.yml", hook("v1.76.0"))
         done = self.surfaces(hooks=(rel,))
-        same(self, done.returncode, 0, done.stderr)
-        same(self, done.stdout.splitlines(), ok(1))
+        same(done.returncode, 0, done.stderr)
+        same(done.stdout.splitlines(), ok(1))
 
     def test_lefthook_on_a_branch_is_red(self) -> None:
         """A remote at a branch, or with no ref at all: named."""
         one = self.plant("lefthook.yml", hook("main"))
         two = self.plant("sub/lefthook.yml", f"# github.com/{CANON}\n")
         done = self.surfaces(hooks=(one, two))
-        same(self, done.returncode, canon_pins.EXIT_RED)
-        same(self, done.stderr.splitlines(), red(f"{one}{BRANCH}", f"{two}{BRANCH}"))
+        same(done.returncode, canon_pins.EXIT_RED)
+        same(done.stderr.splitlines(), red(f"{one}{BRANCH}", f"{two}{BRANCH}"))
 
     def test_lefthook_without_the_canon_is_not_counted(self) -> None:
         """A lefthook config that names no canon remote: nothing."""
         rel = self.plant("lefthook.yml", "pre-commit:\n  jobs: []\n")
         done = self.surfaces(hooks=(rel,))
-        same(self, done.returncode, 0, done.stderr)
-        same(self, done.stdout.splitlines(), SKIPPED)
+        same(done.returncode, 0, done.stderr)
+        same(done.stdout.splitlines(), SKIPPED)
 
     def test_presets(self) -> None:
         """Tagged: clean; untagged: named; no canon: not counted."""
@@ -316,11 +314,11 @@ class TestRemotes(TestPlanted):
         bare = self.plant("a/renovate.json", f'["github>{CANON}:default"]\n')
         other = self.plant(".github/renovate.json", '["github>other/x"]\n')
         done = self.surfaces(presets=(tagged, other))
-        same(self, done.returncode, 0, done.stderr)
-        same(self, done.stdout.splitlines(), ok(1))
+        same(done.returncode, 0, done.stderr)
+        same(done.stdout.splitlines(), ok(1))
         done = self.surfaces(presets=(tagged, bare))
-        same(self, done.returncode, canon_pins.EXIT_RED)
-        same(self, done.stderr.splitlines(), red(f"{bare}{UNTAGGED}"))
+        same(done.returncode, canon_pins.EXIT_RED)
+        same(done.stderr.splitlines(), red(f"{bare}{UNTAGGED}"))
 
 
 class TestCheckouts(TestPlanted):
@@ -330,9 +328,9 @@ class TestCheckouts(TestPlanted):
         """Two checkouts, one with trailing blanks: counted twice, named once."""
         rel = self.plant(".github/workflows/a.yml", steps(checkout(), checkout(" \t")))
         done = self.surfaces(flows=(rel,))
-        same(self, done.returncode, canon_pins.EXIT_RED)
+        same(done.returncode, canon_pins.EXIT_RED)
         named = f"{rel}(2 canon checkout(s) — use $/.github/actions/canon)"
-        same(self, done.stderr.splitlines(), red(named))
+        same(done.stderr.splitlines(), red(named))
 
     def test_what_is_not_a_checkout(self) -> None:
         """Commented, followed by more text, or another repository: nothing."""
@@ -344,8 +342,8 @@ class TestCheckouts(TestPlanted):
         )
         rel = self.plant(".github/workflows/a.yml", steps(*lines))
         done = self.surfaces(flows=(rel,))
-        same(self, done.returncode, 0, done.stderr)
-        same(self, done.stdout.splitlines(), SKIPPED)
+        same(done.returncode, 0, done.stderr)
+        same(done.stdout.splitlines(), SKIPPED)
 
 
 class TestCalls(TestPlanted):
@@ -358,22 +356,22 @@ class TestCalls(TestPlanted):
         two = self.plant("a.yml", bad)
         hooks = self.plant("lefthook.yml", hook("main"))
         done = self.surfaces(yml=(one, two), hooks=(hooks,))
-        same(self, done.returncode, canon_pins.EXIT_RED)
+        same(done.returncode, canon_pins.EXIT_RED)
         expected = red(f"{one}{UNPINNED}", f"{two}{UNPINNED}", f"{hooks}{BRANCH}")
-        same(self, done.stderr.splitlines(), expected)
+        same(done.stderr.splitlines(), expected)
 
     def test_not_utf8_is_judged_on_its_bytes(self) -> None:
         """A file that is not UTF-8 is read as grep reads it: its pin is named."""
         text = f"x: \xff\n  - uses: {CANON}/x@main\n"
         rel = self.plant("a.yml", text.encode("latin-1"))
         done = self.surfaces(yml=(rel,))
-        same(self, done.returncode, canon_pins.EXIT_RED)
-        same(self, done.stderr.splitlines(), red(f"{rel}{UNPINNED}"))
+        same(done.returncode, canon_pins.EXIT_RED)
+        same(done.stderr.splitlines(), red(f"{rel}{UNPINNED}"))
 
     def test_a_missing_file_is_an_error(self) -> None:
         """A named file that is not there is refused by name, exit 2."""
         done = self.surfaces(presets=("renovate.json",))
-        same(self, done.returncode, canon_pins.EXIT_ERROR)
+        same(done.returncode, canon_pins.EXIT_ERROR)
         assert done.stderr.startswith(f"{TASK}: renovate.json: cannot be read:"), (
             done.stderr
         )
@@ -391,5 +389,5 @@ class TestCalls(TestPlanted):
         for argv in calls:
             with self.subTest(argv=argv):
                 done = self.helper(*argv)
-                same(self, done.returncode, canon_pins.EXIT_ERROR)
-                same(self, done.stderr.splitlines(), [usage])
+                same(done.returncode, canon_pins.EXIT_ERROR)
+                same(done.stderr.splitlines(), [usage])

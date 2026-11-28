@@ -30,7 +30,6 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from unittest import mock
 
 import pytest
 
@@ -38,7 +37,9 @@ from belt import decoded, rust_lint, rust_workspaces
 from tests import hermetic
 
 BELT = hermetic.MISE
-METADATA = (hermetic.CANON / "tests" / "release" / "testdata") / "edtf-cargo-metadata.json"
+METADATA = (
+    hermetic.CANON / "tests" / "release" / "testdata"
+) / "edtf-cargo-metadata.json"
 BASH = hermetic.tool("bash")
 GIT = hermetic.tool("git")
 MEMBERS = [
@@ -132,15 +133,15 @@ def body() -> str:
 
 
 def assert_every_member_linted(
-    case: unittest.TestCase, done: subprocess.CompletedProcess[str], asked: list[str]
+    done: subprocess.CompletedProcess[str], asked: list[str]
 ) -> None:
     """Assert clippy reached every member and named the red one."""
-    case.assertEqual(101, done.returncode, done.stdout + done.stderr)
+    assert 101 == done.returncode, done.stdout + done.stderr
     want = [f"{m}@1.3.3" for m in MEMBERS]
-    case.assertEqual(want, asked)
+    assert want == asked
     linted = f"lint:rust: Cargo.toml: 6 crate(s) linted: {' '.join(MEMBERS)}\n"
-    case.assertIn(linted, done.stdout)
-    case.assertIn("lint:rust: red: edtf-core (Cargo.toml)\n", done.stderr)
+    assert linted in done.stdout
+    assert "lint:rust: red: edtf-core (Cargo.toml)\n" in done.stderr
 
 
 class TestEveryMemberIsLinted:
@@ -196,10 +197,10 @@ class TestEveryMemberIsLinted:
         return done, asked
 
     def assert_every_member_linted(
-        self, done: subprocess.CompletedProcess[str], asked: list[str]
+        done: subprocess.CompletedProcess[str], asked: list[str]
     ) -> None:
         """Clippy reached every member and named the red one."""
-        assert_every_member_linted(self, done, asked)
+        assert_every_member_linted(done, asked)
 
     def test_a_red_first_member_leaves_the_rest_linted(self) -> None:
         """All six members are asked; the red one is named; cargo's 101 is kept."""
@@ -270,7 +271,7 @@ class TestEverySuppressionIsAnExpect:
         """Assert the check lets it through and clippy reaches every member."""
         done, asked = self.lint(planted=planted)
         assert UNSEEN not in done.stderr
-        assert_every_member_linted(self, done, asked)
+        assert_every_member_linted(done, asked)
 
     def test_an_inner_clippy_allow_is_refused(self) -> None:
         """`#![allow(clippy::unwrap_used, reason = "x")]`: red, by line."""
@@ -646,7 +647,8 @@ class TestPlanted:
         """
         # The derivation resolves cargo when it is imported; here, the
         # stub on the row's PATH is the cargo it asks.
-        with mock.patch.object(rust_workspaces, "CARGO", str(self.bins / "cargo")):
+        with pytest.MonkeyPatch.context() as patched:
+            patched.setattr(rust_workspaces, "CARGO", str(self.bins / "cargo"))
             return hermetic.call(
                 lambda: rust_lint.main(list(argv)),
                 env=self.env | {"ORG_BELT_DIR": str(self.belt)} | stub,
@@ -1215,7 +1217,8 @@ class TestEveryWorkspace(TestPlanted):
             encoding="utf-8",
         )
         git.chmod(0o755)
-        with mock.patch.object(rust_workspaces, "GIT", str(git)):
+        with pytest.MonkeyPatch.context() as patched:
+            patched.setattr(rust_workspaces, "GIT", str(git))
             done = self.call("lint")
         self.assert_finding(done, 1, "git could not name the tree", "fatal: planted")
         assert self.asked("clippy") == NOT_ASKED

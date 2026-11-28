@@ -17,19 +17,16 @@ as those runs read it, so a Renovate roll of the live file moves nothing
 here.
 """
 
-from tests import hermetic
-import contextlib
 import io
-import os
 import sys
 import tempfile
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
-from unittest import mock
 
 import pytest
 
 from belt.release import matrix
+from tests import hermetic
 
 TESTDATA = Path(__file__).resolve().parent / "testdata" / "matrix"
 MAPPING = str(TESTDATA / "pgrx-base-images.toml")
@@ -40,22 +37,20 @@ NO_IMAGE = "has no digest-pinned base image in docker/pgrx-base-images.toml"
 GO_HINT = "canon targets only (<goos>-<goarch>)"
 
 
-_NAMED = contextlib.ExitStack()
+@pytest.fixture
+def _outside_mise(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Name the helper by its command, as a run outside mise does (#1934).
 
-
-def setUpModule() -> None:
-    """Name the helper by its file, as a run outside mise does (#1934).
-
-    An in-process call reads argv, whatever task runs this suite.
+    An in-process call reads argv, whatever task runs this suite; an
+    empty ORG_FINDINGS records nothing (unset on a runner records to the
+    job's file, #1976).
     """
-    _NAMED.enter_context(mock.patch.object(sys, "argv", ["matrix.py"]))
-    for key in ("MISE_TASK_NAME", "ORG_FINDINGS"):
-        if key in os.environ:
-            _NAMED.callback(os.environ.__setitem__, key, os.environ.pop(key))
-    # Empty, not unset: unset on a runner records to the job's file (#1976).
-    os.environ["ORG_FINDINGS"] = ""
-    _NAMED.callback(os.environ.pop, "ORG_FINDINGS", None)
-    unittest.addModuleCleanup(_NAMED.close)
+    monkeypatch.setattr(sys, "argv", ["matrix"])
+    monkeypatch.delenv("MISE_TASK_NAME", raising=False)
+    monkeypatch.setenv("ORG_FINDINGS", "")
+
+
+pytestmark = pytest.mark.usefixtures("_outside_mise")
 
 
 def run(*argv: str) -> tuple[int, str, str]:
@@ -189,21 +184,21 @@ class TestTargets(TestRows):
                 with self.subTest(cls=cls, request=request):
                     self.refused(
                         ("targets", cls, request),
-                        f"::error::matrix.py: no targets requested — {NOTHING}",
+                        f"::error::matrix: no targets requested — {NOTHING}",
                     )
 
     def test_an_unknown_go_target_names_the_go_form(self) -> None:
         """The Go hint names the target form."""
         self.refused(
             ("targets", "go-binary", "linux-amd64,plan9-386"),
-            f"::error::matrix.py: unknown target plan9-386; {GO_HINT}",
+            f"::error::matrix: unknown target plan9-386; {GO_HINT}",
         )
 
     def test_an_unknown_rust_target_is_refused(self) -> None:
         """The Rust hint is bare."""
         self.refused(
             ("targets", "rust-binary", "x86_64-pc-windows-msvc"),
-            "::error::matrix.py: unknown target x86_64-pc-windows-msvc; canon targets"
+            "::error::matrix: unknown target x86_64-pc-windows-msvc; canon targets"
             " only",
         )
 
@@ -211,42 +206,42 @@ class TestTargets(TestRows):
         """The tables are per class: a Go target is no Rust target."""
         self.refused(
             ("targets", "rust-binary", "linux-amd64"),
-            "::error::matrix.py: unknown target linux-amd64; canon targets only",
+            "::error::matrix: unknown target linux-amd64; canon targets only",
         )
 
     @pytest.mark.parametrize(
-        "request", (",linux-amd64", "linux-amd64,,darwin-arm64", ",")
+        "asked", (",linux-amd64", "linux-amd64,,darwin-arm64", ",")
     )
-    def test_an_empty_field_is_an_unknown_target(self, request: object) -> None:
+    def test_an_empty_field_is_an_unknown_target(self, asked: object) -> None:
         """A leading or inner empty field is kept, and refused."""
         self.refused(
-            ("targets", "go-binary", request),
-            f"::error::matrix.py: unknown target ; {GO_HINT}",
+            ("targets", "go-binary", asked),
+            f"::error::matrix: unknown target ; {GO_HINT}",
         )
 
     @pytest.mark.parametrize(
-        "request", ("linux-amd64,linux-amd64", "linux-amd64, linux-amd64,")
+        "asked", ("linux-amd64,linux-amd64", "linux-amd64, linux-amd64,")
     )
-    def test_a_duplicate_is_refused(self, request: object) -> None:
+    def test_a_duplicate_is_refused(self, asked: object) -> None:
         """The same target twice, spaced or not."""
         self.refused(
-            ("targets", "go-binary", request),
-            "::error::matrix.py: duplicate target requested",
+            ("targets", "go-binary", asked),
+            "::error::matrix: duplicate target requested",
         )
 
     def test_an_unknown_target_is_named_before_a_duplicate(self) -> None:
         """The shell checked every target before counting duplicates."""
         self.refused(
             ("targets", "go-binary", "linux-amd64,linux-amd64,plan9-386"),
-            f"::error::matrix.py: unknown target plan9-386; {GO_HINT}",
+            f"::error::matrix: unknown target plan9-386; {GO_HINT}",
         )
 
     @pytest.mark.parametrize(
-        "request", (" linux-amd64 ", "linux-amd64,", "linux-amd64\ndarwin-arm64")
+        "asked", (" linux-amd64 ", "linux-amd64,", "linux-amd64\ndarwin-arm64")
     )
-    def test_the_request_splits_as_the_shell_split_it(self, request: object) -> None:
+    def test_the_request_splits_as_the_shell_split_it(self, asked: object) -> None:
         """Spaces removed, one trailing comma dropped, the first line only."""
-        code, out, _ = run("targets", "go-binary", request)
+        code, out, _ = run("targets", "go-binary", asked)
         assert code == 0
         assert 'expected=["linux-amd64"]\n' in out
 
@@ -260,11 +255,11 @@ class TestPgrxExtension(TestRows):
     """pgrx-extension: the build-pgrx-extension.yml plan step."""
 
     @pytest.mark.parametrize("asked", ("", " "))
-    def test_an_empty_request_is_refused(self, request: object) -> None:
+    def test_an_empty_request_is_refused(self, asked: object) -> None:
         """Nothing requested."""
         self.refused(
-            ("pgrx-extension", MAPPING, request),
-            f"::error::matrix.py: no PG majors requested — {NOTHING}",
+            ("pgrx-extension", MAPPING, asked),
+            f"::error::matrix: no PG majors requested — {NOTHING}",
         )
 
     @pytest.mark.parametrize("major", ("13", "19"))
@@ -272,7 +267,7 @@ class TestPgrxExtension(TestRows):
         """A major the mapping does not carry, numeric or not."""
         self.refused(
             ("pgrx-extension", MAPPING, f"14,{major}"),
-            f"::error::matrix.py: pg{major} {NO_IMAGE}",
+            f"::error::matrix: pg{major} {NO_IMAGE}",
         )
 
     @pytest.mark.parametrize("major", ("x", "pg14", ""))
@@ -280,7 +275,7 @@ class TestPgrxExtension(TestRows):
         """A field that is not a number is named as such, not as unpinned."""
         self.refused(
             ("pgrx-extension", MAPPING, f"{major},14"),
-            f"::error::matrix.py: {major} is not a PG major",
+            f"::error::matrix: {major} is not a PG major",
         )
 
     @pytest.mark.parametrize(
@@ -296,21 +291,21 @@ class TestPgrxExtension(TestRows):
         """Both a build and a smoke image, or no plan."""
         self.refused(
             ("pgrx-extension", self.mapping(text), "14"),
-            f"::error::matrix.py: pg14 {NO_IMAGE}",
+            f"::error::matrix: pg14 {NO_IMAGE}",
         )
 
     def test_a_duplicate_is_refused(self) -> None:
         """The same major twice."""
         self.refused(
             ("pgrx-extension", MAPPING, "16,17,16"),
-            "::error::matrix.py: duplicate PG major requested",
+            "::error::matrix: duplicate PG major requested",
         )
 
     def test_a_duplicate_is_named_before_an_unpinned_major(self) -> None:
         """The request's own rules run before the mapping's pins (#1531)."""
         self.refused(
             ("pgrx-extension", MAPPING, "16,13,16"),
-            "::error::matrix.py: duplicate PG major requested",
+            "::error::matrix: duplicate PG major requested",
         )
 
     def test_each_major_builds_on_both_arches(self) -> None:
@@ -372,7 +367,7 @@ class TestMappingShape(TestRows):
         """Named as not TOML, with the parser's reason."""
         code, out, err = run("pgrx-extension", self.mapping("[build\n"), "16")
         assert (code, out) == (1, "")
-        assert err.startswith(f"::error::matrix.py: {self.NAME} is not TOML: "), err
+        assert err.startswith(f"::error::matrix: {self.NAME} is not TOML: "), err
 
     def test_each_wrong_shape_is_refused_by_name(self) -> None:
         """A role or the floor that is not a table, a pin that is not a string."""
@@ -389,7 +384,7 @@ class TestMappingShape(TestRows):
                 with self.subTest(text=text, mode=argv[0]):
                     self.refused(
                         (argv[0], self.mapping(text), *argv[1:]),
-                        f"::error::matrix.py: {said}",
+                        f"::error::matrix: {said}",
                     )
 
 
@@ -397,11 +392,11 @@ class TestPgrxImages(TestRows):
     """pgrx-images: the build-pgrx-images.yml plan step."""
 
     @pytest.mark.parametrize("asked", ("", "  "))
-    def test_an_empty_request_is_refused(self, request: object) -> None:
+    def test_an_empty_request_is_refused(self, asked: object) -> None:
         """Nothing requested."""
         self.refused(
-            ("pgrx-images", request),
-            f"::error::matrix.py: no PG majors requested — {NOTHING}",
+            ("pgrx-images", asked),
+            f"::error::matrix: no PG majors requested — {NOTHING}",
         )
 
     @pytest.mark.parametrize("major", ("x", "1a", "pg14", "-1", "1.5", "٣"))
@@ -409,18 +404,18 @@ class TestPgrxImages(TestRows):
         """ASCII digits only, as `^[0-9]+$` held it."""
         self.refused(
             ("pgrx-images", f"14,{major}"),
-            f"::error::matrix.py: {major} is not a PG major",
+            f"::error::matrix: {major} is not a PG major",
         )
 
     def test_an_empty_field_is_not_a_major(self) -> None:
         """A leading empty field is kept, and refused."""
-        self.refused(("pgrx-images", ",14"), "::error::matrix.py:  is not a PG major")
+        self.refused(("pgrx-images", ",14"), "::error::matrix:  is not a PG major")
 
     def test_a_duplicate_is_refused(self) -> None:
         """The same major twice would build and push one image twice (#1531)."""
         self.refused(
             ("pgrx-images", "14,14"),
-            "::error::matrix.py: duplicate PG major requested",
+            "::error::matrix: duplicate PG major requested",
         )
 
 
@@ -461,7 +456,7 @@ class TestBaseImages(TestRows):
         """The heredoc's SystemExit wording, unprefixed as it always was."""
         self.refused(
             ("base-images", self.mapping(f'[smoke]\n"14" = "{ref}"\n')),
-            f"matrix.py: smoke.14: no digest in {ref!r}",
+            f"matrix: smoke.14: no digest in {ref!r}",
         )
 
     @pytest.mark.parametrize(
@@ -471,7 +466,7 @@ class TestBaseImages(TestRows):
         """A mapping that pins nothing approves nothing."""
         self.refused(
             ("base-images", self.mapping(text)),
-            "::error::matrix.py: no pinned base images found — an empty"
+            "::error::matrix: no pinned base images found — an empty"
             " approval"
             " set approves nothing",
         )
@@ -518,4 +513,4 @@ class TestCommandLine:
         """A missing argument or an unknown class prints the usage."""
         code, out, err = run(*argv)
         assert (code, out) == (2, "")
-        assert err.startswith("matrix.py: usage: matrix.py targets")
+        assert err.startswith("matrix: usage: matrix.py targets")

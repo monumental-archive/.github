@@ -4,14 +4,12 @@ Draft, unpushed: the rows #1667's Done-when names for `measured` itself.
 """
 
 import os
+import re
 import shutil
 import signal
 import subprocess
-import sys
 import tempfile
 from pathlib import Path
-
-import re
 
 import pytest
 

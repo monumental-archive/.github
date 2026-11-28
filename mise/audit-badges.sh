@@ -55,6 +55,7 @@ command -v gh > /dev/null || {
 # legs agree a shield is.
 # shellcheck source=mise/identity.sh
 . "${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: lefthook run post-checkout)}/identity.sh"
+: "${ORG_BELT_ROOT:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: lefthook run post-checkout)}"
 # ONE way to ask an issuer (#1161). Every leg that used `curl -sf`
 # folded three different answers into one: the issuer said no, the
 # issuer refused to talk, the issuer was down. All three were reported

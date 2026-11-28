@@ -53,10 +53,8 @@ Run through the gate as `mise run test`, which `ci` collects.
 """
 
 import subprocess
-import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
-
 
 import pytest
 

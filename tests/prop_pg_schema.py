@@ -19,6 +19,7 @@ import io
 import tempfile
 from pathlib import Path
 
+import pytest
 from hypothesis import example
 from hypothesis import strategies as st
 
@@ -104,7 +105,11 @@ class TestRefusal:
         with tempfile.TemporaryDirectory() as scratch:
             path = Path(scratch) / "raw.sql"
             path.write_bytes(data)
-            with hermetic.as_task("lint:pg-schema"), contextlib.redirect_stderr(err):
+            with (
+                pytest.MonkeyPatch.context() as patched,
+                contextlib.redirect_stderr(err),
+            ):
+                hermetic.name_task(patched, "lint:pg-schema")
                 got = ps.surface(str(path))
         if got is None:
             assert "lint:pg-schema:" in err.getvalue()

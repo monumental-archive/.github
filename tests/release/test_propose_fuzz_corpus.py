@@ -21,9 +21,7 @@ import base64
 import os
 import shutil
 import subprocess
-import sys
 from pathlib import Path
-
 
 import pytest
 
@@ -107,9 +105,9 @@ exit 1
 """
 
 
-def same(case: unittest.TestCase, want: list[str], got: list[str]) -> None:
+def same(want: list[str], got: list[str]) -> None:
     """Assert two lists of strings are equal, typed so a literal is too."""
-    case.assertEqual(want, got)
+    assert want == got
 
 
 class TestForge:
@@ -212,7 +210,7 @@ class TestRefusals(TestForge):
             "propose-fuzz-corpus.sh: the artifact is refused whole; nothing is"
             " committed\n"
         )
-        same(self, [], self.calls())
+        same([], self.calls())
 
     def test_a_symbolic_link_is_refused_by_name(self) -> None:
         """A link at a corpus path is refused, and nothing is committed."""
@@ -225,7 +223,7 @@ class TestRefusals(TestForge):
             in result.stderr
         )
         assert "nothing is committed" in result.stderr
-        same(self, [], self.calls())
+        same([], self.calls())
 
     def test_a_dot_dot_segment_is_refused_by_name(self) -> None:
         """No filesystem entry is named `..`, so the reader is held directly."""
@@ -264,7 +262,7 @@ class TestRefusals(TestForge):
             result.stderr
             == "propose-fuzz-corpus.sh: the artifact holds no file; nothing to propose\n"
         )
-        same(self, [], self.calls())
+        same([], self.calls())
 
 
 class TestProposal(TestForge):
@@ -279,7 +277,6 @@ class TestProposal(TestForge):
         result = self.run_script("propose")
         assert result.returncode == 0, result.stderr
         same(
-            self,
             [
                 f"GET repos/{REPO}/git/ref/heads/fuzz-corpus",
                 f"GET repos/{REPO}/git/ref/heads/main",
@@ -309,7 +306,6 @@ class TestProposal(TestForge):
             for entry in decoded.as_array(changes["additions"], "additions")
         ]
         same(
-            self,
             [
                 "fuzz/corpus/parse_marker/abc",
                 "internal/policy/testdata/fuzz/FuzzLoad/crash-f00d",
@@ -317,7 +313,6 @@ class TestProposal(TestForge):
             [decoded.as_str(entry["path"], "path") for entry in added],
         )
         same(
-            self,
             [
                 base64.b64encode(b"raise").decode(),
                 base64.b64encode(b"go test fuzz v1\n").decode(),
@@ -340,7 +335,7 @@ class TestProposal(TestForge):
         assert result.returncode == 0, result.stderr
         assert self.commit()["expectedHeadOid"] == BRANCH_HEAD
         assert f"POST repos/{REPO}/git/refs" not in self.calls()
-        same(self, ["pr list", "pr edit"], self.calls()[-2:])
+        same(["pr list", "pr edit"], self.calls()[-2:])
         assert "updated PR #17" in result.stdout
 
 
@@ -394,7 +389,6 @@ class TestRunners(TestForge):
             for e in decoded.as_array(changes["additions"], "additions")
         ]
         same(
-            self,
             [
                 "fuzz/corpus/parse_marker/abc",
                 "internal/policy/testdata/fuzz/FuzzLoad/f1",
@@ -417,7 +411,7 @@ class TestRunners(TestForge):
             "nothing staged: no runner kept an input or a crash, so nothing is"
             " proposed\n"
         )
-        same(self, [], self.calls())
+        same([], self.calls())
 
     def test_a_downloaded_candidate_lets_the_proposal_run(self) -> None:
         """One file in the merged tree: staged=true, and nothing else said."""
@@ -450,11 +444,11 @@ class TestPullRequestCalls(TestForge):
         self.plant("fuzz/corpus/parse_marker/abc")
         opened = self.run_script("propose")
         assert opened.returncode == 0, opened.stderr
-        same(self, ["pr list", "pr create"], self.calls()[-2:])
+        same(["pr list", "pr create"], self.calls()[-2:])
         (self.state / "open").write_text("17\n", encoding="utf-8")
         updated = self.run_script("propose")
         assert updated.returncode == 0, updated.stderr
-        same(self, ["pr list", "pr edit"], self.calls()[-2:])
+        same(["pr list", "pr edit"], self.calls()[-2:])
 
 
 class TestSignedCommit(TestForge):

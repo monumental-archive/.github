@@ -33,15 +33,13 @@ from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar, override
-from unittest import mock
 
 import pytest
-from tests import test_coverage_tasks
 
 from belt import coverage_floor as cf
 from belt import plpgsql_coverage as pc
 from belt.decoded import as_array, as_object, as_str, load_json, load_toml
-from tests import hermetic
+from tests import hermetic, test_coverage_tasks
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -292,11 +290,12 @@ def call(argv: list[str], env: dict[str, str], cwd: Path) -> Done:
     """
     out, err = io.StringIO(), io.StringIO()
     with (
-        mock.patch.dict(os.environ, env, clear=True),
+        pytest.MonkeyPatch.context() as patched,
         contextlib.chdir(cwd),
         contextlib.redirect_stdout(out),
         contextlib.redirect_stderr(err),
     ):
+        hermetic.patch_env(patched, env, clear=True)
         status = pc.main(argv)
     return Done(status, out.getvalue(), err.getvalue())
 

@@ -47,9 +47,9 @@ MINT = "jobs:\n  r:\n    with:\n      mint-doi: true\n"
 SKIPPED = ["lint:citation: no CITATION.cff and no mint-doi request, skipped"]
 
 
-def same[T](case: unittest.TestCase, got: T, want: T, msg: str = "") -> None:
+def same[T](got: T, want: T, msg: str = "") -> None:
     """Assert two values equal, `want` typed by `got` (mypy.ini: no Any)."""
-    case.assertEqual(got, want, msg or None)
+    assert got == want, msg or None
 
 
 def body() -> str:
@@ -156,17 +156,17 @@ class TestCitation:
         """No workflow tracked, a minting one untracked: the task skips."""
         self.plant(".github/workflows/loose.yml", MINT)
         done = self.task()
-        same(self, done.returncode, 0, done.stderr)
-        same(self, done.stdout.splitlines(), SKIPPED)
+        same(done.returncode, 0, done.stderr)
+        same(done.stdout.splitlines(), SKIPPED)
 
     def test_drift_is_red_through_the_task(self) -> None:
         """A derived field edited by hand: the diff, then the finding."""
         drifted = source("CITATION.cff").replace("license: 0BSD", "license: MIT")
         self.sources(drifted)
         done = self.task("REUSE.toml", ".badge-states", "CITATION.cff")
-        same(self, done.returncode, citation_check.EXIT_RED)
+        same(done.returncode, citation_check.EXIT_RED)
         diff = done.stdout.splitlines()
-        same(self, diff[0].split("\t")[0], "--- CITATION.cff")
+        same(diff[0].split("\t")[0], "--- CITATION.cff")
         assert "-license: MIT" in diff
         assert "+license: 0BSD" in diff
         want = [
@@ -175,64 +175,64 @@ class TestCitation:
                 " REUSE.toml (or the human fields) and run fix:citation"
             )
         ]
-        same(self, done.stderr.splitlines(), want)
+        same(done.stderr.splitlines(), want)
 
     def test_a_failed_render_is_its_own_status(self) -> None:
         """The render refuses: its message, its status, no verdict."""
         self.plant("REUSE.toml", "x = 1\n")
         self.plant("CITATION.cff", source("CITATION.cff"))
         done = self.task("REUSE.toml", "CITATION.cff")
-        same(self, done.returncode, 1)
+        same(done.returncode, 1)
         want = [
             (
                 "lint:citation: REUSE.toml declares no licence expression — fill"
                 " it first (lint:licence)"
             )
         ]
-        same(self, done.stderr.splitlines(), want)
-        same(self, done.stdout, "")
+        same(done.stderr.splitlines(), want)
+        same(done.stdout, "")
 
     def test_agreeing_citation_is_ok(self) -> None:
         """The canon's own citation against its own sources: ok."""
         self.sources(source("CITATION.cff"))
         done = self.helper()
-        same(self, done.returncode, 0, done.stderr)
+        same(done.returncode, 0, done.stderr)
         want = ["lint:citation: CITATION.cff agrees with REUSE.toml"]
-        same(self, done.stdout.splitlines(), want)
+        same(done.stdout.splitlines(), want)
 
     def test_no_reuse_is_red(self) -> None:
         """A citation with no source: red, by name."""
         self.plant("CITATION.cff", source("CITATION.cff"))
         done = self.helper()
-        same(self, done.returncode, citation_check.EXIT_RED)
+        same(done.returncode, citation_check.EXIT_RED)
         want = [
             (
                 "lint:citation: CITATION.cff exists but REUSE.toml (its source of"
                 " truth) does not"
             )
         ]
-        same(self, done.stderr.splitlines(), want)
+        same(done.stderr.splitlines(), want)
 
     def test_an_untracked_citation_is_no_citation(self) -> None:
         """CITATION.cff on disk and not in git: the tree has none (#2013)."""
         self.sources(source("CITATION.cff"))
         rel = self.plant(".github/workflows/wf.yml", "on: push\n")
         done = self.helper(rel, untracked=("CITATION.cff",))
-        same(self, done.returncode, 0, done.stderr)
-        same(self, done.stdout.splitlines(), SKIPPED)
+        same(done.returncode, 0, done.stderr)
+        same(done.stdout.splitlines(), SKIPPED)
 
     def test_an_untracked_reuse_is_no_source(self) -> None:
         """REUSE.toml on disk and not in git: the citation has no source."""
         self.sources(source("CITATION.cff"))
         done = self.helper(untracked=("REUSE.toml",))
-        same(self, done.returncode, citation_check.EXIT_RED)
+        same(done.returncode, citation_check.EXIT_RED)
         want = [
             (
                 "lint:citation: CITATION.cff exists but REUSE.toml (its source of"
                 " truth) does not"
             )
         ]
-        same(self, done.stderr.splitlines(), want)
+        same(done.stderr.splitlines(), want)
 
     def test_no_minting_request_is_skipped(self) -> None:
         """No request, or one only in a comment: skipped by name."""
@@ -245,9 +245,9 @@ class TestCitation:
             with self.subTest(row=row):
                 rel = self.plant(".github/workflows/wf.yml", text)
                 done = self.helper(rel)
-                same(self, done.returncode, 0, done.stderr)
-                same(self, done.stdout.splitlines(), SKIPPED)
-                same(self, done.stderr, "")
+                same(done.returncode, 0, done.stderr)
+                same(done.stdout.splitlines(), SKIPPED)
+                same(done.stderr, "")
 
     def test_minting_without_a_citation_is_red(self) -> None:
         """Each workflow requesting a DOI named, in order, then the remedy."""
@@ -255,7 +255,7 @@ class TestCitation:
         clean = self.plant(".github/workflows/b.yml", "on: push\n")
         two = self.plant(".github/workflows/c.yaml", "mint-doi:\ttrue")
         done = self.helper(one, clean, two)
-        same(self, done.returncode, citation_check.EXIT_RED)
+        same(done.returncode, citation_check.EXIT_RED)
         want = [
             (
                 "lint:citation: mint-doi: true with no CITATION.cff — a citable repo"
@@ -265,14 +265,14 @@ class TestCitation:
             f"  {two}",
             "  run fix:citation (REUSE.toml is the source), commit the render",
         ]
-        same(self, done.stderr.splitlines(), want)
-        same(self, done.stdout, "")
+        same(done.stderr.splitlines(), want)
+        same(done.stdout, "")
 
     def test_not_utf8_is_an_error(self) -> None:
         """A workflow that is not UTF-8 is refused by name, exit 2."""
         rel = self.plant(".github/workflows/bad.yml", b"on: \xff\n")
         done = self.helper(rel)
-        same(self, done.returncode, citation_check.EXIT_ERROR)
+        same(done.returncode, citation_check.EXIT_ERROR)
         assert done.stderr.startswith(f"{TASK}: {rel}: cannot be read as UTF-8:"), (
             done.stderr
         )

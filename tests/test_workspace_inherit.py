@@ -34,7 +34,6 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, Self
-from unittest import mock
 
 import pytest
 
@@ -75,7 +74,9 @@ class Stops:
     it printed, without the final newline.
     """
 
-    def __init__(self, case: unittest.TestCase) -> None:
+    def __init__(
+        self,
+    ) -> None:
         """Hold the row that expects the stop."""
         self.case = case
         self.said = ""
@@ -108,7 +109,7 @@ class Stops:
         self.said = self._err.getvalue().rstrip("\n")
         if not isinstance(exc, SystemExit):
             self.case.fail(f"the task did not stop: {exc!r}")
-        self.case.assertEqual(1, exc.code, self.said)
+        assert 1 == exc.code, self.said
         return True
 
 
@@ -492,9 +493,7 @@ def account_of(root: Path, crate: str, **fields: object) -> dict[str, object]:
 class TwoRoots:
     """A planted tree with two workspaces, cargo stubbed."""
 
-    def __init__(
-        self, case: unittest.TestCase, fetch_fails: str = "", locate_fails: str = ""
-    ) -> None:
+    def __init__(self, fetch_fails: str = "", locate_fails: str = "") -> None:
         """Plant the tree, the stub and each root's account."""
         scratch = TemporaryDirectory()
         case.addCleanup(scratch.cleanup)
@@ -534,7 +533,8 @@ class TwoRoots:
 
         """
         roots = ["Cargo.toml", "fuzz/Cargo.toml"]
-        with mock.patch.object(wi, "CARGO", str(self.cargo)):
+        with pytest.MonkeyPatch.context() as patched:
+            patched.setattr(wi, "CARGO", str(self.cargo))
             return hermetic.call(
                 functools.partial(wi.main, roots), env=self.env, cwd=self.tree
             )

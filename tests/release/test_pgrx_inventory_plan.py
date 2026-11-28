@@ -15,18 +15,15 @@ stdlib `unittest`, matching the rest of release/. Run through the gate
 as `mise run test`, which `ci` collects.
 """
 
-import contextlib
-import os
 import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest import mock
-
 
 from belt import decoded, plan_producers, workflow_yaml
 from tests import hermetic
+import pytest
 
 CANON = hermetic.CANON
 WORKFLOW = CANON / ".github" / "workflows" / "build-pgrx-extension.yml"
@@ -49,27 +46,25 @@ GOLDEN = """[
 ]
 """
 
-MANIFEST_REFUSAL = "::error::inventory_plan.py: crate/Cargo.toml: "
+MANIFEST_REFUSAL = "::error::inventory-plan: crate/Cargo.toml: "
 
 CRATE = '[package]\nname = "pg_edtf"\nversion = "0.4.2"\n\n[features]\npg16 = []\n'
 
 
-_NAMED = contextlib.ExitStack()
+@pytest.fixture
+def _outside_mise(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Name the helper by its command, as a run outside mise does (#1934).
 
-
-def setUpModule() -> None:
-    """Name the helper by its file, as a run outside mise does (#1934).
-
-    An in-process call reads argv, whatever task runs this suite.
+    An in-process call reads argv, whatever task runs this suite; an
+    empty ORG_FINDINGS records nothing (unset on a runner records to the
+    job's file, #1976).
     """
-    _NAMED.enter_context(mock.patch.object(sys, "argv", ["inventory_plan.py"]))
-    for key in ("MISE_TASK_NAME", "ORG_FINDINGS"):
-        if key in os.environ:
-            _NAMED.callback(os.environ.__setitem__, key, os.environ.pop(key))
-    # Empty, not unset: unset on a runner records to the job's file (#1976).
-    os.environ["ORG_FINDINGS"] = ""
-    _NAMED.callback(os.environ.pop, "ORG_FINDINGS", None)
-    unittest.addModuleCleanup(_NAMED.close)
+    monkeypatch.setattr(sys, "argv", ["inventory-plan"])
+    monkeypatch.delenv("MISE_TASK_NAME", raising=False)
+    monkeypatch.setenv("ORG_FINDINGS", "")
+
+
+pytestmark = pytest.mark.usefixtures("_outside_mise")
 
 
 @dataclass
@@ -179,7 +174,7 @@ class TestRefuses:
     def assert_refused(self, run: Run, want: str) -> None:
         """Hold one refusal to its status, its line, and no plan."""
         assert run.returncode == 1, run.stderr
-        assert f"::error::inventory_plan.py: {want}\n" == run.stderr
+        assert f"::error::inventory-plan: {want}\n" == run.stderr
         assert run.plan is None
 
     def test_no_prefix_is_refused(self) -> None:
@@ -235,6 +230,5 @@ class TestRefuses:
         run = run_helper(args=("crate",))
         assert run.returncode == 2
         assert (
-            run.stderr
-            == "inventory_plan.py: usage: inventory_plan.py CRATE_DIR MAJOR\n"
+            run.stderr == "inventory-plan: usage: inventory_plan.py CRATE_DIR MAJOR\n"
         )

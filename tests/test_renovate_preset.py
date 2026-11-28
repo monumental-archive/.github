@@ -41,14 +41,13 @@ stdlib `unittest`, matching the other mise/test_*.py. Run through the
 gate as `mise run test`, which `ci` collects.
 """
 
-from tests import hermetic
 import re
-from pathlib import Path
 
 import pytest
 
 from belt import decoded, typed_std
 from belt.subject_budget import JS_GROUP
+from tests import hermetic
 
 PRESET = hermetic.CANON / "default.json"
 MISE_FILES = "/(^|/)mise\\.toml$/"

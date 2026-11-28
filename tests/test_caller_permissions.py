@@ -79,9 +79,9 @@ FIX = [
 ]
 
 
-def same[T](case: unittest.TestCase, got: T, want: T, msg: str = "") -> None:
+def same[T](got: T, want: T, msg: str = "") -> None:
     """Assert two values equal, `want` typed by `got` (mypy.ini: no Any)."""
-    case.assertEqual(got, want, msg or None)
+    assert got == want, msg or None
 
 
 def body() -> str:
@@ -216,25 +216,25 @@ class TestTask(TestPlanted):
     def test_no_workflows_is_skipped_by_name(self) -> None:
         """No tracked workflow: the task says it skipped, stele never runs."""
         done = self.task()
-        same(self, done.returncode, 0, done.stderr)
-        same(self, done.stdout.splitlines(), SKIPPED)
-        same(self, self.logged(), [])
+        same(done.returncode, 0, done.stderr)
+        same(done.stdout.splitlines(), SKIPPED)
+        same(self.logged(), [])
 
     def test_an_untracked_workflow_is_no_workflow(self) -> None:
         """A workflow git does not track: still skipped."""
         self.plant("ci.yml", track=False)
         done = self.task()
-        same(self, done.returncode, 0, done.stderr)
-        same(self, done.stdout.splitlines(), SKIPPED)
+        same(done.returncode, 0, done.stderr)
+        same(done.stdout.splitlines(), SKIPPED)
 
     def test_a_pass_through_the_task(self) -> None:
         """A tracked workflow: the body calls stele on the canon tree, PASS."""
         self.plant("ci.yml")
         done = self.task()
-        same(self, done.returncode, 0, done.stderr)
-        same(self, done.stdout.splitlines(), ["lint:caller-permissions: stele: PASS"])
-        same(self, done.stderr.splitlines(), ["stub stele: walking"])
-        same(self, self.logged(), [CALL])
+        same(done.returncode, 0, done.stderr)
+        same(done.stdout.splitlines(), ["lint:caller-permissions: stele: PASS"])
+        same(done.stderr.splitlines(), ["stub stele: walking"])
+        same(self.logged(), [CALL])
 
 
 class TestHelper(TestPlanted):
@@ -245,19 +245,19 @@ class TestHelper(TestPlanted):
         rel = self.plant("ci.yml")
         self.env["PATH"] = str(self.tree)
         done = self.helper(CANON, rel)
-        same(self, done.returncode, caller_permissions.EXIT_RED)
-        same(self, done.stdout, "")
+        same(done.returncode, caller_permissions.EXIT_RED)
+        same(done.stdout, "")
         expected = ["lint:caller-permissions: stele missing from the belt"]
-        same(self, done.stderr.splitlines(), expected)
-        same(self, self.logged(), [])
+        same(done.stderr.splitlines(), expected)
+        same(self.logged(), [])
 
     def test_a_short_grant_is_red_with_the_fix(self) -> None:
         """A FAIL from stele: its findings, its verdict, then the fix."""
         rel = self.plant("ci.yml")
         self.answer(FAIL, 1)
         done = self.helper(CANON, rel)
-        same(self, done.returncode, caller_permissions.EXIT_RED)
-        same(self, done.stdout.splitlines(), ["lint:caller-permissions: stele: FAIL"])
+        same(done.returncode, caller_permissions.EXIT_RED)
+        same(done.stdout.splitlines(), ["lint:caller-permissions: stele: FAIL"])
         expected = [
             "stub stele: walking",
             "lint:caller-permissions: .github/workflows/release.yml: caller-grant",
@@ -265,15 +265,15 @@ class TestHelper(TestPlanted):
             "  actual: absent",
             *FIX,
         ]
-        same(self, done.stderr.splitlines(), expected)
-        same(self, self.logged(), [CALL])
+        same(done.stderr.splitlines(), expected)
+        same(self.logged(), [CALL])
 
     def test_a_pass_is_quiet(self) -> None:
         """A PASS from stele: its report alone, exit 0."""
         rel = self.plant("ci.yml")
         done = self.helper(CANON, rel)
-        same(self, done.returncode, 0, done.stderr)
-        same(self, done.stdout.splitlines(), ["lint:caller-permissions: stele: PASS"])
+        same(done.returncode, 0, done.stderr)
+        same(done.stdout.splitlines(), ["lint:caller-permissions: stele: PASS"])
 
     def test_a_bad_call_is_a_usage_error(self) -> None:
         """No canon, an empty canon, or no workflow: exit 2 with the usage line."""
@@ -282,6 +282,6 @@ class TestHelper(TestPlanted):
         for argv in calls:
             with self.subTest(argv=argv):
                 done = self.helper(*argv)
-                same(self, done.returncode, caller_permissions.EXIT_ERROR)
-                same(self, done.stderr.splitlines(), [usage])
-        same(self, self.logged(), [])
+                same(done.returncode, caller_permissions.EXIT_ERROR)
+                same(done.stderr.splitlines(), [usage])
+        same(self.logged(), [])

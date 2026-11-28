@@ -52,9 +52,9 @@ TAIL = [
 ]
 
 
-def same[T](case: unittest.TestCase, got: T, want: T, msg: str = "") -> None:
+def same[T](got: T, want: T, msg: str = "") -> None:
     """Assert two values equal, `want` typed by `got` (mypy.ini: no Any)."""
-    case.assertEqual(got, want, msg or None)
+    assert got == want, msg or None
 
 
 def body() -> str:
@@ -141,9 +141,7 @@ class TestPlanted:
 
         """
         args = list(argv)
-        return hermetic.call(
-            lambda: runner_pin.main(args), env=self.env, cwd=self.tree
-        )
+        return hermetic.call(lambda: runner_pin.main(args), env=self.env, cwd=self.tree)
 
     def check(self, text: str) -> hermetic.Called:
         """Plant one workflow and check it alone.
@@ -178,15 +176,15 @@ class TestTask(TestPlanted):
     def test_nothing_tracked_is_skipped_by_name(self) -> None:
         """No workflow and no template: the task says it skipped."""
         done = self.task()
-        same(self, done.returncode, 0, done.stderr)
-        same(self, done.stdout.splitlines(), SKIPPED)
+        same(done.returncode, 0, done.stderr)
+        same(done.stdout.splitlines(), SKIPPED)
 
     def test_an_untracked_workflow_is_no_workflow(self) -> None:
         """A workflow git does not track: still skipped, never read."""
         self.plant(".github/workflows/ci.yml", job("ubuntu-latest"), track=False)
         done = self.task()
-        same(self, done.returncode, 0, done.stderr)
-        same(self, done.stdout.splitlines(), SKIPPED)
+        same(done.returncode, 0, done.stderr)
+        same(done.stdout.splitlines(), SKIPPED)
 
     def test_both_lists_through_the_task(self) -> None:
         """Offenders in a workflow and a template: one finding, workflows first."""
@@ -194,20 +192,20 @@ class TestTask(TestPlanted):
         self.flow("z.yml", job("self-hosted"))
         self.flow("ok.yaml", job("ubuntu-26.04"))
         done = self.task()
-        same(self, done.returncode, runner_pin.EXIT_RED)
+        same(done.returncode, runner_pin.EXIT_RED)
         expected = red(
             ".github/workflows/z.yml(runs-on: self-hosted)",
             "workflow-templates/a.yaml(runs-on: macos-latest)",
             "workflow-templates/a.yaml(floating label: 3:    runs-on: macos-latest)",
         )
-        same(self, done.stderr.splitlines(), expected)
+        same(done.stderr.splitlines(), expected)
 
     def test_a_template_alone_is_checked(self) -> None:
         """Templates and no workflow: checked, not skipped."""
         self.plant("workflow-templates/a.yml", job("ubuntu-24.04-arm"))
         done = self.task()
-        same(self, done.returncode, 0, done.stderr)
-        same(self, done.stdout.splitlines(), OK)
+        same(done.returncode, 0, done.stderr)
+        same(done.stdout.splitlines(), OK)
 
 
 class TestLabels(TestPlanted):
@@ -231,8 +229,8 @@ class TestLabels(TestPlanted):
     def test_pinned_values_are_clean(self, value: object) -> None:
         """Pinned literals, suffixed, quoted or commented: clean."""
         done = self.check(job(value))
-        same(self, done.returncode, 0, done.stderr)
-        same(self, done.stdout.splitlines(), OK)
+        same(done.returncode, 0, done.stderr)
+        same(done.stdout.splitlines(), OK)
 
     @pytest.mark.parametrize(
         "value,shown",
@@ -251,8 +249,8 @@ class TestLabels(TestPlanted):
         """A literal with no version, or an expression that is no matrix one."""
         rel = ".github/workflows/ci.yml"
         done = self.check(job(value))
-        same(self, done.returncode, runner_pin.EXIT_RED)
-        same(self, done.stderr.splitlines(), red(f"{rel}(runs-on: {shown})"))
+        same(done.returncode, runner_pin.EXIT_RED)
+        same(done.stderr.splitlines(), red(f"{rel}(runs-on: {shown})"))
 
     def test_a_carriage_return_is_part_of_the_value(self) -> None:
         """Lines split on newline alone: a trailing CR leaves the value unpinned.
@@ -260,9 +258,9 @@ class TestLabels(TestPlanted):
         The finding writer prints the CR as its escape, as the shell's did.
         """
         done = self.check("jobs:\n  a:\n    runs-on: ubuntu-24.04\r\n")
-        same(self, done.returncode, runner_pin.EXIT_RED)
+        same(done.returncode, runner_pin.EXIT_RED)
         expected = red(".github/workflows/ci.yml(runs-on: ubuntu-24.04\\r)")
-        same(self, done.stderr.splitlines(), expected)
+        same(done.stderr.splitlines(), expected)
 
 
 class TestFloating(TestPlanted):
@@ -277,26 +275,26 @@ class TestFloating(TestPlanted):
             "    runs-on: ${{ matrix.os }}\n"
         )
         done = self.check(text)
-        same(self, done.returncode, runner_pin.EXIT_RED)
+        same(done.returncode, runner_pin.EXIT_RED)
         named = "        os: [ubuntu-latest, windows-latest]"
         expected = red(f".github/workflows/ci.yml(floating label: 5:{named})")
-        same(self, done.stderr.splitlines(), expected)
+        same(done.stderr.splitlines(), expected)
 
     def test_a_comment_is_not_a_label(self) -> None:
         """A comment line naming ubuntu-latest: not counted."""
         text = "# never ubuntu-latest\n   # nor macos-latest\n" + job("ubuntu-24.04")
         done = self.check(text)
-        same(self, done.returncode, 0, done.stderr)
-        same(self, done.stdout.splitlines(), OK)
+        same(done.returncode, 0, done.stderr)
+        same(done.stdout.splitlines(), OK)
 
     def test_a_trailing_comment_still_counts(self) -> None:
         """A label before a comment on the same line is a float."""
         text = job("ubuntu-24.04") + "      - run: echo ubuntu-latest # no\n"
         done = self.check(text)
-        same(self, done.returncode, runner_pin.EXIT_RED)
+        same(done.returncode, runner_pin.EXIT_RED)
         line = "      - run: echo ubuntu-latest # no"
         expected = red(f".github/workflows/ci.yml(floating label: 6:{line})")
-        same(self, done.stderr.splitlines(), expected)
+        same(done.stderr.splitlines(), expected)
 
 
 class TestCalls(TestPlanted):
@@ -308,26 +306,26 @@ class TestCalls(TestPlanted):
         two = self.flow("a.yml", job("x"))
         three = self.plant("workflow-templates/c.yml", job("y"))
         done = self.helper(one, two, "--", three)
-        same(self, done.returncode, runner_pin.EXIT_RED)
+        same(done.returncode, runner_pin.EXIT_RED)
         expected = red(
             f"{one}(runs-on: ubuntu-latest)",
             f"{one}(floating label: 3:    runs-on: ubuntu-latest)",
             f"{two}(runs-on: x)",
             f"{three}(runs-on: y)",
         )
-        same(self, done.stderr.splitlines(), expected)
+        same(done.stderr.splitlines(), expected)
 
     def test_nothing_given_is_clean(self) -> None:
         """A separator and no file: nothing to name."""
         done = self.helper("--")
-        same(self, done.returncode, 0, done.stderr)
-        same(self, done.stdout.splitlines(), OK)
+        same(done.returncode, 0, done.stderr)
+        same(done.stdout.splitlines(), OK)
 
     def test_not_utf8_is_an_error(self) -> None:
         """A workflow that is not UTF-8 is refused by name, exit 2."""
         rel = self.flow("ci.yml", b"jobs: \xff\n")
         done = self.helper(rel, "--")
-        same(self, done.returncode, runner_pin.EXIT_ERROR)
+        same(done.returncode, runner_pin.EXIT_ERROR)
         assert done.stderr.startswith(f"{TASK}: {rel}: cannot be read as UTF-8:"), (
             done.stderr
         )
@@ -335,7 +333,7 @@ class TestCalls(TestPlanted):
     def test_a_missing_file_is_an_error(self) -> None:
         """A named file that is not there is refused by name, exit 2."""
         done = self.helper("--", "workflow-templates/gone.yml")
-        same(self, done.returncode, runner_pin.EXIT_ERROR)
+        same(done.returncode, runner_pin.EXIT_ERROR)
         assert done.stderr.startswith(
             f"{TASK}: workflow-templates/gone.yml: cannot be read as UTF-8:"
         ), done.stderr
@@ -343,5 +341,5 @@ class TestCalls(TestPlanted):
     def test_no_separator_is_a_usage_error(self) -> None:
         """No `--` between the lists: exit 2 with the usage line."""
         done = self.helper(".github/workflows/ci.yml")
-        same(self, done.returncode, runner_pin.EXIT_ERROR)
-        same(self, done.stderr.splitlines(), [f"{TASK}: {runner_pin.USAGE}"])
+        same(done.returncode, runner_pin.EXIT_ERROR)
+        same(done.stderr.splitlines(), [f"{TASK}: {runner_pin.USAGE}"])

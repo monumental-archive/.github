@@ -55,10 +55,14 @@ def test_the_word_is_read_as_mutmut_reads_it(comment: str, word: str) -> None:
             id="block",
         ),
         pytest.param(
-            "# pragma: no mutate start", f"# pragma: no mutate start — {LINE_ONLY}", id="start"
+            "# pragma: no mutate start",
+            f"# pragma: no mutate start — {LINE_ONLY}",
+            id="start",
         ),
         pytest.param(
-            "# pragma: no mutate end", f"# pragma: no mutate end — {LINE_ONLY}", id="end"
+            "# pragma: no mutate end",
+            f"# pragma: no mutate end — {LINE_ONLY}",
+            id="end",
         ),
     ],
 )

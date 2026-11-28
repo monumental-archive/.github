@@ -21,7 +21,6 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from unittest import mock
 
 import pytest
 
@@ -81,7 +80,7 @@ FAILED_MESSAGE = (
 class Planted:
     """A planted two-root tree, the cargo stub, and their environment."""
 
-    def __init__(self, case: unittest.TestCase, mode: str = "") -> None:
+    def __init__(self, mode: str = "") -> None:
         """Plant the tree under a fresh directory the case cleans up."""
         scratch = tempfile.TemporaryDirectory()
         case.addCleanup(scratch.cleanup)
@@ -131,7 +130,8 @@ class Planted:
             The status and both streams.
 
         """
-        with mock.patch.object(rust_workspaces, "CARGO", str(self.cargo)):
+        with pytest.MonkeyPatch.context() as patched:
+            patched.setattr(rust_workspaces, "CARGO", str(self.cargo))
             return hermetic.call(
                 lambda: rust_workspaces.main(["roots"]), env=self.env, cwd=self.tree
             )
@@ -216,7 +216,8 @@ class TestRoots:
         """The roots; None on an unresolved manifest; None on git, said."""
         planted = Planted(self)
         roots: list[str] = ["Cargo.toml", "fuzz/Cargo.toml"]
-        with mock.patch.object(rust_workspaces, "CARGO", str(planted.cargo)):
+        with pytest.MonkeyPatch.context() as patched:
+            patched.setattr(rust_workspaces, "CARGO", str(planted.cargo))
             done = hermetic.call(
                 lambda: 0 if rust_workspaces.resolved() == roots else 3,
                 env=planted.env,
@@ -224,7 +225,8 @@ class TestRoots:
             )
         assert (done.returncode, done.stderr) == (0, "")
         refused = Planted(self, "outside")
-        with mock.patch.object(rust_workspaces, "CARGO", str(refused.cargo)):
+        with pytest.MonkeyPatch.context() as patched:
+            patched.setattr(rust_workspaces, "CARGO", str(refused.cargo))
             done = hermetic.call(
                 lambda: 0 if rust_workspaces.resolved() is None else 3,
                 env=refused.env,
@@ -350,10 +352,8 @@ class TestFuzzing:
             ({"RUSTFLAGS": "-Cx"}, "-Cx --cfg fuzzing"),
         ]
         for before, inside in rows:
-            with (
-                self.subTest(before=before),
-                mock.patch.dict(os.environ, before, clear=True),
-            ):
+            with pytest.MonkeyPatch.context() as patched, self.subTest(before=before):
+                hermetic.patch_env(patched, before, clear=True)
                 with rust_workspaces.built_as(marked):
                     assert inside == os.environ["RUSTFLAGS"]
                 assert before.get("RUSTFLAGS") == os.environ.get("RUSTFLAGS")
@@ -362,7 +362,8 @@ class TestFuzzing:
         """An exception inside still puts the environment back."""
         marked = self.manifest("[package]\nmetadata = { cargo-fuzz = true }\n")
         empty: dict[str, str] = {}
-        with mock.patch.dict(os.environ, empty, clear=True):
+        with pytest.MonkeyPatch.context() as patched:
+            hermetic.patch_env(patched, empty, clear=True)
             with pytest.raises(KeyError), rust_workspaces.built_as(marked):
                 _ = os.environ["PLANTED_ABSENT"]
             assert "RUSTFLAGS" not in os.environ

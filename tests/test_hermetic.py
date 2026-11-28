@@ -671,7 +671,8 @@ class TestEnv:
 
     def test_planted_variables_do_not_reach_a_fixture(self) -> None:
         """The job's inputs and git's own variables stay with the suite."""
-        with mock.patch.dict(os.environ, PLANTED):
+        with pytest.MonkeyPatch.context() as patched:
+            hermetic.patch_env(patched, PLANTED)
             env = hermetic.env("/fixture-home")
         reached = sorted(set(PLANTED) & set(env))
         assert reached == NOTHING
@@ -686,21 +687,24 @@ class TestEnv:
             "GIT_COMMITTER_NAME",
             "GIT_COMMITTER_EMAIL",
         }
-        with mock.patch.dict(os.environ, PLANTED):
+        with pytest.MonkeyPatch.context() as patched:
+            hermetic.patch_env(patched, PLANTED)
             env = hermetic.env()
         extra = set(env) - set(hermetic.INHERITED) - set_here
         assert extra == NO_NAMES
 
     def test_a_rows_override_reaches_the_fixture(self) -> None:
         """A row states its own input, and that wins over the suite's."""
-        with mock.patch.dict(os.environ, PLANTED):
+        with pytest.MonkeyPatch.context() as patched:
+            hermetic.patch_env(patched, PLANTED)
             env = hermetic.env("/fixture-home", VERSION="2.0.0")
         assert env["VERSION"] == "2.0.0"
 
     def test_home_is_the_fixtures_or_the_suites(self) -> None:
         """A given home wins; without one the suite's HOME is kept."""
         suite: dict[str, str] = {"HOME": "/suite-home"}
-        with mock.patch.dict(os.environ, suite):
+        with pytest.MonkeyPatch.context() as patched:
+            hermetic.patch_env(patched, suite)
             assert hermetic.env("/fixture-home")["HOME"] == "/fixture-home"
             assert hermetic.env()["HOME"] == "/suite-home"
 
@@ -708,7 +712,8 @@ class TestEnv:
         """A tool extension adds its variables and nothing else."""
         every = {n for names in hermetic.TOOLS.values() for n in names}
         planted = dict.fromkeys(every | set(hermetic.INHERITED), "x")
-        with mock.patch.dict(os.environ, planted):
+        with pytest.MonkeyPatch.context() as patched:
+            hermetic.patch_env(patched, planted)
             base = set(hermetic.env())
             for tool, names in hermetic.TOOLS.items():
                 with self.subTest(tool=tool):
@@ -917,7 +922,8 @@ class TestBelt:
         (scratch / "mise" / "a.py").write_text("x\n", encoding="utf-8")
         self.git(scratch, "init", "-q")
         self.git(scratch, "add", ".")
-        with mock.patch.object(hermetic, "CANON", scratch):
+        with pytest.MonkeyPatch.context() as patched:
+            patched.setattr(hermetic, "CANON", scratch)
             before = hermetic.belt(self.tmp / "before")
             (scratch / "mise" / "sub").mkdir()
             (scratch / "mise" / "sub" / "b.sh").write_text("x\n", encoding="utf-8")
@@ -1358,6 +1364,7 @@ class TestCallMain:
     def test_no_env_leaves_the_environment_as_it_is(self) -> None:
         """Without `env`, the call sees this process's own variables."""
         kept: dict[str, str] = {"PLANTED": "kept"}
-        with mock.patch.dict(os.environ, kept):
+        with pytest.MonkeyPatch.context() as patched:
+            hermetic.patch_env(patched, kept)
             done = hermetic.call(lambda: _echo_main(["0"]))
         assert "env=kept" in done.stdout

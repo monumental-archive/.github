@@ -32,7 +32,6 @@ import subprocess
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
-from unittest import mock
 
 import pytest
 
@@ -617,10 +616,11 @@ class TestSiteRules:
         """
         out, err = io.StringIO(), io.StringIO()
         with (
-            mock.patch("sys.stdin", io.StringIO(grep)),
+            pytest.MonkeyPatch.context() as patched,
             contextlib.redirect_stdout(out),
             contextlib.redirect_stderr(err),
         ):
+            patched.setattr("sys.stdin", io.StringIO(grep))
             status = helper.main(["records"])
         return status, out.getvalue(), err.getvalue()
 
@@ -987,10 +987,8 @@ class TestReaders:
     def test_default_major_refuses_metadata_it_cannot_read(self) -> None:
         """The step says so on stderr and exits 1; the leg stops with it."""
         err = io.StringIO()
-        with (
-            mock.patch("sys.stdin", io.StringIO('{"packages": 1}')),
-            contextlib.redirect_stderr(err),
-        ):
+        with pytest.MonkeyPatch.context() as patched, contextlib.redirect_stderr(err):
+            patched.setattr("sys.stdin", io.StringIO('{"packages": 1}'))
             status = helper.main(["default-major", "a"])
         assert status == 1
         assert err.getvalue() == f"{LABEL}: cargo metadata: packages is not a list\n"
@@ -1096,10 +1094,8 @@ class TestReaders:
             f"src/lib.rs:19:  {MARK} {EQUAL}: why\n"
             f"src/lib.rs:20:  x {MARK} delete -: why\n\n"
         )
-        with (
-            mock.patch("sys.stdin", io.StringIO(grep)),
-            contextlib.redirect_stdout(out),
-        ):
+        with pytest.MonkeyPatch.context() as patched, contextlib.redirect_stdout(out):
+            patched.setattr("sys.stdin", io.StringIO(grep))
             status = helper.main(["records"])
         assert status == 0
         want = [DERIVED, r"^src/lib\.rs:20:[0-9]+: delete \-( in .*)?$"]

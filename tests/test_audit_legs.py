@@ -42,13 +42,12 @@ import tempfile
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
-from unittest import mock
 
 import pytest
-from tests import test_gate_tools as reading
 
 from belt import audit_legs, coverage_floor, decoded, gate_tools, workflow_yaml
 from tests import hermetic
+from tests import test_gate_tools as reading
 
 CANON = hermetic.CANON
 WORKFLOWS = CANON / ".github" / "workflows"
@@ -583,8 +582,8 @@ def as_step() -> contextlib.ExitStack:
 
     """
     stack = contextlib.ExitStack()
-    stack.enter_context(hermetic.as_task(""))
-    stack.enter_context(mock.patch.object(sys, "argv", [STEP]))
+    hermetic.name_task(stack.enter_context(pytest.MonkeyPatch.context()), "")
+    stack.enter_context(pytest.MonkeyPatch.context()).setattr(sys, "argv", [STEP])
     return stack
 
 

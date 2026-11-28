@@ -117,7 +117,6 @@ jobs:
         id: python
         run: '"${ORG_PYTHON}" -I .org-canon/belt mutants-python adopted >> "${GITHUB_OUTPUT}"'
 
-
       - name: Rust adopts with a tracked .cargo/mutants.toml
         id: rust
         env:

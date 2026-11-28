@@ -17,7 +17,6 @@ import tempfile
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from typing import TYPE_CHECKING
-from unittest import mock
 
 import pytest
 
@@ -224,10 +223,11 @@ class TestMainTest:
         out, err = io.StringIO(), io.StringIO()
         stdin = io.StringIO(json.dumps(listing) if listing is not None else "{")
         with (
-            mock.patch("sys.stdin", stdin),
+            pytest.MonkeyPatch.context() as patched,
             redirect_stdout(out),
             redirect_stderr(err),
         ):
+            patched.setattr("sys.stdin", stdin)
             status = pgrx_postgres.main(["--majors", majors])
         return status, out.getvalue(), err.getvalue()
 

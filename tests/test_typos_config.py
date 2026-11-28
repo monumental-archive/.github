@@ -30,7 +30,9 @@ from tests import hermetic
 
 BELT = hermetic.MISE
 CONFIG = BELT / "typos.toml"
-CHANGELOG_LINE = Path(__file__).resolve().parent / "testdata" / "typos" / "changelog-v1.67.1.txt"
+CHANGELOG_LINE = (
+    Path(__file__).resolve().parent / "testdata" / "typos" / "changelog-v1.67.1.txt"
+)
 TYPOS = hermetic.tool("typos")
 
 # The run typos found inside the SHA, and what it asked for.

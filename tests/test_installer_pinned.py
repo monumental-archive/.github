@@ -43,9 +43,9 @@ STEP = "      - uses: jdx/mise-action@0123456789abcdef0123456789abcdef01234567\n
 PIN = "        with:\n          version: 2026.11.3\n"
 
 
-def same[T](case: unittest.TestCase, got: T, want: T, msg: str = "") -> None:
+def same[T](got: T, want: T, msg: str = "") -> None:
     """Assert two values equal, `want` typed by `got` (mypy.ini: no Any)."""
-    case.assertEqual(got, want, msg or None)
+    assert got == want, msg or None
 
 
 def body() -> str:
@@ -142,9 +142,9 @@ class TestPinned:
         """An untracked workflow only: the task says it skipped."""
         self.plant("loose.yml", STEP)
         done = self.task()
-        same(self, done.returncode, 0, done.stderr)
+        same(done.returncode, 0, done.stderr)
         skipped = ["lint:installer-pinned: no workflows, skipped"]
-        same(self, done.stdout.splitlines(), skipped)
+        same(done.stdout.splitlines(), skipped)
 
     def test_shortfall_is_red_through_the_task(self) -> None:
         """The task body hands the helper the tracked workflows only."""
@@ -152,8 +152,8 @@ class TestPinned:
         bad = self.plant("bad.yaml", STEP)
         self.plant("loose.yml", STEP)
         done = self.task(good, bad)
-        same(self, done.returncode, installer_pinned.EXIT_RED)
-        same(self, done.stderr.splitlines(), red(f"{bad}(1 steps, 0 version pins)"))
+        same(done.returncode, installer_pinned.EXIT_RED)
+        same(done.stderr.splitlines(), red(f"{bad}(1 steps, 0 version pins)"))
 
     def test_holding_workflows_are_ok(self) -> None:
         """No step, a pin per step, spare pins, a step in a comment: ok."""
@@ -169,9 +169,9 @@ class TestPinned:
             with self.subTest(row=row):
                 rel = self.plant("wf.yml", text)
                 done = self.helper(rel)
-                same(self, done.returncode, 0, done.stderr)
-                same(self, done.stdout.splitlines(), OK)
-                same(self, done.stderr, "")
+                same(done.returncode, 0, done.stderr)
+                same(done.stdout.splitlines(), OK)
+                same(done.stderr, "")
 
     def test_shortfalls_are_red_with_counts(self) -> None:
         """No pin, too few, a pin in prose or short: each named, in order."""
@@ -181,21 +181,21 @@ class TestPinned:
         short = self.plant("short.yml", STEP + "version: 2026.1\n")
         clean = self.plant("clean.yml", STEP + PIN)
         done = self.helper(bare, clean, few, prose, short)
-        same(self, done.returncode, installer_pinned.EXIT_RED)
+        same(done.returncode, installer_pinned.EXIT_RED)
         want = red(
             f"{bare}(1 steps, 0 version pins)",
             f"{few}(2 steps, 1 version pins)",
             f"{prose}(1 steps, 0 version pins)",
             f"{short}(1 steps, 0 version pins)",
         )
-        same(self, done.stderr.splitlines(), want)
-        same(self, done.stdout, "")
+        same(done.stderr.splitlines(), want)
+        same(done.stdout, "")
 
     def test_not_utf8_is_an_error(self) -> None:
         """A workflow that is not UTF-8 is refused by name, exit 2."""
         rel = self.plant("bad.yml", b"on: \xff\n")
         done = self.helper(rel)
-        same(self, done.returncode, installer_pinned.EXIT_ERROR)
+        same(done.returncode, installer_pinned.EXIT_ERROR)
         assert done.stderr.startswith(f"{TASK}: {rel}: cannot be read as UTF-8:"), (
             done.stderr
         )
@@ -203,6 +203,6 @@ class TestPinned:
     def test_no_workflows_is_a_usage_error(self) -> None:
         """No workflow named: exit 2 with the usage line."""
         done = self.helper()
-        same(self, done.returncode, installer_pinned.EXIT_ERROR)
+        same(done.returncode, installer_pinned.EXIT_ERROR)
         usage = f"{TASK}: usage: installer_pinned.py WORKFLOW..."
-        same(self, done.stderr.splitlines(), [usage])
+        same(done.stderr.splitlines(), [usage])

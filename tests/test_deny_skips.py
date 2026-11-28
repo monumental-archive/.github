@@ -10,7 +10,6 @@ stdlib `unittest`, matching the other mise/test_*.py; run through the
 gate as `mise run test`.
 """
 
-from tests import hermetic
 import contextlib
 import io
 import tempfile
@@ -21,6 +20,7 @@ import pytest
 
 from belt import decoded
 from belt import deny_skips as ds
+from tests import hermetic
 
 if TYPE_CHECKING:
     from collections.abc import Callable

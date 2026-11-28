@@ -23,11 +23,11 @@ stdlib `unittest`, run through the gate as `mise run test`.
 
 from __future__ import annotations
 
-from tests import hermetic
 import tempfile
 from pathlib import Path
 
 from belt import decoded, workflow_yaml
+from tests import hermetic
 
 CANON = hermetic.CANON
 WORKFLOWS = Path(".github") / "workflows"
@@ -45,9 +45,9 @@ NOT_LAST = "the findings upload is not the job's last step"
 Step = dict[str, object]
 
 
-def same[T](case: unittest.TestCase, got: T, want: T, msg: str = "") -> None:
+def same[T](got: T, want: T, msg: str = "") -> None:
     """Assert two values equal, `want` typed by `got` (mypy.ini: no Any)."""
-    case.assertEqual(got, want, msg or None)
+    assert got == want, msg or None
 
 
 def run_text(step: Step) -> str:
@@ -243,7 +243,7 @@ class TestCanon:
 
     def test_every_job_hands_its_findings_on(self) -> None:
         """Every job uploads as its last step; every report reads them."""
-        same(self, problems(CANON), [])
+        same(problems(CANON), [])
 
     def test_the_set_is_the_reporting_workflows(self) -> None:
         """The computation reaches a direct workflow, a callee and a stub."""
@@ -275,12 +275,11 @@ class TestPlanted:
 
     def test_as_built_passes(self) -> None:
         """An upload after the check and a download the helper reads pass."""
-        same(self, self.plant(CHECK + UPLOAD_STEP, DOWNLOAD_STEP + HELPER_STEP), [])
+        same(self.plant(CHECK + UPLOAD_STEP, DOWNLOAD_STEP + HELPER_STEP), [])
 
     def test_a_job_with_no_upload(self) -> None:
         """A job that runs `mise run` and uploads nothing is red by name."""
         same(
-            self,
             self.plant(CHECK, DOWNLOAD_STEP + HELPER_STEP),
             [f"planted.yml: check: uploads no {NAME}"],
         )
@@ -288,19 +287,17 @@ class TestPlanted:
     def test_a_plain_run_job_with_no_upload(self) -> None:
         """A job that records only through a plain `run:` step is in the set."""
         same(
-            self,
             self.plant(PLAIN, DOWNLOAD_STEP + HELPER_STEP),
             [f"planted.yml: check: uploads no {NAME}"],
         )
 
     def test_a_job_with_no_steps_is_not_in_the_set(self) -> None:
         """A job that calls a reusable workflow uploads nothing and passes."""
-        same(self, self.plant(PLAIN + UPLOAD_STEP, DOWNLOAD_STEP + HELPER_STEP), [])
+        same(self.plant(PLAIN + UPLOAD_STEP, DOWNLOAD_STEP + HELPER_STEP), [])
 
     def test_an_upload_that_is_not_last(self) -> None:
         """An upload with a step after it is red by name."""
         same(
-            self,
             self.plant(PLAIN + UPLOAD_STEP + PLAIN, DOWNLOAD_STEP + HELPER_STEP),
             [f"planted.yml: check: {NOT_LAST}"],
         )
@@ -309,7 +306,6 @@ class TestPlanted:
         """An upload of the findings path under another name is red by name."""
         renamed = UPLOAD_STEP.replace(NAME, "findings-${{ github.job }}")
         same(
-            self,
             self.plant(PLAIN + renamed, DOWNLOAD_STEP + HELPER_STEP),
             [f"planted.yml: check: the findings upload's name is not {NAME}"],
         )
@@ -318,7 +314,6 @@ class TestPlanted:
         """An upload under the findings name from another path is red by name."""
         moved = UPLOAD_STEP.replace(UPLOAD_PATH, "${{ runner.temp }}/out/")
         same(
-            self,
             self.plant(PLAIN + moved, DOWNLOAD_STEP + HELPER_STEP),
             [f"planted.yml: check: the findings upload's path is not {UPLOAD_PATH}"],
         )
@@ -327,7 +322,6 @@ class TestPlanted:
         """An upload a failed check would skip is red by name."""
         skipped = UPLOAD_STEP.replace(NOT_CANCELLED, "${{ success() }}")
         same(
-            self,
             self.plant(CHECK + skipped, DOWNLOAD_STEP + HELPER_STEP),
             [f"planted.yml: check: the findings upload is not if: {NOT_CANCELLED}"],
         )
@@ -335,7 +329,6 @@ class TestPlanted:
     def test_a_report_with_no_download(self) -> None:
         """A report job that downloads nothing is red by name."""
         same(
-            self,
             self.plant(CHECK + UPLOAD_STEP, HELPER_STEP),
             [f"planted.yml: report: downloads no {PATTERN} before {HELPER}"],
         )
@@ -343,7 +336,6 @@ class TestPlanted:
     def test_a_download_after_the_helper(self) -> None:
         """A download the helper runs before is no download."""
         same(
-            self,
             self.plant(CHECK + UPLOAD_STEP, HELPER_STEP + DOWNLOAD_STEP),
             [f"planted.yml: report: downloads no {PATTERN} before {HELPER}"],
         )
@@ -351,7 +343,6 @@ class TestPlanted:
     def test_a_report_that_does_not_pass_the_flag(self) -> None:
         """A report job whose helper is not passed `--findings` is red by name."""
         same(
-            self,
             self.plant(CHECK + UPLOAD_STEP, DOWNLOAD_STEP + BARE_HELPER_STEP),
             [f"planted.yml: report: {HELPER} is not passed {FLAG}"],
         )

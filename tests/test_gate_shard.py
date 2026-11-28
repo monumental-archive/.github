@@ -14,12 +14,12 @@ stdlib `unittest`, run by `mise run test`.
 
 from pathlib import Path
 
-from tests import hermetic
 import pytest
 import unittest_guarded
 
 from belt import decoded, gate_shard
 from belt.tracked import tracked
+from tests import hermetic
 
 HERE = hermetic.MISE
 CI = HERE.parent / ".github" / "workflows" / "ci.yml"

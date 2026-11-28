@@ -13,10 +13,9 @@ Run by `test:python-properties` under the belt's Hypothesis profile;
 the ordinary suite (`mise run test`) never imports this file.
 """
 
-import os
 from pathlib import Path
-from unittest import mock
 
+import pytest
 from hypothesis import strategies as st
 
 from belt import git_decoy as gd
@@ -58,7 +57,8 @@ class TestScrubbed:
     @given(st.dictionaries(ENV_NAME, VALUE, max_size=10))
     def test_every_git_name_and_nothing_else(self, environ: dict[str, str]) -> None:
         """GIT_* gone; the rest kept as they were."""
-        with mock.patch.dict(os.environ, environ, clear=True):
+        with pytest.MonkeyPatch.context() as patched:
+            hermetic.patch_env(patched, environ, clear=True)
             got = gd.scrubbed()
         kept = {k: v for k, v in environ.items() if not k.startswith("GIT_")}
         assert got == kept

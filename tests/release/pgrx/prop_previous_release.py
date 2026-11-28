@@ -38,8 +38,8 @@ import sys
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
-from unittest import mock
 
+import pytest
 from hypothesis import example
 from hypothesis import strategies as st
 
@@ -70,8 +70,10 @@ def as_helper() -> contextlib.ExitStack:
 
     """
     stack = contextlib.ExitStack()
-    stack.enter_context(hermetic.as_task(""))
-    stack.enter_context(mock.patch.object(sys, "argv", ["previous_release.py"]))
+    hermetic.name_task(stack.enter_context(pytest.MonkeyPatch.context()), "")
+    stack.enter_context(pytest.MonkeyPatch.context()).setattr(
+        sys, "argv", ["previous_release.py"]
+    )
     return stack
 
 
@@ -206,11 +208,12 @@ def quietly(
     """
     out = io.StringIO()
     with (
+        pytest.MonkeyPatch.context() as patched,
         as_helper(),
-        mock.patch.object(subprocess, "run", run),
         contextlib.redirect_stdout(out),
         contextlib.redirect_stderr(out),
     ):
+        patched.setattr(subprocess, "run", run)
         code = call()
     return code, out.getvalue()
 

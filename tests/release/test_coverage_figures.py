@@ -26,13 +26,10 @@ import sys
 import tempfile
 import zipfile
 from pathlib import Path
-from unittest import mock
-
-from belt.release import coverage_figures as figures
-
 
 import pytest
 
+from belt.release import coverage_figures as figures
 from tests import hermetic
 
 HERE = hermetic.RELEASE
@@ -300,10 +297,11 @@ class TestCommandLine:
             piped.seek(0)
             out, err = io.StringIO(), io.StringIO()
             with (
-                mock.patch.object(figures, "STDIN", piped.fileno()),
+                pytest.MonkeyPatch.context() as patched,
                 contextlib.redirect_stdout(out),
                 contextlib.redirect_stderr(err),
             ):
+                patched.setattr(figures, "STDIN", piped.fileno())
                 status = figures.main(argv)
         return status, out.getvalue(), err.getvalue()
 

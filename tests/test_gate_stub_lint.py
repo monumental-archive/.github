@@ -52,9 +52,9 @@ JOB = f"jobs:\n  ci:\n    uses: {CANON}/.github/workflows/ci.yml@{'a' * 40} # v1
 GOOD = TRIGGERS + CONCURRENCY + JOB
 
 
-def same[T](case: unittest.TestCase, got: T, want: T, msg: str = "") -> None:
+def same[T](got: T, want: T, msg: str = "") -> None:
     """Assert two values equal, `want` typed by `got` (mypy.ini: no Any)."""
-    case.assertEqual(got, want, msg or None)
+    assert got == want, msg or None
 
 
 def body() -> str:
@@ -157,9 +157,7 @@ class TestLint:
 
         """
         args = list(argv)
-        return hermetic.call(
-            lambda: gate_stub.main(args), env=self.env, cwd=self.tree
-        )
+        return hermetic.call(lambda: gate_stub.main(args), env=self.env, cwd=self.tree)
 
     def test_no_workflows_is_skipped_by_name(self) -> None:
         """No workflow file: the task says it skipped."""
@@ -173,8 +171,8 @@ class TestLint:
             text=True,
             check=False,
         )
-        same(self, done.returncode, 0, done.stderr)
-        same(self, done.stdout.splitlines(), ["lint:gate-stub: no workflows, skipped"])
+        same(done.returncode, 0, done.stderr)
+        same(done.stdout.splitlines(), ["lint:gate-stub: no workflows, skipped"])
 
     def test_a_conforming_caller_is_ok(self) -> None:
         """Every requirement met, `edited` as a list item too: ok."""
@@ -185,9 +183,9 @@ class TestLint:
         one = self.plant("gate.yml", GOOD)
         two = self.plant("listed.yaml", listed)
         done = self.helper(CANON, one, two)
-        same(self, done.returncode, 0, done.stderr)
-        same(self, done.stdout.splitlines(), OK)
-        same(self, done.stderr, "")
+        same(done.returncode, 0, done.stderr)
+        same(done.stdout.splitlines(), OK)
+        same(done.stderr, "")
 
     def test_not_a_gate_caller_is_not_held(self) -> None:
         """No ci.yml call, another repository's, or no pull_request: not held."""
@@ -198,8 +196,8 @@ class TestLint:
         }
         names = [self.plant(f"{i}.yml", text) for i, text in enumerate(rows.values())]
         done = self.helper(CANON, *names)
-        same(self, done.returncode, 0, done.stderr)
-        same(self, done.stdout.splitlines(), OK)
+        same(done.returncode, 0, done.stderr)
+        same(done.stdout.splitlines(), OK)
 
     def test_edited_only_in_a_comment_is_red(self) -> None:
         """`edited` after a `#` on the types line is not the type."""
@@ -208,16 +206,16 @@ class TestLint:
             GOOD.replace("reopened, edited]", "reopened] # edited"),
         )
         done = self.helper(CANON, rel)
-        same(self, done.returncode, gate_stub.EXIT_RED)
-        same(self, done.stderr.splitlines(), unedited(f" {rel}"))
-        same(self, done.stdout, "")
+        same(done.returncode, gate_stub.EXIT_RED)
+        same(done.stderr.splitlines(), unedited(f" {rel}"))
+        same(done.stdout, "")
 
     def test_an_unindented_merge_group_is_red(self) -> None:
         """`merge_group:` at column 0 is not a trigger under `on:`."""
         rel = self.plant("gate.yml", GOOD.replace("  merge_group:", "merge_group:"))
         done = self.helper(CANON, rel)
-        same(self, done.returncode, gate_stub.EXIT_RED)
-        same(self, done.stderr.splitlines(), unqueued(f" {rel}"))
+        same(done.returncode, gate_stub.EXIT_RED)
+        same(done.stderr.splitlines(), unqueued(f" {rel}"))
 
     def test_all_three_unmet_name_every_caller(self) -> None:
         """A bare caller in the canon (`./`) and one elsewhere: three messages."""
@@ -226,10 +224,10 @@ class TestLint:
         bare = self.plant("bare.yml", "on:\n  pull_request:\n" + JOB)
         clean = self.plant("clean.yml", GOOD)
         done = self.helper(CANON, local, clean, bare)
-        same(self, done.returncode, gate_stub.EXIT_RED)
+        same(done.returncode, gate_stub.EXIT_RED)
         files = f" {local} {bare}"
         expected = [*unedited(files), *unqueued(files), *ungrouped(files)]
-        same(self, done.stderr.splitlines(), expected)
+        same(done.stderr.splitlines(), expected)
 
     def test_a_cancel_line_compares_without_its_comment(self) -> None:
         """Indent, a trailing comment and trailing blanks are dropped first."""
@@ -239,14 +237,14 @@ class TestLint:
         )
         rel = self.plant("gate.yml", commented)
         done = self.helper(CANON, rel)
-        same(self, done.returncode, 0, done.stderr)
-        same(self, done.stdout.splitlines(), OK)
+        same(done.returncode, 0, done.stderr)
+        same(done.stdout.splitlines(), OK)
 
     def test_not_utf8_is_an_error(self) -> None:
         """A workflow that is not UTF-8 is refused by name, exit 2."""
         rel = self.plant("bad.yml", b"on: \xff\n")
         done = self.helper(CANON, rel)
-        same(self, done.returncode, gate_stub.EXIT_ERROR)
+        same(done.returncode, gate_stub.EXIT_ERROR)
         assert done.stderr.startswith(
             f"lint:gate-stub: {rel}: cannot be read as UTF-8:"
         ), done.stderr
@@ -255,7 +253,7 @@ class TestLint:
         """A named workflow that does not exist is refused by name, exit 2."""
         rel = ".github/workflows/gone.yml"
         done = self.helper(CANON, rel)
-        same(self, done.returncode, gate_stub.EXIT_ERROR)
+        same(done.returncode, gate_stub.EXIT_ERROR)
         assert done.stderr.startswith(
             f"lint:gate-stub: {rel}: cannot be read as UTF-8:"
         ), done.stderr
@@ -267,5 +265,5 @@ class TestLint:
         for argv in calls:
             with self.subTest(argv=argv):
                 done = self.helper(*argv)
-                same(self, done.returncode, gate_stub.EXIT_ERROR)
-                same(self, done.stderr.splitlines(), [usage])
+                same(done.returncode, gate_stub.EXIT_ERROR)
+                same(done.stderr.splitlines(), [usage])

@@ -20,11 +20,9 @@ as `mise run test`, which `ci` collects.
 """
 
 import os
-import pathlib
 import subprocess
 import sys
 from pathlib import Path
-
 
 import pytest
 

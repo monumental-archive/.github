@@ -38,13 +38,13 @@ as `mise run test`, which `ci` collects.
 
 from __future__ import annotations
 
-from tests import hermetic
 import base64
 import contextlib
 import hashlib
 import io
 import json
 import os
+import re
 import sys
 import threading
 import urllib.error
@@ -52,33 +52,28 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import ClassVar, NotRequired, TypedDict, override
-from unittest import mock
-
-from belt.release import registry
-
-
-import re
 
 import pytest
 
 from belt import decoded
+from belt.release import registry
+from tests import hermetic
 
-_NAMED = contextlib.ExitStack()
 
+@pytest.fixture
+def _outside_mise(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Name the helper by its command, as a run outside mise does (#1934).
 
-def setUpModule() -> None:
-    """Name the helper by its file, as a run outside mise does (#1934).
-
-    An in-process call reads argv, whatever task runs this suite.
+    An in-process call reads argv, whatever task runs this suite; an
+    empty ORG_FINDINGS records nothing (unset on a runner records to the
+    job's file, #1976).
     """
-    _NAMED.enter_context(mock.patch.object(sys, "argv", ["registry.py"]))
-    for key in ("MISE_TASK_NAME", "ORG_FINDINGS"):
-        if key in os.environ:
-            _NAMED.callback(os.environ.__setitem__, key, os.environ.pop(key))
-    # Empty, not unset: unset on a runner records to the job's file (#1976).
-    os.environ["ORG_FINDINGS"] = ""
-    _NAMED.callback(os.environ.pop, "ORG_FINDINGS", None)
-    unittest.addModuleCleanup(_NAMED.close)
+    monkeypatch.setattr(sys, "argv", ["registry"])
+    monkeypatch.delenv("MISE_TASK_NAME", raising=False)
+    monkeypatch.setenv("ORG_FINDINGS", "")
+
+
+pytestmark = pytest.mark.usefixtures("_outside_mise")
 
 
 def dumps(value: object) -> str:
@@ -364,7 +359,7 @@ class TestHarness:
         """Assert the helper refuses with exactly `message`."""
         code, out = self.run_helper(*argv)
         assert code == 1, out
-        assert f"::error::registry.py: {message}\n" in out
+        assert f"::error::registry: {message}\n" in out
 
 
 class TestBuildxFloor(TestHarness):
@@ -739,7 +734,7 @@ class TestAssemble(TestHarness):
         code, out = self.assemble()
         assert code == 1, out
         assert (
-            "::error::registry.py: imagetools --dry-run output does not end"
+            "::error::registry: imagetools --dry-run output does not end"
             " in a newline;"
             " refusing to guess the manifest bytes\n"
         ) in out
@@ -759,7 +754,7 @@ class TestAssemble(TestHarness):
                 code, out = self.assemble()
                 assert code == 1, out
                 assert (
-                    f"::error::registry.py: the assembled index is '{shown}',"
+                    f"::error::registry: the assembled index is '{shown}',"
                     " not an OCI image index\n"
                 ) in out
                 assert Fake.log == list[Logged]()
@@ -775,7 +770,7 @@ class TestAssemble(TestHarness):
         code, out = self.assemble()
         assert code == 1, out
         assert (
-            f"::error::registry.py: the registry answered {answered}"
+            f"::error::registry: the registry answered {answered}"
             f" for the index pushed as {index}\n"
         ) in out
         assert self.output.read_text("utf-8") == ""
@@ -787,7 +782,7 @@ class TestAssemble(TestHarness):
         code, out = self.assemble()
         assert code == 1, out
         assert (
-            "::error::registry.py: the registry answered no digest"
+            "::error::registry: the registry answered no digest"
             f" for the index pushed as {index}\n"
         ) in out
         assert self.output.read_text("utf-8") == ""
@@ -798,7 +793,7 @@ class TestAssemble(TestHarness):
         code, out = self.assemble()
         assert code == 1, out
         assert re.search(
-            r"::error::registry.py: PUT http://127\.0\.0\.1:\d+/v2/some-owner/some-image"
+            r"::error::registry: PUT http://127\.0\.0\.1:\d+/v2/some-owner/some-image"
             r"/manifests/sha256:[0-9a-f]{64} answered 401\n",
             out,
         )
@@ -951,7 +946,7 @@ class TestTag(TestHarness):
         code, out = self.tag(images)
         assert code == 1, out
         assert (
-            f"::error::registry.py: ghcr.io/some-owner/some-image:1.2.3 resolves to"
+            f"::error::registry: ghcr.io/some-owner/some-image:1.2.3 resolves to"
             f" {resolved},"
             f" gated {digest}\n"
         ) in out
@@ -962,7 +957,7 @@ class TestTag(TestHarness):
         code, out = self.tag(gated(digest=ARM))
         assert code == 1, out
         assert re.search(
-            rf"::error::registry.py: GET http://\S+/manifests/{ARM} answered 404\n", out
+            rf"::error::registry: GET http://\S+/manifests/{ARM} answered 404\n", out
         )
         methods = [e["method"] for e in Fake.log]
         want: list[str] = ["GET", "GET"]
@@ -992,10 +987,11 @@ class TestEnvironment(TestHarness):
 
         out = io.StringIO()
         with (
-            mock.patch.object(urllib.request, "urlopen", refuse),
+            pytest.MonkeyPatch.context() as patched,
             contextlib.redirect_stdout(out),
             contextlib.redirect_stderr(out),
         ):
+            patched.setattr(urllib.request, "urlopen", refuse)
             code = registry.main(["tag"], self.env)
         assert code == 1
         want: list[str] = [
@@ -1008,9 +1004,10 @@ class TestEnvironment(TestHarness):
         """What answered is not an HTTP response: refused by name (#1682)."""
         url = "https://ghcr.io/v2/a/b/manifests/1"
         with (
-            mock.patch.object(urllib.request, "urlopen", return_value=None),
+            pytest.MonkeyPatch.context() as patched,
             pytest.raises(registry.RefusedError) as caught,
         ):
+            patched.setattr(urllib.request, "urlopen", hermetic.returning(None))
             registry.Registry.request("GET", url, {})
         assert f"{url} answered NoneType, not an HTTP response" == str(caught.value)
 

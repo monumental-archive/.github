@@ -103,16 +103,16 @@ def run(argv: list[str]) -> tuple[int, str, str]:
     return code, out.getvalue(), err.getvalue()
 
 
-def assert_answered(case: unittest.TestCase, got: tuple[int, str, str]) -> None:
+def assert_answered(got: tuple[int, str, str]) -> None:
     """Hold a run to one printed line, or one refusal line."""
     code, out, err = got
     if code == 0:
-        case.assertEqual(err, "")
-        case.assertTrue(out.endswith("\n") and out.count("\n") == 1, out)
+        assert err == ""
+        assert out.endswith("\n") and out.count("\n") == 1, out
     else:
-        case.assertEqual((code, out), (1, ""))
-        case.assertTrue(err.startswith("::error::"), err)
-        case.assertEqual(err.count("\n"), 1, err)
+        assert (code, out) == (1, "")
+        assert err.startswith("::error::"), err
+        assert err.count("\n") == 1, err
 
 
 class TestTarballNameParsesBack:
@@ -163,7 +163,7 @@ class TestAnyTable:
             table = Path(tmp) / "pgrx-base-images.toml"
             table.write_text(f"build = {toml_value(build)}\n", "utf-8")
             got = run(["base-image", "--pg", pg, "--table", str(table)])
-        assert_answered(self, got)
+        assert_answered(got)
 
 
 class TestAnyTree:
@@ -186,6 +186,6 @@ class TestAnyTree:
             for f in files:
                 (Path(tmp) / f).write_text("", "utf-8")
             got = run(["extension-name", "--tree", tmp])
-        assert_answered(self, got)
+        assert_answered(got)
         controls = [f for f in files if f.endswith(".control")]
         assert (got[0] == 0) == (len(controls) == 1), files

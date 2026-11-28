@@ -15,24 +15,33 @@ stdlib `unittest`, matching the other mise/test_*.py. Run through the
 gate as `mise run test`, which `ci` collects.
 """
 
-from tests import hermetic
 import io
 import json
 from contextlib import redirect_stdout
 from pathlib import Path
-from unittest import mock
+
+import pytest
 
 from belt import bestpractices_owner as owner
 from belt import decoded
+from tests import hermetic
 
 HERE = hermetic.MISE
 
 DB = decoded.as_object(
-    decoded.load_json((Path(__file__).resolve().parent / "testdata" / "bestpractices-13998.json").read_text()),
+    decoded.load_json(
+        (
+            Path(__file__).resolve().parent / "testdata" / "bestpractices-13998.json"
+        ).read_text()
+    ),
     "project 13998's entry",
 )
 CANON = decoded.as_object(
-    decoded.load_json((Path(__file__).resolve().parent / "testdata" / "bestpractices-14058.json").read_text()),
+    decoded.load_json(
+        (
+            Path(__file__).resolve().parent / "testdata" / "bestpractices-14058.json"
+        ).read_text()
+    ),
     "project 14058's entry",
 )
 
@@ -49,7 +58,8 @@ def run(entry: object, wearer: str) -> tuple[int, str]:
     """
     out = io.StringIO()
     stdin = io.StringIO(json.dumps(entry))
-    with mock.patch("sys.stdin", stdin), redirect_stdout(out):
+    with pytest.MonkeyPatch.context() as patched, redirect_stdout(out):
+        patched.setattr("sys.stdin", stdin)
         status = owner.main([wearer])
     return status, out.getvalue()
 
@@ -127,7 +137,8 @@ class TestNormalisation:
     def test_a_process_with_no_stdin_is_red_by_name(self) -> None:
         """No standard input is named, never a traceback (#1681)."""
         out = io.StringIO()
-        with mock.patch("sys.stdin", None), redirect_stdout(out):
+        with pytest.MonkeyPatch.context() as patched, redirect_stdout(out):
+            patched.setattr("sys.stdin", None)
             status = owner.main([CANON_WEARER])
         assert status == 1
         assert out.getvalue() == (

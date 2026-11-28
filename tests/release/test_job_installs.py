@@ -36,19 +36,15 @@ import copy
 import re
 import shlex
 import subprocess
-import sys
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
-from unittest import mock
-
-from belt.release import caller_pins
-
 
 import pytest
 
 from belt import decoded, python_runs, workflow_yaml
 from belt.python_runs import python_code
+from belt.release import caller_pins
 from tests import hermetic
 
 if TYPE_CHECKING:
@@ -1453,7 +1449,8 @@ def planted_uninstalled(helper: str, also: dict[str, str] | None = None) -> list
                 "run": 'python3 "${GITHUB_WORKSPACE}/release/planted-call.py"',
             },
         )
-        with mock.patch(f"{__name__}.CANON", root):
+        with pytest.MonkeyPatch.context() as patched:
+            patched.setattr(f"{__name__}.CANON", root)
             return uninstalled("attach-release.yml", "attach", job)
 
 
@@ -1476,7 +1473,8 @@ def planted_shell(helper: str) -> list[str]:
                 "run": 'bash "${GITHUB_WORKSPACE}/release/planted-call.sh"',
             },
         )
-        with mock.patch(f"{__name__}.CANON", root):
+        with pytest.MonkeyPatch.context() as patched:
+            patched.setattr(f"{__name__}.CANON", root)
             return uninstalled("attach-release.yml", "attach", job)
 
 

@@ -180,9 +180,9 @@ sys.exit(int(os.environ["STUB_RC"]))
 """
 
 
-def same[T](case: unittest.TestCase, got: T, want: T, msg: str = "") -> None:
+def same[T](got: T, want: T, msg: str = "") -> None:
     """Assert two values equal, `want` typed by `got` (mypy.ini: no Any)."""
-    case.assertEqual(got, want, msg or None)
+    assert got == want, msg or None
 
 
 def records(file: Path) -> list[dict[str, object]]:
@@ -200,12 +200,12 @@ def records(file: Path) -> list[dict[str, object]]:
     ]
 
 
-def refused(case: unittest.TestCase, file: Path, stderr: str) -> None:
+def refused(file: Path, stderr: str) -> None:
     """Hold a refusal to one record: its own, none of the report's (#1934)."""
     got = records(file)
-    same(case, len(got), 1)
-    same(case, got[0]["subject"], "")
-    case.assertIn(f"{TASK}: {got[0]['message']}\n", stderr)
+    same(len(got), 1)
+    same(got[0]["subject"], "")
+    assert f"{TASK}: {got[0]['message']}\n" in stderr
 
 
 class TestStubbed:
@@ -270,10 +270,9 @@ class TestAdapter(TestStubbed):
     def test_the_quoted_report_is_two_records(self) -> None:
         """The real run's log: two records, the lines in the detail, its 3."""
         done = self.run_adapter(QUOTED, 3)
-        same(self, done.returncode, 3, done.stderr)
-        same(self, records(self.file), QUOTED_RECORDS)
+        same(done.returncode, 3, done.stderr)
+        same(records(self.file), QUOTED_RECORDS)
         same(
-            self,
             done.stderr.splitlines(),
             [
                 "-       - uses: actions/checkout@v4",
@@ -285,95 +284,94 @@ class TestAdapter(TestStubbed):
                 "  line 7",
             ],
         )
-        same(self, done.stdout, f"{TASK}: pinact: 2 finding(s)\n")
+        same(done.stdout, f"{TASK}: pinact: 2 finding(s)\n")
 
     def test_a_clean_report_records_nothing(self) -> None:
         """No results: no record, pinact's 0."""
         done = self.run_adapter(sarif(), 0)
-        same(self, done.returncode, 0, done.stderr)
-        same(self, records(self.file), [])
-        same(self, done.stdout, f"{TASK}: pinact: 0 finding(s)\n")
+        same(done.returncode, 0, done.stderr)
+        same(records(self.file), [])
+        same(done.stdout, f"{TASK}: pinact: 0 finding(s)\n")
 
     def test_another_sarif_version_is_refused_by_name(self) -> None:
         """SARIF 2.2: refused, both versions named, exit 1, its one record."""
         done = self.run_adapter(sarif(version="2.2.0"), 0)
-        same(self, done.returncode, 1, done.stderr)
+        same(done.returncode, 1, done.stderr)
         assert (
             "the report is SARIF 2.2.0; this adapter reads SARIF 2.1.0" in done.stderr
         )
-        refused(self, self.file, done.stderr)
-        same(self, done.stdout, "")
+        refused(self.file, done.stderr)
+        same(done.stdout, "")
 
     def test_an_unknown_shape_is_refused_by_name(self) -> None:
         """A log with no `runs`: refused by name, exit 1, its one record."""
         done = self.run_adapter('{"version": "2.1.0"}', 3)
-        same(self, done.returncode, 1, done.stderr)
+        same(done.returncode, 1, done.stderr)
         assert (
             f"{TASK}: pinact exited 3: the output is not pinact's report:"
             " runs is not a list"
         ) in done.stderr
-        refused(self, self.file, done.stderr)
-        same(self, done.stdout, "")
+        refused(self.file, done.stderr)
+        same(done.stdout, "")
 
     def test_output_that_is_not_json_is_refused_by_name(self) -> None:
         """A human report: refused with pinact's status, exit 1."""
         done = self.run_adapter("ERROR failed to handle a line\n", 3)
-        same(self, done.returncode, 1, done.stderr)
+        same(done.returncode, 1, done.stderr)
         assert (
             f"{TASK}: pinact exited 3: the output is not pinact's report" in done.stderr
         )
-        refused(self, self.file, done.stderr)
+        refused(self.file, done.stderr)
 
     def test_a_malformed_result_records_none(self) -> None:
         """One result with no location: refused, none of the report's recorded."""
         bad = result("parse-error", MISMATCH, 6) | {"locations": []}
         done = self.run_adapter(sarif(result("parse-error", "x", 1), bad), 3)
-        same(self, done.returncode, 1, done.stderr)
+        same(done.returncode, 1, done.stderr)
         assert "runs[0].results[1]: locations is empty" in done.stderr
-        refused(self, self.file, done.stderr)
+        refused(self.file, done.stderr)
 
     def test_another_resolved_sha_leaves_the_message(self) -> None:
         """A release moves the SHA in the text: the message is unchanged."""
         later = UNPINNED.replace(FIXED, "f" * 40)
         done = self.run_adapter(sarif(result("unpinned-action", later, 7)), 3)
-        same(self, done.returncode, 3, done.stderr)
+        same(done.returncode, 3, done.stderr)
         got = [(r["message"], r["detail"]) for r in records(self.file)]
         want: list[tuple[object, object]] = [(UNPINNED_LINE, [later, "line 7"])]
-        same(self, got, want)
+        same(got, want)
 
     def test_a_missing_file_is_refused_by_name(self) -> None:
         """A result naming a file that is not there: refused, 1, its one record."""
         (self.dir / WORKFLOW).unlink()
         done = self.run_adapter(QUOTED, 3)
-        same(self, done.returncode, 1, done.stderr)
+        same(done.returncode, 1, done.stderr)
         assert (
             f"{TASK}: pinact exited 3: the output is not pinact's report:"
             f" runs[0].results[0]: locations[0]: {WORKFLOW} cannot be read"
         ) in done.stderr
-        refused(self, self.file, done.stderr)
+        refused(self.file, done.stderr)
 
     def test_a_line_past_the_end_is_refused_by_name(self) -> None:
         """A result past the file's last line: refused, 1, its one record."""
         done = self.run_adapter(sarif(result("parse-error", MISMATCH, 8)), 3)
-        same(self, done.returncode, 1, done.stderr)
+        same(done.returncode, 1, done.stderr)
         assert (
             f"runs[0].results[0]: locations[0]: {WORKFLOW} has no line 8" in done.stderr
         )
-        refused(self, self.file, done.stderr)
+        refused(self.file, done.stderr)
 
     def test_pinact_s_status_is_the_exit(self) -> None:
         """A 2 from pinact with a clean log exits 2."""
         done = self.run_adapter(sarif(), 2)
-        same(self, done.returncode, 2, done.stderr)
-        same(self, records(self.file), [])
+        same(done.returncode, 2, done.stderr)
+        same(records(self.file), [])
 
     def test_arguments_pass_unchanged_after_the_format(self) -> None:
         """The adapter calls `pinact run --format sarif` and the arguments."""
         args = ["--config", "a b.yaml", "--fix=false", WORKFLOW, "x/action.yml"]
         done = self.run_adapter(sarif(), 0, *args)
-        same(self, done.returncode, 0, done.stderr)
+        same(done.returncode, 0, done.stderr)
         same(
-            self,
             self.log.read_text(encoding="utf-8").splitlines(),
             ["\t".join(["run", "--format", "sarif", *args])],
         )
@@ -381,9 +379,9 @@ class TestAdapter(TestStubbed):
     def test_no_pinact_is_refused_by_name(self) -> None:
         """No pinact on PATH: refused by name, exit 1, its one record."""
         done = self.run_adapter(sarif(), 0, path=str(self.dir / "empty"))
-        same(self, done.returncode, 1, done.stderr)
+        same(done.returncode, 1, done.stderr)
         assert f"{TASK}: pinact is not on PATH" in done.stderr
-        refused(self, self.file, done.stderr)
+        refused(self.file, done.stderr)
 
     def test_the_pinned_pinact_offline_gives_two_messages(self) -> None:
         """Two unpinned actions in one file, judged by pinact with `--no-api`.
@@ -427,7 +425,7 @@ class TestAdapter(TestStubbed):
                 "detail": [cannot, "line 7"],
             },
         ]
-        same(self, records(self.file), want)
+        same(records(self.file), want)
 
 
 class TestTask(TestStubbed):
@@ -465,13 +463,13 @@ class TestTask(TestStubbed):
     def test_the_quoted_report_is_the_records_and_pinact_s_red(self) -> None:
         """The real run's log: its two records, pinact's 3, one call."""
         done = self.run_task(QUOTED, 3)
-        same(self, done.returncode, 3, done.stderr)
-        same(self, records(self.file), QUOTED_RECORDS)
-        same(self, len(self.log.read_text(encoding="utf-8").splitlines()), 1)
+        same(done.returncode, 3, done.stderr)
+        same(records(self.file), QUOTED_RECORDS)
+        same(len(self.log.read_text(encoding="utf-8").splitlines()), 1)
 
     def test_a_clean_report_is_no_record_and_pinact_s_green(self) -> None:
         """No results: no record, pinact's 0, the adapter's line."""
         done = self.run_task(sarif(), 0)
-        same(self, done.returncode, 0, done.stderr)
-        same(self, records(self.file), [])
-        same(self, done.stdout, f"{TASK}: pinact: 0 finding(s)\n")
+        same(done.returncode, 0, done.stderr)
+        same(records(self.file), [])
+        same(done.stdout, f"{TASK}: pinact: 0 finding(s)\n")

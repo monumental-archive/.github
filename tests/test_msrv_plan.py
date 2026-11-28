@@ -14,18 +14,17 @@ rather than trust this line. A check that admits the wrong toolchain looks
 exactly like a check that works.
 """
 
-from tests import hermetic
 import io
 import json
 import tempfile
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from typing import TYPE_CHECKING
-from unittest import mock
 
 import pytest
 
 from belt import decoded, msrv_plan
+from tests import hermetic
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -424,10 +423,11 @@ class TestMainTest:
         out, err = io.StringIO(), io.StringIO()
         stdin = io.StringIO(json.dumps(doc) if doc is not None else "{")
         with (
-            mock.patch("sys.stdin", stdin),
+            pytest.MonkeyPatch.context() as patched,
             redirect_stdout(out),
             redirect_stderr(err),
         ):
+            patched.setattr("sys.stdin", stdin)
             status = msrv_plan.main(argv)
         return status, out.getvalue(), err.getvalue()
 
@@ -595,10 +595,11 @@ class TestMainTest:
                 argv = ["--toolchains", str(path), "--floor", floor, "--root", fuzz]
                 err = io.StringIO()
                 with (
-                    mock.patch("sys.stdin", io.StringIO(json.dumps(doc))),
+                    pytest.MonkeyPatch.context() as patched,
                     redirect_stdout(io.StringIO()),
                     redirect_stderr(err),
                 ):
+                    patched.setattr("sys.stdin", io.StringIO(json.dumps(doc)))
                     status = msrv_plan.main(argv)
                 assert status == 1
                 said_err = err.getvalue()

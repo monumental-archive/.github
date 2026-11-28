@@ -54,7 +54,6 @@ stdlib `unittest`, matching the rest of release/. Run through the gate
 as `mise run test`, which `ci` collects.
 """
 
-import contextlib
 import hashlib
 import json
 import os
@@ -63,8 +62,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest import mock
 
+import pytest
 
 from belt import decoded, workflow_yaml
 from belt.release import package_crates
@@ -119,22 +118,20 @@ done
 """
 
 
-_NAMED = contextlib.ExitStack()
+@pytest.fixture
+def _outside_mise(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Name the helper by its command, as a run outside mise does (#1934).
 
-
-def setUpModule() -> None:
-    """Name the helper by its file, as a run outside mise does (#1934).
-
-    An in-process call reads argv, whatever task runs this suite.
+    An in-process call reads argv, whatever task runs this suite; an
+    empty ORG_FINDINGS records nothing (unset on a runner records to the
+    job's file, #1976).
     """
-    _NAMED.enter_context(mock.patch.object(sys, "argv", ["package_crates.py"]))
-    for key in ("MISE_TASK_NAME", "ORG_FINDINGS"):
-        if key in os.environ:
-            _NAMED.callback(os.environ.__setitem__, key, os.environ.pop(key))
-    # Empty, not unset: unset on a runner records to the job's file (#1976).
-    os.environ["ORG_FINDINGS"] = ""
-    _NAMED.callback(os.environ.pop, "ORG_FINDINGS", None)
-    unittest.addModuleCleanup(_NAMED.close)
+    monkeypatch.setattr(sys, "argv", ["package-crates"])
+    monkeypatch.delenv("MISE_TASK_NAME", raising=False)
+    monkeypatch.setenv("ORG_FINDINGS", "")
+
+
+pytestmark = pytest.mark.usefixtures("_outside_mise")
 
 
 def step_body(name: str) -> str:
@@ -404,7 +401,7 @@ class TestPackageAnExcludedMember:
         run = run_steps(EXCLUDE, second={"edtf-core": planted})
         assert run.returncode != 0
         assert (
-            f"::error::package_crates.py: edtf-core-{VERSION}.crate changed when"
+            f"::error::package-crates: edtf-core-{VERSION}.crate changed when"
             f" packaged again"
             f" without verifying: {digest('edtf-core')} verified,"
             f" {hashlib.sha256(planted).hexdigest()} now\n"
@@ -415,7 +412,7 @@ class TestPackageAnExcludedMember:
         """Only crates the verified run wrote are compared."""
         run = run_steps(EXCLUDE, second={UNCOMPILABLE: b"first written here\n"})
         assert run.returncode == 0, run.stdout + run.stderr
-        assert "::error::package_crates.py: " not in run.stderr
+        assert "::error::package-crates: " not in run.stderr
 
     def test_a_verified_run_that_wrote_nothing_is_refused(self) -> None:
         """Every member excluded leaves nothing to compare (#1384)."""
@@ -424,7 +421,7 @@ class TestPackageAnExcludedMember:
         assert run.returncode == 1
         assert (
             run.stderr
-            == "::error::package_crates.py: cargo package wrote no crate to verify\n"
+            == "::error::package-crates: cargo package wrote no crate to verify\n"
         )
         cargo: list[str] = [f"package --workspace --locked{flags}"]
         assert cargo == run.cargo
@@ -529,7 +526,7 @@ class TestSubjectsAreWhatCratesIoReceives:
         run = run_steps("", members=("edtf-core", "edtf-cli"), unwritten=("edtf-cli",))
         assert run.returncode != 0
         assert (
-            f"::error::package_crates.py: edtf-cli {VERSION} publishes to crates.io,"
+            f"::error::package-crates: edtf-cli {VERSION} publishes to crates.io,"
             f" but cargo package wrote no edtf-cli-{VERSION}.crate\n"
         ) == run.stderr
         assert run.outputs == ""

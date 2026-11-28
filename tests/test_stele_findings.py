@@ -108,9 +108,9 @@ def report(verdict: str, *entries: dict[str, object], schema: int = 9) -> str:
     return json.dumps(doc)
 
 
-def same[T](case: unittest.TestCase, got: T, want: T, msg: str = "") -> None:
+def same[T](got: T, want: T, msg: str = "") -> None:
     """Assert two values equal, `want` typed by `got` (mypy.ini: no Any)."""
-    case.assertEqual(got, want, msg or None)
+    assert got == want, msg or None
 
 
 class TestAdapter:
@@ -176,11 +176,10 @@ class TestAdapter:
     def test_the_quoted_document_is_one_record(self) -> None:
         """The document the issue quotes: one record, the line, the verdict, 1."""
         done = self.run_adapter(json.dumps(QUOTED), 1)
-        same(self, done.returncode, 1, done.stderr)
+        same(done.returncode, 1, done.stderr)
         want: list[dict[str, object]] = [QUOTED_RECORD]
-        same(self, self.records(), want)
+        same(self.records(), want)
         same(
-            self,
             done.stderr.splitlines(),
             [
                 "stub stele: walking",
@@ -189,19 +188,19 @@ class TestAdapter:
                 "  actual: pkg:cargo/a",
             ],
         )
-        same(self, done.stdout, f"{TASK}: stele: FAIL\n")
+        same(done.stdout, f"{TASK}: stele: FAIL\n")
 
     def test_a_pass_records_nothing(self) -> None:
         """PASS with no findings: no record, exit 0."""
         done = self.run_adapter(report("PASS"), 0)
-        same(self, done.returncode, 0, done.stderr)
-        same(self, self.records(), [])
-        same(self, done.stdout, f"{TASK}: stele: PASS\n")
+        same(done.returncode, 0, done.stderr)
+        same(self.records(), [])
+        same(done.stdout, f"{TASK}: stele: PASS\n")
 
     def test_cannot_judge_without_findings_is_one_record(self) -> None:
         """A verdict other than PASS with no findings is one finding."""
         done = self.run_adapter(report("CANNOT_JUDGE"), 1)
-        same(self, done.returncode, 1, done.stderr)
+        same(done.returncode, 1, done.stderr)
         want: list[dict[str, object]] = [
             {
                 "v": 1,
@@ -211,8 +210,8 @@ class TestAdapter:
                 "detail": [],
             }
         ]
-        same(self, self.records(), want)
-        same(self, done.stdout, f"{TASK}: stele: CANNOT_JUDGE\n")
+        same(self.records(), want)
+        same(done.stdout, f"{TASK}: stele: CANNOT_JUDGE\n")
 
     def test_three_findings_are_three_records_in_order(self) -> None:
         """Each entry one record, in the document's order, fields as present."""
@@ -222,14 +221,14 @@ class TestAdapter:
             {"subject": "c", "assertion": "third", "expected": "y"},
         ]
         done = self.run_adapter(report("FAIL", *entries), 1)
-        same(self, done.returncode, 1, done.stderr)
+        same(done.returncode, 1, done.stderr)
         got = [(r["subject"], r["message"], r["detail"]) for r in self.records()]
         want: list[tuple[object, object, object]] = [
             ("b", "first: one", []),
             ("a", "second", ["actual: x"]),
             ("c", "third", ["expected: y"]),
         ]
-        same(self, got, want)
+        same(got, want)
 
     def refusal(self) -> tuple[object, str]:
         """Read the one record a refusal leaves: its own (#1934).
@@ -239,28 +238,28 @@ class TestAdapter:
 
         """
         got = self.records()
-        same(self, len(got), 1)
+        same(len(got), 1)
         return got[0]["subject"], str(got[0]["message"])
 
     def test_another_schema_is_refused_by_name(self) -> None:
         """Schema 10: refused, both numbers named, exit 1, only that recorded."""
         done = self.run_adapter(report("PASS", schema=10), 0)
-        same(self, done.returncode, 1, done.stderr)
+        same(done.returncode, 1, done.stderr)
         assert "the report is schema 10; this adapter reads schema 9" in done.stderr
         subject, message = self.refusal()
-        same(self, subject, "")
+        same(subject, "")
         assert "the report is schema 10" in message
-        same(self, done.stdout, "")
+        same(done.stdout, "")
 
     def test_output_that_is_not_json_is_refused_by_name(self) -> None:
         """Not one JSON document: refused with stele's status, exit 1."""
         done = self.run_adapter("assert: FAIL\n", 3)
-        same(self, done.returncode, 1, done.stderr)
+        same(done.returncode, 1, done.stderr)
         assert (
             f"{TASK}: stele assert inventory exited 3: the output is not stele's report"
         ) in done.stderr
         subject, message = self.refusal()
-        same(self, subject, "")
+        same(subject, "")
         assert "exited 3: the output is not stele's report" in message
 
     def test_a_malformed_finding_records_none(self) -> None:
@@ -270,7 +269,7 @@ class TestAdapter:
             {"subject": "b"},
         ]
         done = self.run_adapter(report("FAIL", *entries), 1)
-        same(self, done.returncode, 1, done.stderr)
+        same(done.returncode, 1, done.stderr)
         assert "findings[1]: assertion" in done.stderr
         _, message = self.refusal()
         assert "findings[1]: assertion" in message
@@ -278,16 +277,15 @@ class TestAdapter:
     def test_stele_s_status_is_the_exit(self) -> None:
         """A status of 2 from stele with a PASS document exits 2."""
         done = self.run_adapter(report("PASS"), 2)
-        same(self, done.returncode, 2, done.stderr)
-        same(self, self.records(), [])
+        same(done.returncode, 2, done.stderr)
+        same(self.records(), [])
 
     def test_arguments_pass_unchanged_after_json(self) -> None:
         """The adapter calls `stele assert <target> --json` and the arguments."""
         args = ["--org", "an org", "--policy", "p.json", "--depth", "full", "--"]
         done = self.run_adapter(report("PASS"), 0, "assert", "evidence", *args)
-        same(self, done.returncode, 0, done.stderr)
+        same(done.returncode, 0, done.stderr)
         same(
-            self,
             self.log.read_text(encoding="utf-8").splitlines(),
             ["\t".join(["assert", "evidence", "--json", *args])],
         )
@@ -295,16 +293,16 @@ class TestAdapter:
     def test_no_assertion_is_a_usage_refusal(self) -> None:
         """Arguments that name no assertion: usage, exit 1, stele not run."""
         done = self.run_adapter(report("PASS"), 0, "inventory")
-        same(self, done.returncode, 1, done.stderr)
+        same(done.returncode, 1, done.stderr)
         assert "usage: stele_findings.py assert <target>" in done.stderr
         assert not self.log.exists()
 
     def test_no_stele_is_refused_by_name(self) -> None:
         """No stele on PATH: refused by name, exit 1, only that recorded."""
         done = self.run_adapter(report("PASS"), 0, path=str(self.dir / "empty"))
-        same(self, done.returncode, 1, done.stderr)
+        same(done.returncode, 1, done.stderr)
         assert "stele is not on PATH" in done.stderr
-        same(self, self.refusal(), ("stele assert inventory", "stele is not on PATH"))
+        same(self.refusal(), ("stele assert inventory", "stele is not on PATH"))
 
     def test_the_pinned_stele_gives_the_one_record(self) -> None:
         """A versionless PURL, judged by stele itself: the quoted record."""
@@ -323,7 +321,7 @@ class TestAdapter:
             cwd=self.dir,
             check=False,
         )
-        same(self, done.returncode, 1, done.stderr)
+        same(done.returncode, 1, done.stderr)
         want: list[dict[str, object]] = [QUOTED_RECORD]
-        same(self, self.records(), want)
-        same(self, done.stdout, f"{TASK}: stele: FAIL\n")
+        same(self.records(), want)
+        same(done.stdout, f"{TASK}: stele: FAIL\n")

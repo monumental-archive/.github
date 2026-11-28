@@ -126,11 +126,12 @@ def run(
     ran = signer.Ran(code, json.dumps(findings).encode(), b"")
     env = {"GH_TOKEN": "a token", "MISE_TASK_NAME": TASK, "ORG_FINDINGS": ""}
     with (
-        mock.patch.object(signer, "run_zizmor", return_value=ran),
-        mock.patch.dict(os.environ, env),
+        pytest.MonkeyPatch.context() as patched,
         redirect_stdout(out),
         redirect_stderr(err),
     ):
+        patched.setattr(signer, "run_zizmor", hermetic.returning(ran))
+        hermetic.patch_env(patched, env)
         code = signer.main(["--signer-workflow", workflow, *ARGS])
     return code, out.getvalue(), err.getvalue()
 
@@ -556,13 +557,15 @@ class TestRecords:
 
     def test_no_zizmor_is_refused_by_name(self) -> None:
         """No zizmor on PATH: refused by name, 1, its one record (#1934)."""
-        with mock.patch.object(signer, "ZIZMOR", "/nonexistent/zizmor"):
+        with pytest.MonkeyPatch.context() as patched:
+            patched.setattr(signer, "ZIZMOR", "/nonexistent/zizmor")
             out, err = io.StringIO(), io.StringIO()
             with (
-                mock.patch.dict(os.environ, self.env),
+                pytest.MonkeyPatch.context() as patched,
                 redirect_stdout(out),
                 redirect_stderr(err),
             ):
+                hermetic.patch_env(patched, self.env)
                 status = signer.main(["--signer-workflow", SIGNER_WORKFLOW])
         assert status == 1
         assert f"{TASK}: zizmor is not on PATH" in err.getvalue()

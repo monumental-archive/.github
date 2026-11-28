@@ -23,10 +23,8 @@ as `mise run test`.
 import json
 import os
 import subprocess
-import sys
 import tarfile
 from pathlib import Path
-
 
 import pytest
 

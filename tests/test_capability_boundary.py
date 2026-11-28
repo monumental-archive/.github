@@ -44,9 +44,9 @@ MARKER = "# capability-boundary: signs only; runs no caller step\n"
 JOBS = "jobs:\n  a:\n    runs-on: ubuntu-26.04\n    steps:\n      - run: true\n"
 
 
-def same[T](case: unittest.TestCase, got: T, want: T, msg: str = "") -> None:
+def same[T](got: T, want: T, msg: str = "") -> None:
     """Assert two values equal, `want` typed by `got` (mypy.ini: no Any)."""
-    case.assertEqual(got, want, msg or None)
+    assert got == want, msg or None
 
 
 def body() -> str:
@@ -138,17 +138,17 @@ class TestBoundary:
     def test_no_workflows_is_skipped_by_name(self) -> None:
         """No workflow file: the task says it skipped."""
         done = self.task()
-        same(self, done.returncode, 0, done.stderr)
+        same(done.returncode, 0, done.stderr)
         skipped = ["lint:capability-boundary: no workflows, skipped"]
-        same(self, done.stdout.splitlines(), skipped)
+        same(done.stdout.splitlines(), skipped)
 
     def test_breach_is_red_through_the_task(self) -> None:
         """The task body hands the helper every workflow; a breach is red."""
         self.plant("clean.yml", CALLED + JOBS)
         bad = self.plant("sign.yaml", CALLED + GRANT + JOBS)
         done = self.task()
-        same(self, done.returncode, capability_boundary.EXIT_RED)
-        same(self, done.stderr.splitlines(), red(bad))
+        same(done.returncode, capability_boundary.EXIT_RED)
+        same(done.stderr.splitlines(), red(bad))
 
     def test_inside_the_boundary_is_ok(self) -> None:
         """Not called, no grant, a grant in prose, a marked signer: ok."""
@@ -164,9 +164,9 @@ class TestBoundary:
             with self.subTest(row=row):
                 rel = self.plant("wf.yml", text)
                 done = self.helper(rel)
-                same(self, done.returncode, 0, done.stderr)
-                same(self, done.stdout.splitlines(), OK)
-                same(self, done.stderr, "")
+                same(done.returncode, 0, done.stderr)
+                same(done.stdout.splitlines(), OK)
+                same(done.stderr, "")
 
     def test_breaches_are_red_and_named(self) -> None:
         """No marker, or a marker only in prose: red, every file named."""
@@ -178,23 +178,23 @@ class TestBoundary:
         tabbed = self.plant("tabbed.yml", "on:\n\tworkflow_call:\n\tid-token:\twrite\n")
         clean = self.plant("clean.yml", CALLED + JOBS)
         done = self.helper(bare, clean, prose, tabbed)
-        same(self, done.returncode, capability_boundary.EXIT_RED)
-        same(self, done.stderr.splitlines(), red(bare, prose, tabbed))
-        same(self, done.stdout, "")
+        same(done.returncode, capability_boundary.EXIT_RED)
+        same(done.stderr.splitlines(), red(bare, prose, tabbed))
+        same(done.stdout, "")
 
     def test_a_line_is_split_on_newline_alone(self) -> None:
         """A carriage return or form feed inside a line does not end it."""
         text = "on:\n  workflow_call:\nx: '#'\rid-token: write\n"
         rel = self.plant("cr.yml", text)
         done = self.helper(rel)
-        same(self, done.returncode, 0, done.stderr)
-        same(self, done.stdout.splitlines(), OK)
+        same(done.returncode, 0, done.stderr)
+        same(done.stdout.splitlines(), OK)
 
     def test_not_utf8_is_an_error(self) -> None:
         """A workflow that is not UTF-8 is refused by name, exit 2."""
         rel = self.plant("bad.yml", b"on: \xff\n")
         done = self.helper(rel)
-        same(self, done.returncode, capability_boundary.EXIT_ERROR)
+        same(done.returncode, capability_boundary.EXIT_ERROR)
         assert done.stderr.startswith(
             f"lint:capability-boundary: {rel}: cannot be read as UTF-8:"
         ), done.stderr
@@ -202,7 +202,7 @@ class TestBoundary:
     def test_missing_file_is_an_error(self) -> None:
         """A named workflow that does not exist is refused by name, exit 2."""
         done = self.helper(".github/workflows/gone.yml")
-        same(self, done.returncode, capability_boundary.EXIT_ERROR)
+        same(done.returncode, capability_boundary.EXIT_ERROR)
         assert done.stderr.startswith(
             "lint:capability-boundary: .github/workflows/gone.yml:"
             " cannot be read as UTF-8:"
@@ -211,6 +211,6 @@ class TestBoundary:
     def test_no_workflows_is_a_usage_error(self) -> None:
         """No workflow named: exit 2 with the usage line."""
         done = self.helper()
-        same(self, done.returncode, capability_boundary.EXIT_ERROR)
+        same(done.returncode, capability_boundary.EXIT_ERROR)
         usage = "lint:capability-boundary: usage: capability_boundary.py WORKFLOW..."
-        same(self, done.stderr.splitlines(), [usage])
+        same(done.stderr.splitlines(), [usage])

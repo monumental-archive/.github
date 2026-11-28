@@ -28,7 +28,6 @@ import sys
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
-from unittest import mock
 
 import pytest
 
@@ -225,15 +224,16 @@ class TestPlanted:
         """
         out, err = self.tmp / "out", self.tmp / "err"
         with (
-            mock.patch.dict(os.environ, self.env, clear=True),
-            mock.patch.object(
-                rust_workspaces,
-                "resolved",
-                return_value=None if roots is None else list(roots),
-            ),
+            pytest.MonkeyPatch.context() as patched,
             contextlib.chdir(self.tree),
             captured(out, err),
         ):
+            hermetic.patch_env(patched, self.env, clear=True)
+            patched.setattr(
+                rust_workspaces,
+                "resolved",
+                hermetic.returning(None if roots is None else list(roots)),
+            )
             if manifest is None:
                 status = msrv_lint.main()
             else:

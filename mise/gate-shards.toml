@@ -103,4 +103,3 @@ when = ["*.sql"]
 
 [lint.cost."lint:biome"]
 seconds = 23
-

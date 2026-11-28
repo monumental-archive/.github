@@ -303,7 +303,7 @@ org_pgrx_postgres() { # usage: org_pgrx_postgres <Postgres major>, in the subshe
   local belt="${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: lefthook run post-checkout)}"
   local installed plan record major where source="" target key cache clone
   installed=$(mise ls "aqua:theseus-rs/postgresql-binaries" --json) || return 1
-  plan=$("${ORG_PYTHON}" -I "${ORG_BELT_ROOT}/belt" pgrx-postgres --majors "$1" <<< "${installed}") || return 1
+  plan=$("${ORG_PYTHON}" -I "${belt%/*}/belt" pgrx-postgres --majors "$1" <<< "${installed}") || return 1
   while IFS=$'\t' read -r record major where; do
     [[ ${record} == pg && ${major} == "$1" ]] || continue
     source=${where}
@@ -566,11 +566,12 @@ org_pgrx_provision() { # usage: org_pgrx_provision <variable>; sets it to the de
   # workspace with no extension — the skip #813 exists to end.
   metadata=$(cargo metadata --no-deps --format-version 1 --locked) || return 1
   : "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
-  surface=$("${ORG_PYTHON}" -I "${ORG_BELT_ROOT}/belt" gate-surface <<< "${metadata}") || return 1
+  surface=$("${ORG_PYTHON}" -I "${belt%/*}/belt" gate-surface <<< "${metadata}") || return 1
   while IFS=$'\t' read -r record spec kind crate_majors _dir; do
     [[ ${record} == crate && ${kind} == pgrx ]] || continue
     majors="${majors}${majors:+,}${crate_majors}"
-    crate_default=$("${ORG_PYTHON}" -I "${ORG_BELT_ROOT}/belt" mutants-rust default-major "${spec%@*}" <<< "${metadata}") || return 1
+    crate_default=$("${ORG_PYTHON}" -I "${belt%/*}/belt" \
+      mutants-rust default-major "${spec%@*}" <<< "${metadata}") || return 1
     [[ -z ${crate_default} || " ${defaults} " == *" ${crate_default#pg} "* ]] \
       || defaults="${defaults}${defaults:+ }${crate_default#pg}"
   done <<< "${surface}"
@@ -582,6 +583,6 @@ org_pgrx_provision() { # usage: org_pgrx_provision <variable>; sets it to the de
   fi
   org_pgrx_darwin_flags || return 1
   installed=$(mise ls "aqua:theseus-rs/postgresql-binaries" --json) || return 1
-  "${ORG_PYTHON}" -I "${ORG_BELT_ROOT}/belt" pgrx-postgres --majors "${majors}" <<< "${installed}" > /dev/null || return 1
+  "${ORG_PYTHON}" -I "${belt%/*}/belt" pgrx-postgres --majors "${majors}" <<< "${installed}" > /dev/null || return 1
   printf -v "$1" '%s' "${defaults}"
 }

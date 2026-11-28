@@ -14,7 +14,6 @@ of every other input that decides what the cargo caches hold.
 import contextlib
 import hashlib
 import io
-import os
 import platform
 import re
 import stat
@@ -23,7 +22,6 @@ import sys
 import tempfile
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
-from unittest import mock
 
 import pytest
 
@@ -193,12 +191,10 @@ def run(canon: Path) -> dict[str, str]:
     with tempfile.TemporaryDirectory() as tmp:
         out = Path(tmp) / "out"
         env = {**RUNNER, "GITHUB_OUTPUT": str(out)}
-        with (
-            mock.patch.dict(os.environ, env, clear=True),
-            mock.patch.object(platform, "system", return_value="Linux"),
-            mock.patch.object(platform, "machine", return_value="x86_64"),
-            redirect_stdout(io.StringIO()),
-        ):
+        with pytest.MonkeyPatch.context() as patched, redirect_stdout(io.StringIO()):
+            hermetic.patch_env(patched, env, clear=True)
+            patched.setattr(platform, "system", hermetic.returning("Linux"))
+            patched.setattr(platform, "machine", hermetic.returning("x86_64"))
             code = gate_cache_key.main(["tool", "mise-v2", str(canon)], now=WHEN)
         if code != 0:
             msg = f"gate-cache-key exited {code}"
@@ -240,11 +236,9 @@ class TestMain:
     def test_a_missing_tree_is_red(self) -> None:
         """A canon tree without its files is a red step, not a key."""
         err = io.StringIO()
-        with (
-            hermetic.as_task(""),
-            mock.patch.object(sys, "argv", ["gate_cache_key.py"]),
-            redirect_stderr(err),
-        ):
+        with pytest.MonkeyPatch.context() as patched, redirect_stderr(err):
+            hermetic.name_task(patched, "")
+            patched.setattr(sys, "argv", ["gate_cache_key.py"])
             code = gate_cache_key.main(["tool", "mise-v2", "/nonexistent"])
             assert code == 1
         assert "gate_cache_key.py:" in err.getvalue()
@@ -351,11 +345,12 @@ class TestInstallList:
             out = Path(tmp) / "out"
             env = {**RUNNER, "GITHUB_OUTPUT": str(out)}
             with (
-                mock.patch.dict(os.environ, env, clear=True),
-                mock.patch.object(platform, "system", return_value="Linux"),
-                mock.patch.object(platform, "machine", return_value="x86_64"),
+                pytest.MonkeyPatch.context() as patched,
                 redirect_stdout(io.StringIO()),
             ):
+                hermetic.patch_env(patched, env, clear=True)
+                patched.setattr(platform, "system", hermetic.returning("Linux"))
+                patched.setattr(platform, "machine", hermetic.returning("x86_64"))
                 argv = ["tool", "mise-pgrx-v1-pg18", str(tree)]
                 argv += ["--install", "jq rust@1"]
                 assert gate_cache_key.main(argv, now=WHEN) == 0
@@ -455,11 +450,12 @@ def cargo_main(
         }
         err = io.StringIO()
         with (
+            pytest.MonkeyPatch.context() as patched,
             contextlib.chdir(where),
-            mock.patch.dict(os.environ, env, clear=True),
             redirect_stdout(io.StringIO()),
             redirect_stderr(err),
         ):
+            hermetic.patch_env(patched, env, clear=True)
             code = gate_cache_key.main(["cargo", "--canon-ref", canon_ref])
         return code, out.read_text("utf-8"), err.getvalue()
 
@@ -793,10 +789,11 @@ def digest_main(path: str) -> tuple[int, str, str]:
     out, err = io.StringIO(), io.StringIO()
     env: dict[str, str] = {"PATH": path, "MISE_TASK_NAME": "coverage:check"}
     with (
-        mock.patch.dict(os.environ, env, clear=True),
+        pytest.MonkeyPatch.context() as patched,
         redirect_stdout(out),
         redirect_stderr(err),
     ):
+        hermetic.patch_env(patched, env, clear=True)
         code = gate_cache_key.main(["digest"])
     return code, out.getvalue(), err.getvalue()
 

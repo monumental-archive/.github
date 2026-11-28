@@ -18,19 +18,18 @@ is written to catch.
 stdlib `unittest`, run through the gate as `mise run test`.
 """
 
-from tests import hermetic
 import io
 import json
 import tempfile
 from contextlib import redirect_stderr
 from pathlib import Path
 from typing import TYPE_CHECKING
-from unittest import mock
 
 import pytest
 
 from belt import decoded
 from belt import plan_producers as pp
+from tests import hermetic
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -378,10 +377,8 @@ class TestMainTest:
         """A policy that will not decode stops the check, loudly."""
         missing = REPO / "slsa" / "no-such-policy.json"
         err = io.StringIO()
-        with (
-            redirect_stderr(err),
-            mock.patch("sys.argv", ["plan_producers.py", "--policy", str(missing)]),
-        ):
+        with pytest.MonkeyPatch.context() as patched, redirect_stderr(err):
+            patched.setattr("sys.argv", ["plan_producers.py", "--policy", str(missing)])
             assert pp.main() == 1
         assert "does not read as JSON" in err.getvalue()
 
@@ -447,10 +444,8 @@ class TestPolicyShapeTest:
             bad = Path(tmp) / "policy.json"
             bad.write_text('{"evidence": {"classes": []}}', encoding="utf-8")
             err = io.StringIO()
-            with (
-                redirect_stderr(err),
-                mock.patch("sys.argv", ["plan_producers.py", "--policy", str(bad)]),
-            ):
+            with pytest.MonkeyPatch.context() as patched, redirect_stderr(err):
+                patched.setattr("sys.argv", ["plan_producers.py", "--policy", str(bad)])
                 assert pp.main() == 1
         assert err.getvalue() == f"{TASK}: {bad}: evidence.classes is not an object\n"
 
@@ -460,10 +455,8 @@ class TestPolicyShapeTest:
             bad = Path(tmp) / "policy.json"
             bad.write_text('{"evidence": {}, "evidence": {}}', encoding="utf-8")
             err = io.StringIO()
-            with (
-                redirect_stderr(err),
-                mock.patch("sys.argv", ["plan_producers.py", "--policy", str(bad)]),
-            ):
+            with pytest.MonkeyPatch.context() as patched, redirect_stderr(err):
+                patched.setattr("sys.argv", ["plan_producers.py", "--policy", str(bad)])
                 assert pp.main() == 1
         assert (
             err.getvalue()

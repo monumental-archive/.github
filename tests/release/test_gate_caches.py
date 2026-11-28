@@ -30,18 +30,14 @@ The planted rows each break one property on the real file and assert the
 message that names it.
 """
 
-from tests import hermetic
 import re
-import sys
-from pathlib import Path
-
-from tests.release import test_job_installs as job_installs
-from tests.release.test_job_installs import Job, Step, field, inputs, parsed, table
-
 
 import pytest
 
 from belt import workflow_yaml
+from tests import hermetic
+from tests.release import test_job_installs as job_installs
+from tests.release.test_job_installs import Job, Step, field, inputs, parsed, table
 
 CANON = hermetic.CANON
 CI = CANON / ".github" / "workflows" / "ci.yml"

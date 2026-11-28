@@ -213,9 +213,7 @@ class TestBranches:
 
         """
         args = list(argv)
-        return hermetic.call(
-            lambda: signer_pin.main(args), env=self.env, cwd=self.tree
-        )
+        return hermetic.call(lambda: signer_pin.main(args), env=self.env, cwd=self.tree)
 
     def check(self, *files: str) -> hermetic.Called:
         """Call the helper on these workflows with the real signer.

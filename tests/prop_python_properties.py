@@ -25,6 +25,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+import pytest
 from hypothesis import example, settings
 from hypothesis import strategies as st
 
@@ -209,7 +210,8 @@ class TestUsage:
     )
     def test_a_usage_error_is_two(self, argv: list[str]) -> None:
         """R: exit 2 with the usage line, and nothing run."""
-        with hermetic.as_task(GATE):
+        with pytest.MonkeyPatch.context() as patched:
+            hermetic.name_task(patched, GATE)
             done = hermetic.call(lambda: pp.main(argv))
         assert done == hermetic.Called(2, "", USAGE)
 

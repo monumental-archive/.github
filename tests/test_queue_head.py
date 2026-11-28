@@ -27,7 +27,6 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from unittest import mock
 
 import pytest
 
@@ -39,7 +38,9 @@ HELPER = HERE / "queue_head.py"
 # A workflow step runs the helper outside mise, so its findings carry the
 # script's own name (findings.task_name, #1934).
 STEP = "queue_head.py"
-BUNDLE = Path(__file__).resolve().parent / "testdata" / "queue-head" / "edtf-265.bundle.gz"
+BUNDLE = (
+    Path(__file__).resolve().parent / "testdata" / "queue-head" / "edtf-265.bundle.gz"
+)
 CI = HERE.parent / ".github" / "workflows" / "ci.yml"
 GIT = hermetic.tool("git")
 # An empty HOME for every fixture, made once for the module.
@@ -191,7 +192,8 @@ def run_helper(cwd: pathlib.Path, ref: str, base: str, group: str) -> hermetic.C
         The status and both streams.
 
     """
-    with mock.patch.object(sys, "argv", [STEP]):
+    with pytest.MonkeyPatch.context() as patched:
+        patched.setattr(sys, "argv", [STEP])
         return hermetic.call(
             lambda: queue_head.main([]), env=step_env(ref, base, group), cwd=cwd
         )

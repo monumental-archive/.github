@@ -28,7 +28,6 @@ own case, because it is a real finding and not a fixture artefact.
 stdlib `unittest`, the belt's one test idiom.
 """
 
-from tests import hermetic
 import copy
 import io
 import subprocess
@@ -36,12 +35,12 @@ import tempfile
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from typing import TYPE_CHECKING
-from unittest import mock
 
 import pytest
 
 from belt import decoded
 from belt import security_config as sc
+from tests import hermetic
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -461,13 +460,15 @@ class TestShapeTest:
         """A duplicate key in gh's output is refused with the endpoint."""
         done = subprocess.CompletedProcess([], 0, stdout='{"a": 1, "a": 2}', stderr="")
         with (
-            mock.patch.object(subprocess, "run", return_value=done),
+            pytest.MonkeyPatch.context() as patched,
             pytest.raises(decoded.UndecodableError) as cm,
         ):
+            patched.setattr(subprocess, "run", hermetic.returning(done))
             sc.gh_fetch("x/y")
         assert str(cm.value) == 'x/y: duplicate key "a"'
         pages = subprocess.CompletedProcess([], 0, stdout="[[1], [2]]", stderr="")
-        with mock.patch.object(subprocess, "run", return_value=pages):
+        with pytest.MonkeyPatch.context() as patched:
+            patched.setattr(subprocess, "run", hermetic.returning(pages))
             assert sc.gh_fetch("x/y", paginate=True) == (200, [1, 2])
 
     def test_main_reports_a_refusal_as_an_unreadable_input(self) -> None:

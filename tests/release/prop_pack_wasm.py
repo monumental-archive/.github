@@ -24,8 +24,8 @@ import os
 import sys
 import tempfile
 from pathlib import Path
-from unittest import mock
 
+import pytest
 from hypothesis import example
 from hypothesis import strategies as st
 
@@ -48,8 +48,10 @@ def as_helper() -> contextlib.ExitStack:
 
     """
     stack = contextlib.ExitStack()
-    stack.enter_context(hermetic.as_task(""))
-    stack.enter_context(mock.patch.object(sys, "argv", ["pack_wasm.py"]))
+    hermetic.name_task(stack.enter_context(pytest.MonkeyPatch.context()), "")
+    stack.enter_context(pytest.MonkeyPatch.context()).setattr(
+        sys, "argv", ["pack_wasm.py"]
+    )
     return stack
 
 

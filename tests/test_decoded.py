@@ -21,7 +21,6 @@ import ast
 import json
 from collections.abc import Callable, Iterator
 from pathlib import Path
-from unittest import mock
 
 import pytest
 
@@ -213,7 +212,8 @@ class TestLoadJson:
 
     def test_a_stack_too_small_for_the_bound_is_refused(self) -> None:
         """The backstop: RecursionError under the bound is still a refusal."""
-        with mock.patch("json.loads", side_effect=RecursionError):
+        with pytest.MonkeyPatch.context() as patched:
+            patched.setattr("json.loads", hermetic.raising(RecursionError))
             assert self.refused("[]") == "nested too deep to decode"
 
     def test_bytes_that_are_not_utf8_are_refused(self) -> None:

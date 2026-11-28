@@ -21,8 +21,6 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from unittest import mock
-
 
 import pytest
 
@@ -163,7 +161,8 @@ class TestRows:
         argv = self.arguments(kept, legs)
         # The gaining job runs the script by path with no mise task
         # around it, so the finding writer names the script (#1934).
-        with mock.patch.object(sys, "argv", [str(HELPER), *argv]):
+        with pytest.MonkeyPatch.context() as patched:
+            patched.setattr(sys, "argv", [str(HELPER), *argv])
             return hermetic.call(lambda: gain.main(argv), env=self.env)
 
     def recorded(self) -> list[dict[str, object]]:

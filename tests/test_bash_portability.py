@@ -51,9 +51,9 @@ SCRIPT = "#!/usr/bin/env bash\nset -eu\n"
 TRAP = "trap 'rm -f x' EXIT\n"
 
 
-def same[T](case: unittest.TestCase, got: T, want: T, msg: str = "") -> None:
+def same[T](got: T, want: T, msg: str = "") -> None:
     """Assert two values equal, `want` typed by `got` (mypy.ini: no Any)."""
-    case.assertEqual(got, want, msg or None)
+    assert got == want, msg or None
 
 
 def body() -> str:
@@ -173,16 +173,16 @@ class TestTask(TestPlanted):
         """No workflow, shell file or mise config: skipped, by name."""
         self.plant("README.md", "hi\n")
         done = self.task()
-        same(self, done.returncode, 0, done.stderr)
-        same(self, done.stdout.splitlines(), SKIPPED)
+        same(done.returncode, 0, done.stderr)
+        same(done.stdout.splitlines(), SKIPPED)
 
     def test_untracked_files_are_never_read(self) -> None:
         """Offending files git does not track: still a skip."""
         self.plant("a.sh", SCRIPT + "mapfile -t x\n", track=False)
         self.plant(".github/workflows/ci.yml", "x: ${a,,}\n", track=False)
         done = self.task()
-        same(self, done.returncode, 0, done.stderr)
-        same(self, done.stdout.splitlines(), SKIPPED)
+        same(done.returncode, 0, done.stderr)
+        same(done.stdout.splitlines(), SKIPPED)
 
     def test_a_clean_tree_is_counted(self) -> None:
         """Workflows and shell files counted, mise configs read for traps only."""
@@ -190,24 +190,24 @@ class TestTask(TestPlanted):
         self.plant("a.sh", SCRIPT + "echo ok\n")
         self.plant("mise.toml", "[tasks.a]\nrun = 'true'\n")
         done = self.task()
-        same(self, done.returncode, 0, done.stderr)
+        same(done.returncode, 0, done.stderr)
         expected = [
             "exit-trap: 2 script(s) and task body(ies), every EXIT trap guarded",
             clean(2),
         ]
-        same(self, done.stdout.splitlines(), expected)
+        same(done.stdout.splitlines(), expected)
 
     def test_hits_through_the_task(self) -> None:
         """A workflow's hit and a shell file's, workflows first."""
         self.plant("b.sh", SCRIPT + "declare -A m\n")
         self.plant(".github/workflows/ci.yml", "run: echo ${x^^}\n")
         done = self.task()
-        same(self, done.returncode, bash_portability.EXIT_RED)
+        same(done.returncode, bash_portability.EXIT_RED)
         expected = red(
             "  .github/workflows/ci.yml: 1:run: echo ${x^^}",
             "  b.sh: 2:declare -A m",
         )
-        same(self, done.stderr.splitlines(), expected)
+        same(done.stderr.splitlines(), expected)
 
 
 class TestSyntax(TestPlanted):
@@ -232,8 +232,8 @@ class TestSyntax(TestPlanted):
     def test_each_form_is_named(self, line: object) -> None:
         """Every bash 4 form, on its own line."""
         done = self.script(SCRIPT + line + "\n")
-        same(self, done.returncode, bash_portability.EXIT_RED)
-        same(self, done.stderr.splitlines(), red(f"  a.sh: 2:{line}"))
+        same(done.returncode, bash_portability.EXIT_RED)
+        same(done.stderr.splitlines(), red(f"  a.sh: 2:{line}"))
 
     def test_near_misses_are_clean(self) -> None:
         """Bash 3 forms that look alike: not named."""
@@ -251,31 +251,31 @@ class TestSyntax(TestPlanted):
             )
         )
         done = self.script(text)
-        same(self, done.returncode, 0, done.stderr)
-        same(self, done.stdout.splitlines()[-1], clean(1))
+        same(done.returncode, 0, done.stderr)
+        same(done.stdout.splitlines()[-1], clean(1))
 
     def test_comments_are_dropped_before_numbering(self) -> None:
         """A comment naming a form is no hit, and numbers skip it."""
         text = SCRIPT + "# never ${v,,}\n  # nor mapfile x\n\necho ${v^}\n"
         done = self.script(text)
-        same(self, done.returncode, bash_portability.EXIT_RED)
-        same(self, done.stderr.splitlines(), red("  a.sh: 3:echo ${v^}"))
+        same(done.returncode, bash_portability.EXIT_RED)
+        same(done.stderr.splitlines(), red("  a.sh: 3:echo ${v^}"))
 
     def test_hits_in_one_file_and_across_files(self) -> None:
         """A file's first hit carries its name; its others do not."""
         one = self.plant(".github/workflows/a.yml", "a: ${x,}\nb: ok\nc: ${y^}\n")
         two = self.plant("b.sh", SCRIPT + "mapfile x\n")
         done = self.helper(one, "--", two, "--")
-        same(self, done.returncode, bash_portability.EXIT_RED)
+        same(done.returncode, bash_portability.EXIT_RED)
         expected = red(f"  {one}: 1:a: ${{x,}}", "3:c: ${y^}", f"  {two}: 2:mapfile x")
-        same(self, done.stderr.splitlines(), expected)
+        same(done.stderr.splitlines(), expected)
 
     def test_a_path_that_is_not_a_file_is_counted_unread(self) -> None:
         """A named directory or a missing path: counted, never read."""
         (self.tree / "d.yml").mkdir()
         done = self.helper(".github/workflows/gone.yml", "d.yml", "--", "--")
-        same(self, done.returncode, 0, done.stderr)
-        same(self, done.stdout.splitlines()[-1], clean(2))
+        same(done.returncode, 0, done.stderr)
+        same(done.stdout.splitlines()[-1], clean(2))
 
 
 class TestExpansion(TestPlanted):
@@ -296,8 +296,8 @@ class TestExpansion(TestPlanted):
     def test_escapes_are_expanded(self, line: object, shown: object) -> None:
         """Bash's escapes in a hit line expand; an unknown one stays."""
         done = self.script(SCRIPT + line + "\n")
-        same(self, done.returncode, bash_portability.EXIT_RED)
-        same(self, done.stderr.splitlines(), red(*shown))
+        same(done.returncode, bash_portability.EXIT_RED)
+        same(done.stderr.splitlines(), red(*shown))
 
     @pytest.mark.parametrize("stop", ("\\c", "\\0"))
     def test_backslash_c_and_nul_end_the_text(self, stop: object) -> None:
@@ -305,16 +305,16 @@ class TestExpansion(TestPlanted):
         one = self.plant("a.sh", SCRIPT + f"echo ${{v,,}} x{stop}y\n")
         two = self.plant("b.sh", SCRIPT + "mapfile x\n")
         done = self.helper("--", one, two, "--")
-        same(self, done.returncode, bash_portability.EXIT_RED)
+        same(done.returncode, bash_portability.EXIT_RED)
         expected = red("  a.sh: 2:echo ${v,,} x")
-        same(self, done.stderr.splitlines(), expected)
+        same(done.stderr.splitlines(), expected)
 
     def test_the_expansion_by_itself(self) -> None:
         r"""Octal past a byte wraps, a big \U stays, \e is escape."""
-        same(self, bash_portability.expand("\\777\\e\\E"), "\udcff\x1b\x1b")
-        same(self, bash_portability.expand("\\UFFFFFFFF"), "\\UFFFFFFFF")
-        same(self, bash_portability.expand("\\u"), "\\u")
-        same(self, bash_portability.expand("\\a\\b\\f\\r\\v"), "\a\b\f\r\v")
+        same(bash_portability.expand("\\777\\e\\E"), "\udcff\x1b\x1b")
+        same(bash_portability.expand("\\UFFFFFFFF"), "\\UFFFFFFFF")
+        same(bash_portability.expand("\\u"), "\\u")
+        same(bash_portability.expand("\\a\\b\\f\\r\\v"), "\a\b\f\r\v")
 
 
 class TestTraps(TestPlanted):
@@ -323,18 +323,18 @@ class TestTraps(TestPlanted):
     def test_an_unguarded_trap_is_red_alone(self) -> None:
         """No bash 4 syntax, an unguarded trap: red, the trap's finding only."""
         done = self.script(SCRIPT + TRAP)
-        same(self, done.returncode, bash_portability.EXIT_RED)
-        same(self, done.stdout, "")
+        same(done.returncode, bash_portability.EXIT_RED)
+        same(done.stdout, "")
         assert HEAD not in done.stderr
         assert f"{TASK}: a.sh" in done.stderr
 
     def test_both_halves_red(self) -> None:
         """An unguarded trap and bash 4 syntax: both findings, the trap's first."""
         done = self.script(SCRIPT + TRAP + "mapfile x\n")
-        same(self, done.returncode, bash_portability.EXIT_RED)
+        same(done.returncode, bash_portability.EXIT_RED)
         head, _, rest = done.stderr.partition(HEAD + "\n")
         assert f"{TASK}: a.sh" in head
-        same(self, [HEAD, *rest.splitlines()], red("  a.sh: 3:mapfile x"))
+        same([HEAD, *rest.splitlines()], red("  a.sh: 3:mapfile x"))
 
 
 class TestCalls(TestPlanted):
@@ -344,8 +344,8 @@ class TestCalls(TestPlanted):
         """A workflow that is not UTF-8 is read as grep reads it."""
         rel = self.plant("a.yml", b"x: \xff\nmapfile x\n")
         done = self.helper(rel, "--", "--")
-        same(self, done.returncode, bash_portability.EXIT_RED)
-        same(self, done.stderr.splitlines(), red(f"  {rel}: 2:mapfile x"))
+        same(done.returncode, bash_portability.EXIT_RED)
+        same(done.stderr.splitlines(), red(f"  {rel}: 2:mapfile x"))
 
     def test_a_script_exit_trap_cannot_read_is_an_error(self) -> None:
         """A shell file or config not UTF-8, or a directory: exit 2."""
@@ -360,7 +360,7 @@ class TestCalls(TestPlanted):
             with self.subTest(name=name):
                 lists = ("--", name, "--") if name != conf else ("--", "--", name)
                 done = self.helper(*lists)
-                same(self, done.returncode, bash_portability.EXIT_ERROR)
+                same(done.returncode, bash_portability.EXIT_ERROR)
                 assert done.stderr.startswith(said), done.stderr
 
     @pytest.mark.parametrize("argv", ([], ["a.sh"], ["--"], ["--", "--", "--"]))
@@ -368,5 +368,5 @@ class TestCalls(TestPlanted):
         """Not two separators: exit 2 with the usage line."""
         usage = f"{TASK}: {bash_portability.USAGE}"
         done = self.helper(*argv)
-        same(self, done.returncode, bash_portability.EXIT_ERROR)
-        same(self, done.stderr.splitlines(), [usage])
+        same(done.returncode, bash_portability.EXIT_ERROR)
+        same(done.stderr.splitlines(), [usage])

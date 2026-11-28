@@ -242,7 +242,12 @@ def run_main(argv: list[str]) -> tuple[int, str, str]:
     out, err = io.StringIO(), io.StringIO()
     # check is lint:pg-schema's call, write fix:pg-schema's (#1934).
     task = "fix:pg-schema" if argv[:1] == ["write"] else "lint:pg-schema"
-    with hermetic.as_task(task), redirect_stdout(out), redirect_stderr(err):
+    with (
+        pytest.MonkeyPatch.context() as patched,
+        redirect_stdout(out),
+        redirect_stderr(err),
+    ):
+        hermetic.name_task(patched, task)
         status = pg_schema.main(argv)
     return status, out.getvalue(), err.getvalue()
 

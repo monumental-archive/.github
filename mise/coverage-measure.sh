@@ -164,7 +164,8 @@ if [[ ${legs} == reports ]]; then
     # A floor that records its legs names each one this run lost (#1666),
     # which is the case a repository most needs named; the generic line
     # is for a floor with no record.
-    "${ORG_PYTHON}" -I "$(dirname "${BASH_SOURCE[0]}")/../belt" coverage-floor hold --label "${label}" --job gate < /dev/null || exit 1
+    "${ORG_PYTHON}" -I "$(dirname "${BASH_SOURCE[0]}")/../belt" \
+      coverage-floor hold --label "${label}" --job gate < /dev/null || exit 1
     org_finding "" "no leg was measured — a check that reads nothing must not pass"
     exit 1
   fi

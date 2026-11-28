@@ -24,6 +24,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+import pytest
 from hypothesis import example
 from hypothesis import strategies as st
 
@@ -144,10 +145,11 @@ class TestRefusal:
             sys.stdin = io.StringIO(json.dumps(resolved))
             try:
                 with (
-                    hermetic.as_task("lint:tsconfig-dials"),
+                    pytest.MonkeyPatch.context() as patched,
                     contextlib.redirect_stdout(out),
                     contextlib.redirect_stderr(err),
                 ):
+                    hermetic.name_task(patched, "lint:tsconfig-dials")
                     status = td.main(["--flags", str(flags), "--name", "t"])
             finally:
                 sys.stdin = old

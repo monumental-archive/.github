@@ -17,12 +17,11 @@ the ordinary suite (`mise run test`) never imports this file.
 """
 
 import io
-import os
 import tempfile
 from contextlib import redirect_stderr
 from pathlib import Path
-from unittest import mock
 
+import pytest
 from hypothesis import example
 from hypothesis import strategies as st
 
@@ -60,9 +59,10 @@ class TestOneRecordReadsBack:
             file = Path(scratch) / "out" / "job.jsonl"
             env = {"ORG_FINDINGS": str(file), "MISE_TASK_NAME": "lint:demo"}
             with (
-                mock.patch.dict(os.environ, env),
+                pytest.MonkeyPatch.context() as patched,
                 redirect_stderr(io.StringIO()),
             ):
+                hermetic.patch_env(patched, env)
                 findings.finding(subject, message, detail)
             text = file.read_text(encoding="utf-8")
         assert text.endswith("\n"), text

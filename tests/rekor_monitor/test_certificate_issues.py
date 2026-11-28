@@ -21,8 +21,6 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from unittest import mock
-
 
 import pytest
 
@@ -119,7 +117,8 @@ class TestHarness:
         argv = ["--report", str(self.report), "--run-url", RUN]
         # The leg runs the script by path with no mise task around it, so
         # the finding writer names the script (#1934).
-        with mock.patch.object(sys, "argv", [str(HELPER), *argv]):
+        with pytest.MonkeyPatch.context() as patched:
+            patched.setattr(sys, "argv", [str(HELPER), *argv])
             return hermetic.call(
                 lambda: certificate_issues.main(argv), env={**self.env, **env}
             )

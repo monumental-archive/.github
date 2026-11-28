@@ -40,11 +40,8 @@ Run through the gate as `mise run test`, which `ci` collects.
 import json
 import os
 import subprocess
-import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import patch
-
 
 import pytest
 
@@ -545,7 +542,8 @@ class TestHermeticEnvironment:
     def test_the_release_job_inputs_do_not_reach_a_fixture(self) -> None:
         """The release job exports its step inputs; no fixture sees them."""
         planted = {"VERSION": "1.69.4", "PLAN": "{}", "APP_SLUG": "canon-release"}
-        with patch.dict(os.environ, planted), TemporaryDirectory() as d:
+        with pytest.MonkeyPatch.context() as patched, TemporaryDirectory() as d:
+            hermetic.patch_env(patched, planted)
             env = hermetic_env(Path(d))
         leaked = sorted(set(planted) & set(env))
         assert list[str]() == leaked
@@ -553,7 +551,8 @@ class TestHermeticEnvironment:
     def test_a_row_still_states_its_own_input(self) -> None:
         """Overrides are how a row gives a fixture an input."""
         planted = {"VERSION": "1.69.4"}
-        with patch.dict(os.environ, planted), TemporaryDirectory() as d:
+        with pytest.MonkeyPatch.context() as patched, TemporaryDirectory() as d:
+            hermetic.patch_env(patched, planted)
             env = hermetic_env(Path(d), VERSION="2.0.0")
         assert env["VERSION"] == "2.0.0"
 

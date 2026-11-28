@@ -43,7 +43,7 @@ def weak(a: int) -> bool:
     """Called, and its answer never checked."""
     return a > 0
 '''
-CALC_TESTS = '''from pkg import calc
+CALC_TESTS = """from pkg import calc
 
 
 def test_add() -> None:
@@ -52,7 +52,7 @@ def test_add() -> None:
 
 def test_weak() -> None:
     calc.weak(5)
-'''
+"""
 SPIN = '''"""A loop whose mutant never ends."""
 
 
@@ -63,17 +63,15 @@ def spin(n: int) -> int:
         i += 1
     return i
 '''
-SPIN_TESTS = '''from pkg import spin
+SPIN_TESTS = """from pkg import spin
 
 
 def test_spin() -> None:
     assert spin.spin(3) == 3
-'''
+"""
 
 
-def plant(
-    root: Path, module: str, source: str, tests: str, setup: str = SETUP
-) -> Path:
+def plant(root: Path, module: str, source: str, tests: str, setup: str = SETUP) -> Path:
     """Plant a repository: a package, its tests and its mutmut section.
 
     Returns:
@@ -218,7 +216,9 @@ def test_no_configuration_skips_clean_by_name(
     assert not summary.exists()
 
 
-def test_both_configurations_are_red(tmp_path: Path, leg: Callable[..., Called]) -> None:
+def test_both_configurations_are_red(
+    tmp_path: Path, leg: Callable[..., Called]
+) -> None:
     """pyproject.toml [tool.mutmut] beside setup.cfg [mutmut]: mutmut reads one."""
     root = tmp_path
     (root / "pyproject.toml").write_text(

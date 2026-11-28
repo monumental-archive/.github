@@ -158,6 +158,8 @@ def run_out(argv: list[str]) -> str:
     """
     done = subprocess.run(argv, capture_output=True, text=True, check=False)
     if done.returncode != 0:
+        # pytest reports a collection error on its standard output.
+        sys.stderr.write(done.stdout)
         sys.stderr.write(done.stderr)
         msg = (
             f"`{' '.join(argv)}` failed (exit {done.returncode}),"

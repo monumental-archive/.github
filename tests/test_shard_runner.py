@@ -192,9 +192,7 @@ class TestRunner:
             stub.write_text(f"#!{sys.executable}\n{body}", encoding="utf-8")
             stub.chmod(0o755)
 
-    def adapt(
-        self, spec: str, command: list[str], fixture: dict[str, str]
-    ) -> Called:
+    def adapt(self, spec: str, command: list[str], fixture: dict[str, str]) -> Called:
         """Call the adapter for one shard of a command.
 
         Returns:
@@ -369,7 +367,12 @@ PACKAGES = [
 ]
 
 
-TEST_FILES = ["tests/test_a.py", "tests/test_b.py", "tests/sub/test_c.py", "tests/test_d.py"]
+TEST_FILES = [
+    "tests/test_a.py",
+    "tests/test_b.py",
+    "tests/sub/test_c.py",
+    "tests/test_d.py",
+]
 
 
 class TestPytest(TestRunner):

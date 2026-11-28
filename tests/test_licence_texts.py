@@ -10,7 +10,6 @@ stdlib `unittest`, matching the other mise/test_*.py; run through the
 gate as `mise run test`.
 """
 
-from tests import hermetic
 import contextlib
 import io
 import sys
@@ -21,6 +20,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import licence_texts as lt
+from tests import hermetic
 
 if TYPE_CHECKING:
     from collections.abc import Callable

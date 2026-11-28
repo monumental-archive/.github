@@ -25,18 +25,16 @@ import json
 import os
 import re
 import subprocess
-import sys
 import tempfile
 from pathlib import Path
 from typing import ClassVar, override
-
 
 import pytest
 
 from belt import decoded
 from tests import hermetic
 
-HERE = (hermetic.CANON / "settings")
+HERE = hermetic.CANON / "settings"
 CANON = HERE.parent
 SCRIPT = HERE / "repo-baseline.sh"
 BASH = hermetic.tool("bash")

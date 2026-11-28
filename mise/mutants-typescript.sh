@@ -121,7 +121,7 @@ if [[ -z ${CI:-} ]]; then
 fi
 
 belt="${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: lefthook run post-checkout)}"
-python3 -I "${ORG_BELT_ROOT}/belt" mutants-typescript --label "${label}" config "${adoption}"
+python3 -I "${belt%/*}/belt" mutants-typescript --label "${label}" config "${adoption}"
 
 stryker=node_modules/.bin/stryker
 [[ -x ${stryker} ]] || {
@@ -147,7 +147,7 @@ rc=0
 scratch=$(mktemp -d)
 trap 'rc=$?; rm -rf "${scratch}"; [ -n "${org_done:-}" ] || [ "${rc}" -ne 0 ] || rc=1; exit "${rc}"' EXIT
 
-python3 -I "${ORG_BELT_ROOT}/belt" mutants-typescript --label "${label}" share "${adoption}" \
+python3 -I "${belt%/*}/belt" mutants-typescript --label "${label}" share "${adoption}" \
   --shard "${shard}" --out "${scratch}/mutate" --summary-dir "${MUTANTS_SUMMARY_DIR:-}"
 mutate=$(< "${scratch}/mutate")
 if [[ -z ${mutate} ]]; then
@@ -181,7 +181,7 @@ if [[ ! -s ${report} ]]; then
 fi
 mv "${report}" "${scratch}/mutation.json"
 
-python3 -I "${ORG_BELT_ROOT}/belt" mutants-typescript --label "${label}" \
+python3 -I "${belt%/*}/belt" mutants-typescript --label "${label}" \
   verdict "${scratch}/mutation.json" --shard "${shard}" \
   --summary-dir "${MUTANTS_SUMMARY_DIR:-}"
 org_done=1

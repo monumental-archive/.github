@@ -21,17 +21,15 @@ gate as `mise run test`, which `ci` collects.
 """
 
 import contextlib
-import os
 import subprocess
 import tempfile
 from pathlib import Path
-from unittest import mock
 
 import pytest
-from tests import test_derive_badges as derive
 
 from belt import decoded, tracked
 from tests import hermetic
+from tests import test_derive_badges as derive
 
 BELT = hermetic.MISE
 BASH = hermetic.tool("bash")
@@ -245,10 +243,8 @@ class TestProducers:
         in, so the list is that repository's own.
         """
         tree = self.planted()
-        with (
-            contextlib.chdir(tree),
-            mock.patch.dict(os.environ, hermetic.env(tree.parent / "home"), clear=True),
-        ):
+        with pytest.MonkeyPatch.context() as patched, contextlib.chdir(tree):
+            hermetic.patch_env(patched, hermetic.env(tree.parent / "home"), clear=True)
             narrowed: list[str] = tracked.tracked("é*")
             every: list[str] = sorted(tracked.tracked())
         assert list[str]([ACCENTED]) == narrowed
@@ -475,12 +471,13 @@ class TestHas:
         stub.write_text(FAILING_GIT, encoding="utf-8")
         stub.chmod(0o755)
         with (
-            mock.patch.object(tracked, "GIT", str(stub)),
+            pytest.MonkeyPatch.context() as patched,
             pytest.raises(
                 tracked.GitUnanswerableError,
                 match=r"^git could not say whether kept is tracked \(exit 128\)$",
             ),
         ):
+            patched.setattr(tracked, "GIT", str(stub))
             tracked.has("kept", root=tree)
 
     def test_a_task_whose_git_fails_is_red_not_skipped(self) -> None:

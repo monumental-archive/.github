@@ -24,6 +24,7 @@ import io
 import json
 import sys
 
+import pytest
 from hypothesis import example
 from hypothesis import strategies as st
 
@@ -220,10 +221,11 @@ class TestRefusal:
         sys.stdin = io.StringIO(json.dumps(doc))
         try:
             with (
-                hermetic.as_task(TASK),
+                pytest.MonkeyPatch.context() as patched,
                 contextlib.redirect_stdout(out),
                 contextlib.redirect_stderr(err),
             ):
+                hermetic.name_task(patched, TASK)
                 status = gs.main([])
         finally:
             sys.stdin = old

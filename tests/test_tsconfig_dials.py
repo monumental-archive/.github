@@ -11,7 +11,6 @@ and observed to fail. A floor check that admits a weaker config looks
 exactly like a floor check that works.
 """
 
-from tests import hermetic
 import io
 import json
 import sys
@@ -22,6 +21,7 @@ from pathlib import Path
 import pytest
 
 from belt import decoded, tsconfig_dials
+from tests import hermetic
 
 FLAGS_FILE = hermetic.MISE / "tsc-flags.txt"
 REQUIRED, UNREADABLE = tsconfig_dials.dials(FLAGS_FILE)

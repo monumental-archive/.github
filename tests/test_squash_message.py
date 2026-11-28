@@ -16,11 +16,9 @@ stdlib `unittest`, matching the other tests here.
 from __future__ import annotations
 
 import os
-import pathlib
 import subprocess
 import sys
 from pathlib import Path
-from unittest import mock
 
 import pytest
 
@@ -180,7 +178,8 @@ class TestStepHarness:
             The status and both streams.
 
         """
-        with mock.patch.object(sys, "argv", [STEP]):
+        with pytest.MonkeyPatch.context() as patched:
+            patched.setattr(sys, "argv", [STEP])
             return hermetic.call(
                 lambda: squash_message.main([]),
                 env=self.step_env(title, body, verdict),

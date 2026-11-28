@@ -26,7 +26,6 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
-from unittest import mock
 
 import pytest
 
@@ -436,9 +435,10 @@ class TestHelper:
             readme = Path(tmp) / "README.md"
             readme.write_text(README, encoding="utf-8")
             with (
-                mock.patch.object(shutil, "which", return_value=None),
+                pytest.MonkeyPatch.context() as patched,
                 contextlib.redirect_stderr(io.StringIO()) as err,
             ):
+                patched.setattr(shutil, "which", hermetic.returning(None))
                 status = drift.main([".bestpractices.json", REPO, str(readme)])
         assert status == 1
         assert err.getvalue() == "audit:bestpractices: curl missing\n"

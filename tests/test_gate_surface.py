@@ -20,7 +20,6 @@ import tempfile
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from typing import TYPE_CHECKING
-from unittest import mock
 
 import pytest
 
@@ -478,10 +477,11 @@ class TestMainTest:
         out, err = io.StringIO(), io.StringIO()
         stdin = io.StringIO(json.dumps(doc) if doc is not None else "{")
         with (
-            mock.patch("sys.stdin", stdin),
+            pytest.MonkeyPatch.context() as patched,
             redirect_stdout(out),
             redirect_stderr(err),
         ):
+            patched.setattr("sys.stdin", stdin)
             status = gate_surface.main(argv)
         return status, out.getvalue(), err.getvalue()
 
@@ -572,10 +572,11 @@ class TestMainTest:
         """A process started with no stdin is refused by name, not raised."""
         err = io.StringIO()
         with (
-            mock.patch("sys.stdin", None),
+            pytest.MonkeyPatch.context() as patched,
             redirect_stderr(err),
             redirect_stdout(io.StringIO()),
         ):
+            patched.setattr("sys.stdin", None)
             status = gate_surface.main([])
         assert status == 1
         assert (

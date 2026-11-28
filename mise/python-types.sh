@@ -63,11 +63,11 @@ running=$(mypy --version | awk '{ print $2 }')
 # on the belt's Python (#1788).
 exe=$(command -v python3)
 if command -v pytest > /dev/null; then
-  exe=$("${ORG_PYTHON}" -I "${ORG_BELT_ROOT}/belt" tool-python "${label}" pytest) || exit 1
+  exe=$("${ORG_PYTHON}" -I "${belt%/*}/belt" tool-python "${label}" pytest) || exit 1
 fi
 
 red=0
-seams=$("${ORG_PYTHON}" -I "${ORG_BELT_ROOT}/belt" python-types-seams "${args[@]}") || red=1
+seams=$("${ORG_PYTHON}" -I "${belt%/*}/belt" python-types-seams "${args[@]}") || red=1
 if [[ -n ${seams} ]]; then
   detail=()
   while IFS= read -r line; do detail+=("${line}"); done <<< "${seams}"
@@ -82,7 +82,7 @@ fi
 # belt.typed_hypothesis import given` resolves as the properties runner
 # resolves it (#1604, #2177).
 # Two files that would be one module are red by name, before mypy stops.
-roots=$("${ORG_PYTHON}" -I "${ORG_BELT_ROOT}/belt" python-roots "${ORG_BELT_ROOT:?unset}" "${args[@]}") || {
+roots=$("${ORG_PYTHON}" -I "${belt%/*}/belt" python-roots "${belt%/*}" "${args[@]}") || {
   org_finding "" "rename one of each pair above so every module name is one file's"
   exit 1
 }

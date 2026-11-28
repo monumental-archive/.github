@@ -56,11 +56,9 @@ Run through the gate as `mise run test`, which `ci` collects.
 
 import os
 import subprocess
-import sys
 import textwrap
 from pathlib import Path
 from tempfile import TemporaryDirectory
-
 
 import pytest
 
@@ -301,12 +299,12 @@ class Tree:
         return decoded.as_object(decoded.load_json(text), "the plan")
 
 
-def require_engine(case: unittest.TestCase) -> None:
+def require_engine() -> None:
     """Skip a row when a tool the prepare step runs is not installed."""
     if not STELE:
-        case.skipTest("stele is the belt's release engine and derives the plan")
+        pytest.skip("stele is the belt's release engine and derives the plan")
     if not CARGO:
-        case.skipTest("cargo refreshes the lockfiles the plan declares")
+        pytest.skip("cargo refreshes the lockfiles the plan declares")
 
 
 class TestTheChangelogContract:
@@ -320,7 +318,7 @@ class TestTheChangelogContract:
     @pytest.fixture(autouse=True)
     def _set_up_test_the_changelog_contract(self) -> None:
         """Skip unless stele and cargo are installed."""
-        require_engine(self)
+        require_engine()
 
     def test_a_missing_changelog_refuses_and_names_the_file(self) -> None:
         """#742's first data point: edtf carried no root CHANGELOG.md."""
@@ -381,7 +379,7 @@ class TestTheTreeDecisions:
     @pytest.fixture(autouse=True)
     def _set_up_test_the_tree_decisions(self) -> None:
         """Skip unless stele and cargo are installed."""
-        require_engine(self)
+        require_engine()
 
     def test_the_lockfiles_are_declared_to_the_plan_not_appended_after(self) -> None:
         """`--also` carries both cargo workspaces into the plan's file list.

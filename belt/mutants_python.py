@@ -401,4 +401,3 @@ def main(argv: list[str]) -> int:
         return EXIT_USAGE
     k, n = named or (1, 1)
     return run(root, f"{k}/{n}")
-

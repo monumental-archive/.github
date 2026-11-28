@@ -19,7 +19,6 @@ import io
 import os
 import subprocess
 import sys
-import unittest.mock
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -622,7 +621,8 @@ class TestOrgConfig:
             workflow('- name: s\n  run: |\n    x=1\n    echo "$x"'),
             encoding="utf-8",
         )
-        with unittest.mock.patch.dict(os.environ, hermetic.env(home), clear=True):
+        with pytest.MonkeyPatch.context() as patched:
+            hermetic.patch_env(patched, hermetic.env(home), clear=True)
             found = es.check(path, fmt=False, lint=True)
         assert any("[SC2250]" in f for f in found), found
 
@@ -1037,10 +1037,11 @@ class TestTasks:
         out, err = io.StringIO(), io.StringIO()
         task = "fix:task-shell" if write else "lint:task-shell"
         with (
-            hermetic.as_task(task),
+            pytest.MonkeyPatch.context() as patched,
             redirect_stdout(out),
             redirect_stderr(err),
         ):
+            hermetic.name_task(patched, task)
             rc = es.task_ceiling([str(self.cfg)], self.debt, write=write)
         return rc, out.getvalue(), err.getvalue()
 

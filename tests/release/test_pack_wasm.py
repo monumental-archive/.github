@@ -14,7 +14,6 @@ stdlib `unittest`, matching the rest of release/. Run through the gate
 as `mise run test`, which `ci` collects.
 """
 
-import contextlib
 import hashlib
 import json
 import os
@@ -23,8 +22,6 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest import mock
-
 
 import pytest
 
@@ -55,22 +52,20 @@ printf '%s\\n' "${STUB_TARBALL}"
 """
 
 
-_NAMED = contextlib.ExitStack()
+@pytest.fixture
+def _outside_mise(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Name the helper by its command, as a run outside mise does (#1934).
 
-
-def setUpModule() -> None:
-    """Name the helper by its file, as a run outside mise does (#1934).
-
-    An in-process call reads argv, whatever task runs this suite.
+    An in-process call reads argv, whatever task runs this suite; an
+    empty ORG_FINDINGS records nothing (unset on a runner records to the
+    job's file, #1976).
     """
-    _NAMED.enter_context(mock.patch.object(sys, "argv", ["pack_wasm.py"]))
-    for key in ("MISE_TASK_NAME", "ORG_FINDINGS"):
-        if key in os.environ:
-            _NAMED.callback(os.environ.__setitem__, key, os.environ.pop(key))
-    # Empty, not unset: unset on a runner records to the job's file (#1976).
-    os.environ["ORG_FINDINGS"] = ""
-    _NAMED.callback(os.environ.pop, "ORG_FINDINGS", None)
-    unittest.addModuleCleanup(_NAMED.close)
+    monkeypatch.setattr(sys, "argv", ["pack-wasm"])
+    monkeypatch.delenv("MISE_TASK_NAME", raising=False)
+    monkeypatch.setenv("ORG_FINDINGS", "")
+
+
+pytestmark = pytest.mark.usefixtures("_outside_mise")
 
 
 def strings(*items: str) -> list[str]:
@@ -166,7 +161,7 @@ def refusal(repo_url: str) -> str:
 
     """
     return (
-        f"::error::pack_wasm.py: package.json repository is '{repo_url}', npm"
+        f"::error::pack-wasm: package.json repository is '{repo_url}', npm"
         f" provenance"
         f" requires '{WANT}' — set repository = \"{WANT}\" in the crate's"
         " Cargo.toml (canon: [workspace.package] repository with"
@@ -250,20 +245,20 @@ class TestRefuses:
         """The package would publish under a version the tag does not name."""
         run = run_helper(package(version="1.3.3"))
         self.assert_refused(
-            run, f"::error::pack_wasm.py: package.json says 1.3.3, tag says {VERSION}\n"
+            run, f"::error::pack-wasm: package.json says 1.3.3, tag says {VERSION}\n"
         )
 
     def test_no_version_is_refused(self) -> None:
         """A missing version reads as null, as jq read it."""
         run = run_helper(package(version=None))
         self.assert_refused(
-            run, f"::error::pack_wasm.py: package.json says null, tag says {VERSION}\n"
+            run, f"::error::pack-wasm: package.json says null, tag says {VERSION}\n"
         )
 
     def test_a_repository_spanning_lines_stays_one_error(self) -> None:
         """A newline in the caller's text is escaped (#1556's audit seed).
 
-        A repository of one newline split the `::error::pack_wasm.py: ` line in two,
+        A repository of one newline split the `::error::pack-wasm: ` line in two,
         and the second line was the caller's, free to be a workflow
         command.
         """
@@ -281,7 +276,7 @@ class TestRefuses:
             with self.subTest(manifest=manifest):
                 self.assert_refused(
                     run_helper(manifest),
-                    "::error::pack_wasm.py: crates/edtf-wasm/pkg/package.json is not"
+                    "::error::pack-wasm: crates/edtf-wasm/pkg/package.json is not"
                     " a JSON object\n",
                 )
 
@@ -293,14 +288,14 @@ class TestEmptyPack:
         """A zero-byte file is nothing to publish."""
         run = run_helper(package(), mode="empty")
         assert run.returncode == 1
-        assert run.stderr == "::error::pack_wasm.py: npm pack produced nothing\n"
+        assert run.stderr == "::error::pack-wasm: npm pack produced nothing\n"
         assert run.outputs == ""
 
     def test_no_tarball_named_is_refused(self) -> None:
         """A pack that names no tarball is nothing to publish."""
         run = run_helper(package(), mode="silent")
         assert run.returncode == 1
-        assert run.stderr == "::error::pack_wasm.py: npm pack produced nothing\n"
+        assert run.stderr == "::error::pack-wasm: npm pack produced nothing\n"
         assert run.outputs == ""
 
     def test_a_failing_npm_fails_the_step_with_its_status(self) -> None:

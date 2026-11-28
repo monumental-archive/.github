@@ -148,6 +148,6 @@ if [[ -n ${majors} ]]; then
   fi
   legs+=$'\n'${pgrx_legs}
 fi
-"${ORG_PYTHON}" -I "${ORG_BELT_ROOT}/belt" coverage-floor write --provenance "v${VERSION}" <<< "${legs}"
+"${ORG_PYTHON}" -I "${belt%/*}/belt" coverage-floor write --provenance "v${VERSION}" <<< "${legs}"
 
 emit "files=.coverage-floor"

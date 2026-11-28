@@ -46,7 +46,6 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from unittest import mock
 
 import pytest
 
@@ -735,11 +734,10 @@ class TestTable:
                 "utf-8",
             )
             here = sys.modules[__name__]
-            with (
-                mock.patch.object(here, "BELT", belt_dir),
-                mock.patch.dict(_SOURCES, clear=True),
-                mock.patch.dict(_CODE, clear=True),
-            ):
+            with pytest.MonkeyPatch.context() as patched:
+                patched.setattr(here, "BELT", belt_dir)
+                hermetic.patch_dict(patched, _SOURCES, clear=True)
+                hermetic.patch_dict(patched, _CODE, clear=True)
                 planted: list[str] = ["planted.sh"]
                 assert planted == python_code("runs.py").scripts
                 runs = expand('"${ORG_PYTHON}" "${ORG_BELT_DIR}/runs.py"', set())
@@ -761,11 +759,10 @@ class TestTable:
                 "utf-8",
             )
             here = sys.modules[__name__]
-            with (
-                mock.patch.object(here, "BELT", belt_dir),
-                mock.patch.dict(_SOURCES, clear=True),
-                mock.patch.dict(_CODE, clear=True),
-            ):
+            with pytest.MonkeyPatch.context() as patched:
+                patched.setattr(here, "BELT", belt_dir)
+                hermetic.patch_dict(patched, _SOURCES, clear=True)
+                hermetic.patch_dict(patched, _CODE, clear=True)
                 says = expand('"${ORG_PYTHON}" "${ORG_BELT_DIR}/says.py"', set())
                 assert first_call(says, ["hadolint"]) is None
                 assert first_call(says, ["git"]) == 1
@@ -781,11 +778,10 @@ class TestTable:
                 "utf-8",
             )
             here = sys.modules[__name__]
-            with (
-                mock.patch.object(here, "BELT", belt_dir),
-                mock.patch.dict(_SOURCES, clear=True),
-                mock.patch.dict(_CODE, clear=True),
-            ):
+            with pytest.MonkeyPatch.context() as patched:
+                patched.setattr(here, "BELT", belt_dir)
+                hermetic.patch_dict(patched, _SOURCES, clear=True)
+                hermetic.patch_dict(patched, _CODE, clear=True)
                 wraps = expand('"${ORG_PYTHON}" "${ORG_BELT_DIR}/wraps.py"', set())
                 assert first_call(wraps, ["hadolint"]) == 1
 
@@ -1093,11 +1089,12 @@ class TestRefusals:
         (Path(tmp.name) / "config.toml").write_text(config_text, encoding="utf-8")
         err = io.StringIO()
         with (
-            hermetic.as_task(""),
-            mock.patch.object(sys, "argv", [STEP]),
+            pytest.MonkeyPatch.context() as patched,
             contextlib.redirect_stderr(err),
             contextlib.redirect_stdout(io.StringIO()),
         ):
+            hermetic.name_task(patched, "")
+            patched.setattr(sys, "argv", [STEP])
             status = gate_tools.main(["--table", str(table), "list"])
         return status, err.getvalue(), table
 

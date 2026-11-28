@@ -16,7 +16,6 @@ stdlib `unittest`, matching the rest of release/. Run through the gate
 as `mise run test`, which `ci` collects.
 """
 
-import contextlib
 import gzip
 import hashlib
 import io
@@ -27,8 +26,8 @@ import tarfile
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest import mock
 
+import pytest
 
 from belt import workflow_yaml
 from belt.release import source_archive
@@ -62,22 +61,20 @@ esac
 """
 
 
-_NAMED = contextlib.ExitStack()
+@pytest.fixture
+def _outside_mise(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Name the helper by its command, as a run outside mise does (#1934).
 
-
-def setUpModule() -> None:
-    """Name the helper by its file, as a run outside mise does (#1934).
-
-    An in-process call reads argv, whatever task runs this suite.
+    An in-process call reads argv, whatever task runs this suite; an
+    empty ORG_FINDINGS records nothing (unset on a runner records to the
+    job's file, #1976).
     """
-    _NAMED.enter_context(mock.patch.object(sys, "argv", ["source_archive.py"]))
-    for key in ("MISE_TASK_NAME", "ORG_FINDINGS"):
-        if key in os.environ:
-            _NAMED.callback(os.environ.__setitem__, key, os.environ.pop(key))
-    # Empty, not unset: unset on a runner records to the job's file (#1976).
-    os.environ["ORG_FINDINGS"] = ""
-    _NAMED.callback(os.environ.pop, "ORG_FINDINGS", None)
-    unittest.addModuleCleanup(_NAMED.close)
+    monkeypatch.setattr(sys, "argv", ["source-archive"])
+    monkeypatch.delenv("MISE_TASK_NAME", raising=False)
+    monkeypatch.setenv("ORG_FINDINGS", "")
+
+
+pytestmark = pytest.mark.usefixtures("_outside_mise")
 
 
 def tarball(entries: int, salt: str = "") -> bytes:
@@ -242,7 +239,7 @@ class TestRefuses:
         run = run_helper((a, b), tracked=5)
         assert run.returncode == 1
         assert (
-            f"::error::source_archive.py: source archive is not deterministic"
+            f"::error::source-archive: source archive is not deterministic"
             f" ({sha(a)} vs {sha(b)})\n"
         ) == run.stderr
         assert "ls-files" not in run.git
@@ -254,7 +251,7 @@ class TestRefuses:
         assert run.returncode == 1
         assert (
             run.stderr
-            == "::error::source_archive.py: archive lists 3 entries for 7 tracked files\n"
+            == "::error::source-archive: archive lists 3 entries for 7 tracked files\n"
         )
 
     def test_an_empty_archive_is_refused(self) -> None:
@@ -264,7 +261,7 @@ class TestRefuses:
         assert run.returncode == 1
         assert (
             run.stderr
-            == "::error::source_archive.py: archive lists 0 entries for 4 tracked files\n"
+            == "::error::source-archive: archive lists 0 entries for 4 tracked files\n"
         )
 
     def test_a_failing_git_fails_the_step_with_its_status(self) -> None:

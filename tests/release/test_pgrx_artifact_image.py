@@ -16,9 +16,9 @@ stdlib `unittest`, matching the other tests here. Run through the gate
 as `mise run test`, which `ci` collects.
 """
 
-from tests import hermetic
-import pathlib
 import shlex
+
+from tests import hermetic
 
 ROOT = hermetic.CANON
 DOCKERFILE = ROOT / "docker" / "pgrx-artifact.Dockerfile"

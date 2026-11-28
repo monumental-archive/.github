@@ -22,12 +22,12 @@ stdlib `unittest`, run through the gate as `mise run test`.
 
 from __future__ import annotations
 
-from tests import hermetic
 import re
 import tempfile
 from pathlib import Path
 
 from belt import decoded, workflow_yaml
+from tests import hermetic
 
 CANON = hermetic.CANON
 WORKFLOWS = Path(".github") / "workflows"
@@ -42,9 +42,9 @@ HELPER = "mise/standing_issue.py"
 Mapping = dict[str, object]
 
 
-def same[T](case: unittest.TestCase, got: T, want: T, msg: str = "") -> None:
+def same[T](got: T, want: T, msg: str = "") -> None:
     """Assert two values equal, `want` typed by `got` (mypy.ini: no Any)."""
-    case.assertEqual(got, want, msg or None)
+    assert got == want, msg or None
 
 
 def scheduled(document: Mapping) -> bool:
@@ -212,7 +212,7 @@ class TestCanon:
 
     def test_every_scheduled_workflow_reports(self) -> None:
         """Every workflow the set computes ends with `report`; every stub grants."""
-        same(self, problems(CANON), [])
+        same(problems(CANON), [])
 
     def test_the_set_is_not_empty(self) -> None:
         """The computation reaches direct workflows and the stubs' callees."""
@@ -247,12 +247,11 @@ class TestPlanted:
 
     def test_as_built_passes(self) -> None:
         """A report needing both jobs passes."""
-        same(self, self.plant(REPORT.format(needs="      - one\n      - two")), [])
+        same(self.plant(REPORT.format(needs="      - one\n      - two")), [])
 
     def test_no_report_job(self) -> None:
         """A scheduled workflow with no report job is red by name."""
         same(
-            self,
             self.plant(""),
             ["planted.yml: the last job is not `report` (it is ['two'])"],
         )
@@ -260,7 +259,7 @@ class TestPlanted:
     def test_needs_misses_a_job(self) -> None:
         """A report whose needs: misses a job names the job."""
         found = self.plant(REPORT.format(needs="      - one"))
-        same(self, found, ["planted.yml: report's needs: misses two"])
+        same(found, ["planted.yml: report's needs: misses two"])
 
     def test_cancelled_run_reaches_the_helper(self) -> None:
         """A helper step without the cancelled guard is red by name."""
@@ -269,7 +268,6 @@ class TestPlanted:
         )
         found = self.plant(report)
         same(
-            self,
             found,
             [f"planted.yml: report's {HELPER} step is not if: {NOT_CANCELLED}"],
         )
@@ -292,7 +290,6 @@ class TestPlanted:
             )
             (root / WORKFLOWS / "stub.yml").write_text(stub, encoding="utf-8")
             same(
-                self,
                 problems(root),
                 [
                     "stub.yml: call does not grant issues: write",

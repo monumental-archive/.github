@@ -12,13 +12,11 @@ gate as `mise run test`.
 
 import contextlib
 import io
-import os
 import subprocess
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
-from unittest import mock
 
 import pytest
 
@@ -112,10 +110,11 @@ def audit(
         out, err = io.StringIO(), io.StringIO()
         named: dict[str, str] = {"GITHUB_REPOSITORY_OWNER": owner}
         with (
-            mock.patch.dict(os.environ, named),
+            pytest.MonkeyPatch.context() as patched,
             contextlib.redirect_stdout(out),
             contextlib.redirect_stderr(err),
         ):
+            hermetic.patch_env(patched, named)
             status = citations.main(org, tree)
         return status, out.getvalue(), err.getvalue()
 
@@ -155,7 +154,8 @@ class TestInputs:
 
     def test_no_gh_is_red(self) -> None:
         """With no network stand-in and no gh on PATH: `gh missing`."""
-        with mock.patch("shutil.which", return_value=None):
+        with pytest.MonkeyPatch.context() as patched:
+            patched.setattr("shutil.which", hermetic.returning(None))
             status, _, err = audit(DOC, None)
         assert (1, f"{TASK}: gh missing\n") == (status, err)
 

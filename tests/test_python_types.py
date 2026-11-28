@@ -339,9 +339,7 @@ def roots(*files: str) -> hermetic.Called:
         for name in files:
             (Path(tmp) / name).parent.mkdir(parents=True, exist_ok=True)
             (Path(tmp) / name).write_text("X = 1\n", encoding="utf-8")
-        return hermetic.call(
-            lambda: python_roots.main([str(BELT), *files]), cwd=tmp
-        )
+        return hermetic.call(lambda: python_roots.main([str(BELT), *files]), cwd=tmp)
 
 
 class TestTheHelpers:

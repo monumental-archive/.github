@@ -15,7 +15,6 @@ stdlib `unittest`, matching the rest of release/. Run through the gate
 as `mise run test`, which `ci` collects.
 """
 
-import contextlib
 import io
 import os
 import re
@@ -65,22 +64,20 @@ DEBUG_LOG = f"""0 verbose cli /usr/bin/node /usr/bin/npm
 """
 
 
-_NAMED = contextlib.ExitStack()
+@pytest.fixture
+def _outside_mise(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Name the helper by its command, as a run outside mise does (#1934).
 
-
-def setUpModule() -> None:
-    """Name the helper by its file, as a run outside mise does (#1934).
-
-    An in-process call reads argv, whatever task runs this suite.
+    An in-process call reads argv, whatever task runs this suite; an
+    empty ORG_FINDINGS records nothing (unset on a runner records to the
+    job's file, #1976).
     """
-    _NAMED.enter_context(mock.patch.object(sys, "argv", ["publish_npm.py"]))
-    for key in ("MISE_TASK_NAME", "ORG_FINDINGS"):
-        if key in os.environ:
-            _NAMED.callback(os.environ.__setitem__, key, os.environ.pop(key))
-    # Empty, not unset: unset on a runner records to the job's file (#1976).
-    os.environ["ORG_FINDINGS"] = ""
-    _NAMED.callback(os.environ.pop, "ORG_FINDINGS", None)
-    unittest.addModuleCleanup(_NAMED.close)
+    monkeypatch.setattr(sys, "argv", ["publish-npm"])
+    monkeypatch.delenv("MISE_TASK_NAME", raising=False)
+    monkeypatch.setenv("ORG_FINDINGS", "")
+
+
+pytestmark = pytest.mark.usefixtures("_outside_mise")
 
 
 @dataclass
@@ -172,7 +169,7 @@ class TestRefusals:
         run = run_publish(version="11.5.0")
         assert run.returncode == 1
         assert run.stderr == (
-            "::error::publish_npm.py: npm 11.5.0 < 11.5.1; trusted publishing needs"
+            "::error::publish-npm: npm 11.5.0 < 11.5.1; trusted publishing needs"
             " 11.5.1+"
             " — bump the pin in this repository's mise config\n"
         )
@@ -189,7 +186,7 @@ class TestRefusals:
         run = run_publish(oidc=False)
         assert run.returncode == 1
         assert run.stderr == (
-            "::error::publish_npm.py: the OIDC token endpoint is absent from this"
+            "::error::publish-npm: the OIDC token endpoint is absent from this"
             " job's environment,"
             " so npm cannot use trusted publishing — every job in the call chain"
             " must grant id-token: write, including the caller's own job in its"
@@ -203,7 +200,7 @@ class TestRefusals:
         run = run_publish(tarballs=tarballs)
         assert run.returncode == 1
         assert run.stderr.endswith(
-            f"::error::publish_npm.py: expected exactly one tarball, found {count}\n"
+            f"::error::publish-npm: expected exactly one tarball, found {count}\n"
         ), run.stderr
         published: list[str] = [c for c in run.npm if c.startswith("publish")]
         assert not published

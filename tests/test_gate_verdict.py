@@ -13,7 +13,6 @@ stdlib `unittest`, matching the other tests here.
 from __future__ import annotations
 
 import os
-import pathlib
 import subprocess
 
 from tests import hermetic

@@ -18,15 +18,14 @@ stdlib `unittest`, matching the rest of release/. Run through the gate
 as `mise run test`, which `ci` collects.
 """
 
-import contextlib
 import os
 import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest import mock
 
+import pytest
 
 from belt import workflow_yaml
 from belt.release import build_go_commands
@@ -55,22 +54,20 @@ esac
 """
 
 
-_NAMED = contextlib.ExitStack()
+@pytest.fixture
+def _outside_mise(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Name the helper by its command, as a run outside mise does (#1934).
 
-
-def setUpModule() -> None:
-    """Name the helper by its file, as a run outside mise does (#1934).
-
-    An in-process call reads argv, whatever task runs this suite.
+    An in-process call reads argv, whatever task runs this suite; an
+    empty ORG_FINDINGS records nothing (unset on a runner records to the
+    job's file, #1976).
     """
-    _NAMED.enter_context(mock.patch.object(sys, "argv", ["build_go_commands.py"]))
-    for key in ("MISE_TASK_NAME", "ORG_FINDINGS"):
-        if key in os.environ:
-            _NAMED.callback(os.environ.__setitem__, key, os.environ.pop(key))
-    # Empty, not unset: unset on a runner records to the job's file (#1976).
-    os.environ["ORG_FINDINGS"] = ""
-    _NAMED.callback(os.environ.pop, "ORG_FINDINGS", None)
-    unittest.addModuleCleanup(_NAMED.close)
+    monkeypatch.setattr(sys, "argv", ["build-go-commands"])
+    monkeypatch.delenv("MISE_TASK_NAME", raising=False)
+    monkeypatch.setenv("ORG_FINDINGS", "")
+
+
+pytestmark = pytest.mark.usefixtures("_outside_mise")
 
 
 @dataclass
@@ -192,7 +189,7 @@ class TestRefuses:
         run = run_helper("\n\n")
         assert run.returncode == 1
         assert run.stderr == (
-            "::error::build_go_commands.py: no main packages in this module —"
+            "::error::build-go-commands: no main packages in this module —"
             " go-binary is the wrong class\n"
         )
         assert run.staged == NOTHING
@@ -202,7 +199,7 @@ class TestRefuses:
         run = run_helper("example.com/m/cmd/tool\nexample.com/m/internal/tool\n")
         assert run.returncode == 1
         assert run.stderr == (
-            "::error::build_go_commands.py: two main packages both build a binary"
+            "::error::build-go-commands: two main packages both build a binary"
             " named tool\n"
         )
         staged: list[str] = ["tool"]

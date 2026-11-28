@@ -417,7 +417,8 @@ class TestReport(TestRepoCase):
     def test_summary_lists_only_recent_no_test(self) -> None:
         """The summary carries the window's ratio and the recent fixes only."""
         env = {"GIT_COMMITTER_DATE": "2020-01-01T00:00:00Z"}
-        with mock.patch.dict(os.environ, env):
+        with pytest.MonkeyPatch.context() as patched:
+            hermetic.patch_env(patched, env)
             self.repo.commit("fix: old", {"old.py": "1\n"})
         self.repo.commit("fix: new", {"new.py": "1\n"})
         self.repo.commit("fix: tested", {"t.py": "1\n", "test_t.py": "1\n"})

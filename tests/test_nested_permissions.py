@@ -48,9 +48,9 @@ TAIL = [
 ]
 
 
-def same[T](case: unittest.TestCase, got: T, want: T, msg: str = "") -> None:
+def same[T](got: T, want: T, msg: str = "") -> None:
     """Assert two values equal, `want` typed by `got` (mypy.ini: no Any)."""
-    case.assertEqual(got, want, msg or None)
+    assert got == want, msg or None
 
 
 def body() -> str:
@@ -149,17 +149,17 @@ class TestNested:
     def test_no_workflows_is_skipped_by_name(self) -> None:
         """No workflow file: the task says it skipped."""
         done = self.task()
-        same(self, done.returncode, 0, done.stderr)
+        same(done.returncode, 0, done.stderr)
         skipped = ["lint:nested-permissions: no workflows, skipped"]
-        same(self, done.stdout.splitlines(), skipped)
+        same(done.stdout.splitlines(), skipped)
 
     def test_offender_is_red_through_the_task(self) -> None:
         """The task body hands the helper every workflow; an offender is red."""
         self.plant("clean.yml", "jobs:\n  ci:\n" + CALL + GRANT)
         bad = self.plant("stub.yaml", "jobs:\n  ci:\n" + CALL)
         done = self.task()
-        same(self, done.returncode, nested_permissions.EXIT_RED)
-        same(self, done.stderr.splitlines(), red(f"{bad}:ci"))
+        same(done.returncode, nested_permissions.EXIT_RED)
+        same(done.stderr.splitlines(), red(f"{bad}:ci"))
 
     def test_stated_permissions_are_clean(self) -> None:
         """Every uses: job states permissions; only files with one count."""
@@ -170,9 +170,9 @@ class TestNested:
         )
         none = self.plant("none.yml", "jobs:\n  build:\n" + STEP)
         done = self.helper(one, two, none)
-        same(self, done.returncode, 0, done.stderr)
-        same(self, done.stdout.splitlines(), ok(2))
-        same(self, done.stderr, "")
+        same(done.returncode, 0, done.stderr)
+        same(done.stdout.splitlines(), ok(2))
+        same(done.stderr, "")
 
     def test_offenders_are_named_in_file_order(self) -> None:
         """First, middle and last jobs offend: each named, file by file."""
@@ -182,29 +182,28 @@ class TestNested:
         )
         second = self.plant("second.yml", "jobs:\n  m:\n" + STEP + "  n:\n" + CALL)
         done = self.helper(first, second)
-        same(self, done.returncode, nested_permissions.EXIT_RED)
+        same(done.returncode, nested_permissions.EXIT_RED)
         same(
-            self,
             done.stderr.splitlines(),
             red(f"{first}:a", f"{first}:c", f"{second}:n"),
         )
-        same(self, done.stdout, "")
+        same(done.stdout, "")
 
     def test_keys_before_jobs_are_not_jobs(self) -> None:
         """A two-space key above `jobs:` opens no job."""
         text = "on:\n  workflow_call:\n" + CALL + "jobs:\n  ci:\n" + CALL + GRANT
         rel = self.plant("wf.yml", text)
         done = self.helper(rel)
-        same(self, done.returncode, 0, done.stderr)
-        same(self, done.stdout.splitlines(), ok(1))
+        same(done.returncode, 0, done.stderr)
+        same(done.stdout.splitlines(), ok(1))
 
     def test_a_second_jobs_line_closes_nothing(self) -> None:
         """A repeated `jobs:` line leaves the open job open."""
         text = "jobs:\n  ci:\n" + CALL + "jobs:\n" + GRANT
         rel = self.plant("wf.yml", text)
         done = self.helper(rel)
-        same(self, done.returncode, 0, done.stderr)
-        same(self, done.stdout.splitlines(), ok(1))
+        same(done.returncode, 0, done.stderr)
+        same(done.stdout.splitlines(), ok(1))
 
     def test_trailing_blanks_and_carriage_returns(self) -> None:
         """Trailing blanks still open a job; a carriage return stays in its name.
@@ -215,22 +214,22 @@ class TestNested:
         blanks = self.plant("blanks.yml", "jobs: \t\n  ci:  \n" + CALL)
         crlf = self.plant("crlf.yml", "jobs:\r\n  ci:\r\n" + CALL)
         done = self.helper(blanks, crlf)
-        same(self, done.returncode, nested_permissions.EXIT_RED)
-        same(self, done.stderr.splitlines(), red(f"{blanks}:ci", f"{crlf}:ci:\\r"))
+        same(done.returncode, nested_permissions.EXIT_RED)
+        same(done.stderr.splitlines(), red(f"{blanks}:ci", f"{crlf}:ci:\\r"))
 
     def test_not_a_job_key(self) -> None:
         """Deeper, shallower or valued keys open no job."""
         text = "jobs:\n  ci:\n" + GRANT + "  x: y\n   deep:\n" + CALL
         rel = self.plant("wf.yml", text)
         done = self.helper(rel)
-        same(self, done.returncode, 0, done.stderr)
-        same(self, done.stdout.splitlines(), ok(1))
+        same(done.returncode, 0, done.stderr)
+        same(done.stdout.splitlines(), ok(1))
 
     def test_not_utf8_is_an_error(self) -> None:
         """A workflow that is not UTF-8 is refused by name, exit 2."""
         rel = self.plant("bad.yml", b"jobs: \xff\n")
         done = self.helper(rel)
-        same(self, done.returncode, nested_permissions.EXIT_ERROR)
+        same(done.returncode, nested_permissions.EXIT_ERROR)
         assert done.stderr.startswith(
             f"lint:nested-permissions: {rel}: cannot be read as UTF-8:"
         ), done.stderr
@@ -238,7 +237,7 @@ class TestNested:
     def test_missing_file_is_an_error(self) -> None:
         """A named workflow that does not exist is refused by name, exit 2."""
         done = self.helper(".github/workflows/gone.yml")
-        same(self, done.returncode, nested_permissions.EXIT_ERROR)
+        same(done.returncode, nested_permissions.EXIT_ERROR)
         assert done.stderr.startswith(
             "lint:nested-permissions: .github/workflows/gone.yml:"
             " cannot be read as UTF-8:"
@@ -247,6 +246,6 @@ class TestNested:
     def test_no_workflows_is_a_usage_error(self) -> None:
         """No workflow named: exit 2 with the usage line."""
         done = self.helper()
-        same(self, done.returncode, nested_permissions.EXIT_ERROR)
+        same(done.returncode, nested_permissions.EXIT_ERROR)
         usage = "lint:nested-permissions: usage: nested_permissions.py WORKFLOW..."
-        same(self, done.stderr.splitlines(), [usage])
+        same(done.stderr.splitlines(), [usage])

@@ -17,8 +17,6 @@ import json
 import subprocess
 import sys
 from pathlib import Path
-from unittest import mock
-
 
 import pytest
 
@@ -87,7 +85,8 @@ def call(argv: list[str]) -> hermetic.Called:
         Its exit status and output, captured.
 
     """
-    with mock.patch.object(sys, "argv", [str(HELPER), *argv]):
+    with pytest.MonkeyPatch.context() as patched:
+        patched.setattr(sys, "argv", [str(HELPER), *argv])
         return hermetic.call(lambda: verdict.main(argv), env=hermetic.env())
 
 

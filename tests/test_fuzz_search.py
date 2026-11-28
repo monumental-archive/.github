@@ -215,9 +215,9 @@ func FuzzLoad(f *testing.F) {
 SEEDS = "internal/policy/testdata/fuzz/FuzzLoad"
 
 
-def same(case: unittest.TestCase, want: list[str], got: list[str]) -> None:
+def same(want: list[str], got: list[str]) -> None:
     """Assert two lists of strings are equal, typed so a literal is too."""
-    case.assertEqual(want, got)
+    assert want == got
 
 
 def subject(record: dict[str, object]) -> str:
@@ -465,7 +465,7 @@ class TestRustSearch(TestSearchCase):
         status = self.git("status", "--porcelain", "--untracked-files=all", "fuzz")
         result = self.run_task("audit:fuzz")
         assert result.returncode == 0, result.stderr
-        same(self, ["fuzz/corpus/parse_marker/bbb-raise"], self.staged())
+        same(["fuzz/corpus/parse_marker/bbb-raise"], self.staged())
         assert (
             "- `parse_marker` (fuzz-parse-marker): corpus 10% to 11%, 1 input(s)"
             " kept, 0 crash(es);"
@@ -477,7 +477,7 @@ class TestRustSearch(TestSearchCase):
         )
         corpus = self.tree / "fuzz/corpus/parse_marker"
         names: list[str] = sorted(path.name for path in corpus.iterdir())
-        same(self, ["seed"], names)
+        same(["seed"], names)
         # The search wrote into a scratch finds/ handed first, never the tree.
         search = next(line for line in self.log("cargo") if "-max_total_time" in line)
         assert "fuzz/corpus" not in search
@@ -489,7 +489,7 @@ class TestRustSearch(TestSearchCase):
         self.rust()
         result = self.run_task("audit:fuzz")
         assert result.returncode == 0, result.stderr
-        same(self, [], self.staged())
+        same([], self.staged())
         assert "corpus 10% to 10%, 0 input(s) kept, 0 crash(es)" in result.stdout
 
     def test_each_target_prints_its_figure_once(self) -> None:
@@ -504,7 +504,6 @@ class TestRustSearch(TestSearchCase):
             line for line in result.stderr.splitlines() if "corpus reaches" in line
         ]
         same(
-            self,
             [
                 "fuzz-parse-marker: corpus reaches 10% of the lines it links",
                 "fuzz-parse-date: corpus reaches 10% of the lines it links",
@@ -518,7 +517,7 @@ class TestRustSearch(TestSearchCase):
         self.env["STUB_CRASH"] = "crash-0badc0de"
         result = self.run_task("audit:fuzz")
         assert result.returncode == 1, result.stdout
-        same(self, ["fuzz/corpus/parse_marker/crash-0badc0de"], self.staged())
+        same(["fuzz/corpus/parse_marker/crash-0badc0de"], self.staged())
         assert (
             "audit:fuzz: fuzz/corpus/parse_marker/crash-0badc0de: parse_marker crashed"
             in result.stderr
@@ -542,7 +541,7 @@ class TestRustSearch(TestSearchCase):
         assert base == "base: proposed seed "
         # Measured against what is already proposed: 10% plus `proposed`.
         assert "corpus 11% to 11%" in result.stdout
-        same(self, [], self.staged())
+        same([], self.staged())
 
 
 class TestMeasureNeedsItsLog(TestSearchCase):
@@ -593,7 +592,7 @@ class TestGoSearch(TestSearchCase):
         status = self.git("status", "--porcelain", "--untracked-files=all")
         result = self.run_task("audit:go-fuzz")
         assert result.returncode == 0, result.stderr
-        same(self, [f"{SEEDS}/bbb-raise"], self.staged())
+        same([f"{SEEDS}/bbb-raise"], self.staged())
         calls = self.log("go")
         cleaned = calls.index("clean -fuzzcache")
         first = next(i for i, c in enumerate(calls) if c.startswith("test -fuzz"))
@@ -612,7 +611,7 @@ class TestGoSearch(TestSearchCase):
         status = self.git("status", "--porcelain", "--untracked-files=all")
         result = self.run_task("audit:go-fuzz")
         assert result.returncode == 1, result.stdout
-        same(self, [f"{SEEDS}/crash-feedface"], self.staged())
+        same([f"{SEEDS}/crash-feedface"], self.staged())
         assert (
             f"audit:go-fuzz: {SEEDS}/crash-feedface: FuzzLoad in"
             " example.com/x/internal/policy failed;"
@@ -646,7 +645,6 @@ class TestCrashFindings(TestSearchCase):
         )
         # Unstamped, from the panic to the SUMMARY line and no further.
         same(
-            self,
             [
                 "thread '<unnamed>' panicked at src/lib.rs:7:3:",
                 "range forms disagree",
@@ -666,7 +664,6 @@ class TestCrashFindings(TestSearchCase):
         found = self.crashes("audit:fuzz")
         assert self.result.returncode == 1, self.result.stdout
         same(
-            self,
             [
                 "fuzz/corpus/parse_marker/crash-abc",
                 "fuzz/corpus/parse_marker/crash-def",
@@ -681,7 +678,6 @@ class TestCrashFindings(TestSearchCase):
         found = self.crashes("audit:go-fuzz")
         assert self.result.returncode == 1, self.result.stdout
         same(
-            self,
             [f"{SEEDS}/crash-beefcafe", f"{SEEDS}/crash-feedface"],
             sorted(subject(r) for r in found),
         )
@@ -694,7 +690,6 @@ class TestCrashFindings(TestSearchCase):
         ) == crash["message"]
         # Go's own lines, from `--- FAIL: ` to the package's `FAIL`.
         same(
-            self,
             [
                 "--- FAIL: FuzzLoad (0.02s)",
                 "    --- FAIL: FuzzLoad (0.00s)",
@@ -731,7 +726,7 @@ class TestQuietSteps(TestSearchCase):
         assert result.returncode == 1, result.stdout
         out = result.stdout + result.stderr
         shown = [line for line in out.splitlines() if line.startswith(prefix)]
-        same(self, [f"{prefix}{i}" for i in range(961, 1001)], shown)
+        same([f"{prefix}{i}" for i in range(961, 1001)], shown)
         return result.stderr
 
     def test_a_rust_merge_that_succeeds_prints_nothing(self) -> None:
@@ -847,7 +842,7 @@ class TestNestedModule(TestSearchCase):
         self.find("bbb-raise", "raise\n")
         result = self.run_task("audit:go-fuzz")
         assert result.returncode == 0, result.stderr
-        same(self, ["tools/gen/testdata/fuzz/FuzzLoad/bbb-raise"], self.staged())
+        same(["tools/gen/testdata/fuzz/FuzzLoad/bbb-raise"], self.staged())
         assert (
             "- `FuzzLoad` in example.com/x/tools/gen (fuzz-tools-gen-load):"
             " corpus 10.0% to 11.0%, 1 input(s) kept"
@@ -873,7 +868,7 @@ class TestSelection(TestSearchCase):
         self.env["FUZZ_TARGET"] = "parse_date"
         result = self.run_task("audit:fuzz")
         assert result.returncode == 0, result.stderr
-        same(self, ["parse_date"], self.searched())
+        same(["parse_date"], self.searched())
         assert "- `parse_date` (fuzz-parse-date):" in result.stdout
         assert "- `parse_marker`" not in result.stdout
 
@@ -882,7 +877,7 @@ class TestSelection(TestSearchCase):
         self.rust_two()
         result = self.run_task("audit:fuzz")
         assert result.returncode == 0, result.stderr
-        same(self, ["parse_marker", "parse_date"], self.searched())
+        same(["parse_marker", "parse_date"], self.searched())
 
     def test_an_unknown_rust_target_is_red_naming_it(self) -> None:
         """A name cargo fuzz list does not print is red, and nothing is searched."""
@@ -894,7 +889,7 @@ class TestSelection(TestSearchCase):
             "audit:fuzz: FUZZ_TARGET 'parse_time' is no fuzz target of"
             " fuzz/Cargo.toml (cargo fuzz list: parse_marker parse_date)"
         ) in result.stderr
-        same(self, [], self.searched())
+        same([], self.searched())
 
     def test_a_rust_target_with_no_fuzz_crate_is_red_naming_it(self) -> None:
         """A named target on a tree with no fuzz/ is red, not skipped."""
@@ -1054,7 +1049,6 @@ class TestHandover:
             and s.get("name") != "Hand the findings to the report job"
         ]
         same(
-            self,
             [self.UPLOAD, self.UPLOAD_SUMMARY],
             [decoded.as_str(s.get("name"), "name") for s in uploads],
         )
@@ -1137,7 +1131,7 @@ class TestOneRunnerPerTarget:
         assert not strategy["fail-fast"]
         matrix = decoded.as_object(strategy["matrix"], "matrix")
         keys: list[str] = list(matrix)
-        same(self, ["include"], keys)
+        same(["include"], keys)
         assert (
             matrix["include"] == "${{ fromJSON(needs.applies.outputs.fuzz-targets) }}"
         )
@@ -1178,7 +1172,6 @@ class TestOneRunnerPerTarget:
             for n in (TestHandover.UPLOAD, TestHandover.UPLOAD_SUMMARY)
         ]
         same(
-            self,
             [
                 "fuzz-corpus-candidates-${{ matrix.leg }}",
                 "fuzz-corpus-summary-${{ matrix.leg }}",
@@ -1197,7 +1190,6 @@ class TestOneRunnerPerTarget:
         ]
         temp = "${{ runner.temp }}"
         same(
-            self,
             [
                 f"fuzz-corpus-candidates-* {temp}/fuzz-corpus-candidates True",
                 f"fuzz-corpus-summary-* {temp}/fuzz-corpus-summaries True",
@@ -1263,7 +1255,6 @@ class TestProposeRunsNoRepositoryCode:
             if s.get("if") == "${{ steps.staged.outputs.staged == 'true' }}"
         ]
         same(
-            self,
             [
                 "Refuse any path outside the two corpus shapes",
                 "Mint the proposal token",
@@ -1282,7 +1273,7 @@ class TestProposeRunsNoRepositoryCode:
             for s in workflow_yaml.steps(job)
             if "create-github-app-token" in str(s.get("uses", ""))
         )
-        same(self, ["propose"], minting)
+        same(["propose"], minting)
         text = WORKFLOW.read_text(encoding="utf-8")
         assert text.count("secrets.app-private-key") == 1
         assert "id-token" not in text

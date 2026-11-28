@@ -12,37 +12,32 @@ stdlib `unittest`, matching the other tests here.
 
 from __future__ import annotations
 
-import contextlib
 import json
 import os
-import pathlib
 import subprocess
 import sys
 from pathlib import Path
-from unittest import mock
-
 
 import pytest
 
 from belt.release import repro_resolve
 from tests import hermetic
 
-_NAMED = contextlib.ExitStack()
 
+@pytest.fixture
+def _outside_mise(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Name the helper by its command, as a run outside mise does (#1934).
 
-def setUpModule() -> None:
-    """Name the helper by its file, as a run outside mise does (#1934).
-
-    An in-process call reads argv, whatever task runs this suite.
+    An in-process call reads argv, whatever task runs this suite; an
+    empty ORG_FINDINGS records nothing (unset on a runner records to the
+    job's file, #1976).
     """
-    _NAMED.enter_context(mock.patch.object(sys, "argv", ["repro_resolve.py"]))
-    for key in ("MISE_TASK_NAME", "ORG_FINDINGS"):
-        if key in os.environ:
-            _NAMED.callback(os.environ.__setitem__, key, os.environ.pop(key))
-    # Empty, not unset: unset on a runner records to the job's file (#1976).
-    os.environ["ORG_FINDINGS"] = ""
-    _NAMED.callback(os.environ.pop, "ORG_FINDINGS", None)
-    unittest.addModuleCleanup(_NAMED.close)
+    monkeypatch.setattr(sys, "argv", ["repro-resolve"])
+    monkeypatch.delenv("MISE_TASK_NAME", raising=False)
+    monkeypatch.setenv("ORG_FINDINGS", "")
+
+
+pytestmark = pytest.mark.usefixtures("_outside_mise")
 
 
 def dumps(value: object) -> str:
@@ -194,8 +189,7 @@ class TestReadTheLatestRelease:
         done, out = self.resolve("nightly")
         assert done.returncode == 1, done.stdout + done.stderr
         assert done.stderr == (
-            "::error::repro_resolve.py: latest release tag nightly is not a v*"
-            " release\n"
+            "::error::repro-resolve: latest release tag nightly is not a v* release\n"
         )
         assert out == ""
 
@@ -204,7 +198,7 @@ class TestReadTheLatestRelease:
         done, out = self.resolve(checksums="")
         assert done.returncode == 1, done.stdout + done.stderr
         assert done.stderr == (
-            "::error::repro_resolve.py: release v1.2.3 has no checksums.txt — nothing"
+            "::error::repro-resolve: release v1.2.3 has no checksums.txt — nothing"
             " to prove against\n"
         )
         assert out == ""
@@ -224,7 +218,7 @@ class TestReadTheLatestRelease:
         done, out = self.resolve(manifest="{")
         assert done.returncode == 1, done.stdout + done.stderr
         assert done.stderr.startswith(
-            "::error::repro_resolve.py: evidence-manifest.json is not JSON:"
+            "::error::repro-resolve: evidence-manifest.json is not JSON:"
         ), done.stderr
         assert out == ""
 
@@ -237,7 +231,7 @@ class TestReadTheLatestRelease:
         done, out = self.resolve(manifest=dumps({"entries": entries}))
         assert done.returncode == 1, done.stdout + done.stderr
         assert done.stderr == (
-            "::error::repro_resolve.py: evidence-manifest.json is not an"
+            "::error::repro-resolve: evidence-manifest.json is not an"
             " evidence manifest:"
             " its entries are not a list\n"
         )

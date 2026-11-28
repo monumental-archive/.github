@@ -19,10 +19,8 @@ as `mise run test`, which `ci` collects.
 import json
 import os
 import subprocess
-import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
-
 
 from tests import hermetic
 

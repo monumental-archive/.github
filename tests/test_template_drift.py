@@ -54,9 +54,9 @@ TAIL = [
 ]
 
 
-def same[T](case: unittest.TestCase, got: T, want: T, msg: str = "") -> None:
+def same[T](got: T, want: T, msg: str = "") -> None:
     """Assert two values equal, `want` typed by `got` (mypy.ini: no Any)."""
-    case.assertEqual(got, want, msg or None)
+    assert got == want, msg or None
 
 
 def body() -> str:
@@ -219,65 +219,65 @@ class TestPins(TestPlanted):
         """No workflow-templates/: the task says it skipped."""
         shutil.rmtree(self.tree / "workflow-templates")
         done = self.task()
-        same(self, done.returncode, 0, done.stderr)
+        same(done.returncode, 0, done.stderr)
         skipped = ["audit:template-pins: no workflow-templates/, skipped"]
-        same(self, done.stdout.splitlines(), skipped)
+        same(done.stdout.splitlines(), skipped)
 
     def test_clean_pin_through_the_task(self) -> None:
         """The body hands the helper the canon and the templates; no drift is ok."""
         self.commit("docs/a.md")
         self.plant(template(self.pin))
         done = self.task()
-        same(self, done.returncode, 0, done.stderr)
+        same(done.returncode, 0, done.stderr)
         ok = (
             f"audit:template-pins: pin {self.pin[:8]} carries all shipped"
             " workflow and belt changes"
         )
-        same(self, done.stdout.splitlines(), [ok])
+        same(done.stdout.splitlines(), [ok])
 
     def test_no_org_pin_is_skipped_by_name(self) -> None:
         """Templates that pin no canon SHA: skipped, by name."""
         rel = self.plant(template())
         done = self.helper(CANON, rel)
-        same(self, done.returncode, 0, done.stderr)
+        same(done.returncode, 0, done.stderr)
         skipped = ["audit:template-pins: no org pins in templates, skipped"]
-        same(self, done.stdout.splitlines(), skipped)
+        same(done.stdout.splitlines(), skipped)
 
     def test_a_short_pin_is_no_pin(self) -> None:
         """A pin that is not 40 hex is not read as one."""
         rel = self.plant(template(self.pin[:12]))
         done = self.helper(CANON, rel)
-        same(self, done.returncode, 0, done.stderr)
+        same(done.returncode, 0, done.stderr)
         skipped = ["audit:template-pins: no org pins in templates, skipped"]
-        same(self, done.stdout.splitlines(), skipped)
+        same(done.stdout.splitlines(), skipped)
 
     def test_two_shas_are_red(self) -> None:
         """Two distinct pinned SHAs: red, naming the lint that missed it."""
         other = self.commit("mise/b.sh")
         rel = self.plant(template(self.pin, other, self.pin))
         done = self.helper(CANON, rel)
-        same(self, done.returncode, template_drift.EXIT_RED)
+        same(done.returncode, template_drift.EXIT_RED)
         expected = [
             (
                 "audit:template-pins: templates pin more than one SHA"
                 " (lint:template-pins should have failed)"
             )
         ]
-        same(self, done.stderr.splitlines(), expected)
+        same(done.stderr.splitlines(), expected)
 
     def test_a_sha_not_in_the_clone_is_red(self) -> None:
         """A pin the clone lacks: red, naming a shallow clone."""
         absent = "b" * 40
         rel = self.plant(template(absent))
         done = self.helper(CANON, rel)
-        same(self, done.returncode, template_drift.EXIT_RED)
+        same(done.returncode, template_drift.EXIT_RED)
         expected = [
             (
                 "audit:template-pins: pinned SHA bbbbbbbb not in local history"
                 " (shallow clone?)"
             )
         ]
-        same(self, done.stderr.splitlines(), expected)
+        same(done.stderr.splitlines(), expected)
 
 
 class TestDrift(TestPlanted):
@@ -290,10 +290,10 @@ class TestDrift(TestPlanted):
         self.commit("mise/b.sh")
         rel = self.plant(template(self.pin))
         done = self.helper(CANON, rel)
-        same(self, done.returncode, template_drift.EXIT_RED)
+        same(done.returncode, template_drift.EXIT_RED)
         head = f"audit:template-pins: pin {self.pin[:8]} misses shipped canon changes:"
-        same(self, done.stderr.splitlines(), [head, *self.log(self.pin), *TAIL])
-        same(self, len(self.log(self.pin)), 2)
+        same(done.stderr.splitlines(), [head, *self.log(self.pin), *TAIL])
+        same(len(self.log(self.pin)), 2)
 
     def test_inside_the_window_from_the_next_tag(self) -> None:
         """Drift within 24h of the next tag in VERSION order: reported, ok."""
@@ -303,8 +303,8 @@ class TestDrift(TestPlanted):
         rel = self.plant(template(self.pin))
         now = T0 + DAY + 5 * 3600 + 59
         done = self.helper(CANON, rel, now=now)
-        same(self, done.returncode, 0, done.stderr)
-        same(self, done.stdout.splitlines(), window("v1.9.0", 5, "v1.10.0"))
+        same(done.returncode, 0, done.stderr)
+        same(done.stdout.splitlines(), window("v1.9.0", 5, "v1.10.0"))
 
     def test_past_the_window_is_red(self) -> None:
         """Drift a full day after the next tag: red, every commit listed."""
@@ -312,9 +312,9 @@ class TestDrift(TestPlanted):
         self.commit("mise/b.sh", tag="v1.1.0")
         rel = self.plant(template(self.pin))
         done = self.helper(CANON, rel, now=T0 + 2 * DAY)
-        same(self, done.returncode, template_drift.EXIT_RED)
+        same(done.returncode, template_drift.EXIT_RED)
         head = f"audit:template-pins: pin {self.pin[:8]} misses shipped canon changes:"
-        same(self, done.stderr.splitlines(), [head, *self.log(self.pin), *TAIL])
+        same(done.stderr.splitlines(), [head, *self.log(self.pin), *TAIL])
 
     def test_newest_tag_measures_from_its_own(self) -> None:
         """A pin on the newest tag, with drift after it: the pin's own tag dates it."""
@@ -322,8 +322,8 @@ class TestDrift(TestPlanted):
         self.commit("mise/b.sh")
         rel = self.plant(template(self.pin))
         done = self.helper(CANON, rel, now=T0 + 3 * 3600)
-        same(self, done.returncode, 0, done.stderr)
-        same(self, done.stdout.splitlines(), window("v1.0.0", 3, "v1.0.0"))
+        same(done.returncode, 0, done.stderr)
+        same(done.stdout.splitlines(), window("v1.0.0", 3, "v1.0.0"))
 
     def test_a_negative_age_truncates_toward_zero(self) -> None:
         """A tag dated after `now`: its hours truncate as bash's `/` does."""
@@ -331,15 +331,15 @@ class TestDrift(TestPlanted):
         self.commit("mise/b.sh", tag="v1.1.0")
         rel = self.plant(template(self.pin))
         done = self.helper(CANON, rel, now=T0 + DAY - 5400)
-        same(self, done.returncode, 0, done.stderr)
-        same(self, done.stdout.splitlines(), window("v1.0.0", -1, "v1.1.0"))
+        same(done.returncode, 0, done.stderr)
+        same(done.stdout.splitlines(), window("v1.0.0", -1, "v1.1.0"))
 
     def test_a_failed_git_call_is_an_error(self) -> None:
         """HEAD unborn: the diff fails, and that is no empty drift."""
         rel = self.plant(template(self.pin))
         self.git("checkout", "-q", "--orphan", "unborn")
         done = self.helper(CANON, rel)
-        same(self, done.returncode, template_drift.EXIT_ERROR)
+        same(done.returncode, template_drift.EXIT_ERROR)
         assert done.stderr.startswith(
             f"audit:template-pins: git diff --name-only {self.pin}..HEAD --"
             " .github/workflows/ mise/ failed (128):"
@@ -349,7 +349,7 @@ class TestDrift(TestPlanted):
         """A template that is not UTF-8 is refused by name, exit 2."""
         rel = self.plant(b"jobs: \xff\n")
         done = self.helper(CANON, rel)
-        same(self, done.returncode, template_drift.EXIT_ERROR)
+        same(done.returncode, template_drift.EXIT_ERROR)
         assert done.stderr.startswith(
             f"audit:template-pins: {rel}: cannot be read as UTF-8:"
         ), done.stderr
@@ -361,11 +361,11 @@ class TestDrift(TestPlanted):
         for argv in calls:
             with self.subTest(argv=argv):
                 done = self.helper(*argv)
-                same(self, done.returncode, template_drift.EXIT_ERROR)
-                same(self, done.stderr.splitlines(), [usage])
+                same(done.returncode, template_drift.EXIT_ERROR)
+                same(done.stderr.splitlines(), [usage])
 
     def test_version_order(self) -> None:
         """Digit runs order as numbers: v1.10.0 after v1.9.0."""
         tags = ["v1.10.0", "v1.9.0", "v2.0.0", "v1.9.1"]
         ordered = sorted(tags, key=template_drift.version_key)
-        same(self, ordered, ["v1.9.0", "v1.9.1", "v1.10.0", "v2.0.0"])
+        same(ordered, ["v1.9.0", "v1.9.1", "v1.10.0", "v2.0.0"])

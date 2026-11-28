@@ -29,7 +29,9 @@ def run(pytester: pytest.Pytester, config: Path = CONFIG) -> pytest.RunResult:
         pytest's result.
 
     """
-    return pytester.runpytest_inprocess("-c", str(config), "--rootdir", str(pytester.path))
+    return pytester.runpytest_inprocess(
+        "-c", str(config), "--rootdir", str(pytester.path)
+    )
 
 
 @pytest.mark.parametrize(
@@ -109,9 +111,10 @@ def test_a_config_the_run_cannot_honour_is_refused(
     base = CONFIG.read_text(encoding="utf-8")
     for key in ("required_plugins", "minversion"):
         if extra.startswith(key):
-            base = "\n".join(
-                row for row in base.splitlines() if not row.startswith(key)
-            ) + "\n"
+            base = (
+                "\n".join(row for row in base.splitlines() if not row.startswith(key))
+                + "\n"
+            )
     config = pytester.path / "planted.toml"
     config.write_text(base + extra, encoding="utf-8")
     result = run(pytester, config)

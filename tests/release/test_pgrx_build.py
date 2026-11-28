@@ -18,7 +18,6 @@ that reads like a pass (#364).
 stdlib `unittest`, matching the other tests here.
 """
 
-import contextlib
 import json
 import os
 import re
@@ -28,8 +27,6 @@ import sys
 import tarfile
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest import mock
-
 
 import pytest
 
@@ -45,22 +42,20 @@ ON_RUNNER = os.environ.get("GITHUB_ACTIONS") == "true"
 type Done = subprocess.CompletedProcess[str] | hermetic.Called
 
 
-_NAMED = contextlib.ExitStack()
+@pytest.fixture
+def _outside_mise(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Name the helper by its command, as a run outside mise does (#1934).
 
-
-def setUpModule() -> None:
-    """Name the helper by its file, as a run outside mise does (#1934).
-
-    An in-process call reads argv, whatever task runs this suite.
+    An in-process call reads argv, whatever task runs this suite; an
+    empty ORG_FINDINGS records nothing (unset on a runner records to the
+    job's file, #1976).
     """
-    _NAMED.enter_context(mock.patch.object(sys, "argv", ["previous_release.py"]))
-    for key in ("MISE_TASK_NAME", "ORG_FINDINGS"):
-        if key in os.environ:
-            _NAMED.callback(os.environ.__setitem__, key, os.environ.pop(key))
-    # Empty, not unset: unset on a runner records to the job's file (#1976).
-    os.environ["ORG_FINDINGS"] = ""
-    _NAMED.callback(os.environ.pop, "ORG_FINDINGS", None)
-    unittest.addModuleCleanup(_NAMED.close)
+    monkeypatch.setattr(sys, "argv", ["previous-release"])
+    monkeypatch.delenv("MISE_TASK_NAME", raising=False)
+    monkeypatch.setenv("ORG_FINDINGS", "")
+
+
+pytestmark = pytest.mark.usefixtures("_outside_mise")
 
 
 def strings(*items: str) -> list[str]:
@@ -211,7 +206,7 @@ class TestFloorBlock:
 
 
 # --------------------------------------------------------------------
-# previous_release.py: the control-file refusal and the previous
+# previous-release: the control-file refusal and the previous
 # tarball, against a stub `gh` that serves a release listing.
 # --------------------------------------------------------------------
 
@@ -342,7 +337,8 @@ class TestPreviousRelease:
         def call() -> int:
             return previous_release.main(args)
 
-        with mock.patch.object(previous_release, "GH", str(self.gh)):
+        with pytest.MonkeyPatch.context() as patched:
+            patched.setattr(previous_release, "GH", str(self.gh))
             return hermetic.call(call, env=hermetic.env(**env), cwd=self.root)
 
     def previous(
@@ -426,7 +422,7 @@ class TestControlFileRefusal(TestPreviousRelease):
         result = self.previous("guard")
         assert result.returncode == 1
         assert result.stderr == (
-            "::error::previous_release.py: no upgrade path"
+            "::error::previous-release: no upgrade path"
             " crates/demo-ext/sql/demo_ext--1.1.0--1.2.0.sql"
             " from published 1.1.0 (v1.1.0) — existing installations would be"
             " stranded\n"
@@ -612,7 +608,7 @@ class TestOnePredecessor(TestPreviousRelease):
         result = self.previous("guard", version="1.3.0")
         assert result.returncode == 1, result.stderr
         assert result.stderr == (
-            "::error::previous_release.py: no upgrade path"
+            "::error::previous-release: no upgrade path"
             " crates/edtf-postgres/sql/edtf_postgres--1.2.3--1.3.0.sql from"
             " published 1.2.3 (edtf-postgres-v1.2.3) — existing installations"
             " would be stranded\n"

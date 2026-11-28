@@ -15,7 +15,6 @@ interpreter. Nothing is added to the belt to run this.
 Run through the gate as `mise run test`, which `ci` collects.
 """
 
-from tests import hermetic
 import io
 import json
 import os
@@ -25,12 +24,12 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, Self
-from unittest import mock
 
 import pytest
 
 from belt import decoded, typed_std
 from belt import subject_budget as sb
+from tests import hermetic
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -80,7 +79,9 @@ class Stops:
     it printed, without the final newline.
     """
 
-    def __init__(self, case: unittest.TestCase) -> None:
+    def __init__(
+        self,
+    ) -> None:
         """Hold the row that expects the stop."""
         self.case = case
         self.said = ""
@@ -113,7 +114,7 @@ class Stops:
         self.said = self._err.getvalue().rstrip("\n")
         if not isinstance(exc, SystemExit):
             self.case.fail(f"the task did not stop: {exc!r}")
-        self.case.assertEqual(1, exc.code, self.said)
+        assert 1 == exc.code, self.said
         return True
 
 
@@ -1348,28 +1349,28 @@ class TestCeiling:
                 encoding="utf-8",
             )
             env: dict[str, str] = {"ORG_BELT_DIR": tmp}
-            with mock.patch.dict(os.environ, env):
+            with pytest.MonkeyPatch.context() as patched:
+                hermetic.patch_env(patched, env)
                 assert sb.ceiling() == 61
 
     def test_unset_belt_dir_is_a_hard_error(self) -> None:
         """No belt means no ceiling; the task must not invent one."""
         env: dict[str, str] = {"ORG_BELT_DIR": ""}
         with (
-            mock.patch.dict(os.environ, env),
+            pytest.MonkeyPatch.context() as patched,
             pytest.raises(
                 SystemExit,
             ),
         ):
+            hermetic.patch_env(patched, env)
             sb.ceiling()
 
     def test_absent_committed_toml_is_a_hard_error(self) -> None:
         """A belt without the delivered config fails rather than defaults."""
         with TemporaryDirectory() as tmp:
             env: dict[str, str] = {"ORG_BELT_DIR": tmp}
-            with (
-                mock.patch.dict(os.environ, env),
-                pytest.raises(SystemExit),
-            ):
+            with pytest.MonkeyPatch.context() as patched, pytest.raises(SystemExit):
+                hermetic.patch_env(patched, env)
                 sb.ceiling()
 
     def test_a_ceiling_of_the_wrong_shape_is_refused_by_name(self) -> None:
@@ -1385,10 +1386,11 @@ class TestCeiling:
                 config.write_text(text, encoding="utf-8")
                 env: dict[str, str] = {"ORG_BELT_DIR": tmp}
                 with (
+                    pytest.MonkeyPatch.context() as patched,
                     self.subTest(text=text),
-                    mock.patch.dict(os.environ, env),
                     Stops(self) as caught,
                 ):
+                    hermetic.patch_env(patched, env)
                     sb.ceiling()
             assert caught.said == f"lint:subject-budget: {config}: {message}"
 
@@ -1576,15 +1578,10 @@ class TestMainGuards:
             listing = "\0".join(tree)
             out, err = io.StringIO(), io.StringIO()
             env = {"ORG_BELT_DIR": str(belt), "ORG_CANON_DIR": str(root)}
-            with (
-                mock.patch.dict(os.environ, env),
-                mock.patch.object(
-                    sys,
-                    "stdin",
-                    io.StringIO(listing),
-                ),
-                mock.patch.object(Path, "cwd", return_value=root),
-            ):
+            with pytest.MonkeyPatch.context() as patched:
+                hermetic.patch_env(patched, env)
+                patched.setattr(sys, "stdin", io.StringIO(listing))
+                patched.setattr(Path, "cwd", hermetic.returning(root))
                 os.chdir(root)
                 try:
                     with redirect_stdout(out), redirect_stderr(err):

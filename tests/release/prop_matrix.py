@@ -23,8 +23,8 @@ import contextlib
 import io
 import sys
 from contextlib import redirect_stderr, redirect_stdout
-from unittest import mock
 
+import pytest
 from hypothesis import example
 from hypothesis import strategies as st
 
@@ -65,8 +65,10 @@ def as_helper() -> contextlib.ExitStack:
 
     """
     stack = contextlib.ExitStack()
-    stack.enter_context(hermetic.as_task(""))
-    stack.enter_context(mock.patch.object(sys, "argv", ["matrix.py"]))
+    hermetic.name_task(stack.enter_context(pytest.MonkeyPatch.context()), "")
+    stack.enter_context(pytest.MonkeyPatch.context()).setattr(
+        sys, "argv", ["matrix.py"]
+    )
     return stack
 
 

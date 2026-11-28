@@ -21,9 +21,8 @@ the ordinary suite (`mise run test`) never imports this file.
 import contextlib
 import io
 import json
-import os
-from unittest import mock
 
+import pytest
 from hypothesis import example
 from hypothesis import strategies as st
 
@@ -109,11 +108,12 @@ def run(stdout: str) -> tuple[int, str]:
     ran = zs.Ran(14, stdout.encode(), b"")
     env = {"GH_TOKEN": "a token", "MISE_TASK_NAME": "audit:actions", "ORG_FINDINGS": ""}
     with (
-        mock.patch.object(zs, "run_zizmor", return_value=ran),
-        mock.patch.dict(os.environ, env),
+        pytest.MonkeyPatch.context() as patched,
         contextlib.redirect_stdout(out),
         contextlib.redirect_stderr(io.StringIO()),
     ):
+        patched.setattr(zs, "run_zizmor", hermetic.returning(ran))
+        hermetic.patch_env(patched, env)
         status = zs.main(["--signer-workflow", WORKFLOW])
     return status, out.getvalue()
 

@@ -19,7 +19,6 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
-from unittest import mock
 
 import pytest
 
@@ -153,7 +152,8 @@ class TestActionsLint:
         env = hermetic.env(
             MISE_TASK_NAME=TASK, ORG_FINDINGS="", ORG_CANON_DIR=str(CANON_DIR)
         )
-        with mock.patch.object(actions_lint, "ACTIONLINT", missing):
+        with pytest.MonkeyPatch.context() as patched:
+            patched.setattr(actions_lint, "ACTIONLINT", missing)
             done = hermetic.call(
                 lambda: actions_lint.main([rel]), env=env, cwd=self.tree
             )

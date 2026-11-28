@@ -17,6 +17,8 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from belt import gate_cache_key
+from tests import hermetic
 from tests.test_coverage_tasks import (
     BASH,
     BELT,
@@ -25,9 +27,6 @@ from tests.test_coverage_tasks import (
     floor_of,
     init_tree,
 )
-
-from belt import gate_cache_key
-from tests import hermetic
 
 # The Rust leg's tools: rustup asserting llvm-tools, and cargo answering
 # the workspace read (no pgrx crate) and the measurement.

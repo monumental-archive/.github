@@ -38,6 +38,7 @@ unset org__here
 org_task "lint:biome"
 : "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
 : "${ORG_BELT_DIR:?unset — the belt directory (the belt [env] computes it)}"
+: "${ORG_BELT_ROOT:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: lefthook run post-checkout)}"
 
 generated=${1:?usage: biome-generate.sh <generated config path>}
 

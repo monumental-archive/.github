@@ -19,13 +19,12 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from unittest import mock
 
 import pytest
-from tests import test_rust_lint as planted
 
 from belt import pg_clippy, rust_workspaces
 from tests import hermetic
+from tests import test_rust_lint as planted
 
 BELT = hermetic.MISE
 GIT = hermetic.tool("git")
@@ -152,7 +151,8 @@ class TestPlanted:
         """
         # The derivation resolves cargo when it is imported; here, the
         # stub on the row's PATH is the cargo it asks.
-        with mock.patch.object(rust_workspaces, "CARGO", str(self.bins / "cargo")):
+        with pytest.MonkeyPatch.context() as patched:
+            patched.setattr(rust_workspaces, "CARGO", str(self.bins / "cargo"))
             return hermetic.call(
                 lambda: pg_clippy.main(list(argv)),
                 env=self.env | {"ORG_BELT_DIR": str(self.belt)} | stub,

@@ -49,7 +49,7 @@ python="${ORG_PYTHON:?${ORG_PYTHON_UNSET:-unset — the belt Python}}"
 locks=() && org_tracked_read locks ':!vendor/**' Cargo.lock '*/Cargo.lock'
 pins=""
 if [[ -n ${locks[0]+set} ]]; then
-  pins=$(printf '%s\0' "${locks[@]}" | xargs -0 "${python}" -I "${ORG_BELT_ROOT}/belt" rust-properties locked) || {
+  pins=$(printf '%s\0' "${locks[@]}" | xargs -0 "${python}" -I "${belt%/*}/belt" rust-properties locked) || {
     org_finding "" "a tracked Cargo.lock could not be read (above)"
     exit 1
   }
@@ -60,7 +60,7 @@ fi
 }
 
 if [[ ${profile} == lint ]]; then
-  findings=$(printf '%s\0' "${locks[@]}" | xargs -0 "${python}" -I "${ORG_BELT_ROOT}/belt" rust-properties lint) || {
+  findings=$(printf '%s\0' "${locks[@]}" | xargs -0 "${python}" -I "${belt%/*}/belt" rust-properties lint) || {
     detail=()
     while IFS= read -r finding; do detail+=("${finding}"); done <<< "${findings}"
     org_finding "" "proptest below 1.7.0 ignores PROPTEST_RNG_SEED, so the gate's seed never reaches it:" \
@@ -83,7 +83,7 @@ if ! mise tasks info test > /dev/null 2>&1; then
   exit 1
 fi
 
-seed=$("${python}" -I "${ORG_BELT_ROOT}/belt" rust-properties seed) || exit 2
+seed=$("${python}" -I "${belt%/*}/belt" rust-properties seed) || exit 2
 echo "${label}: seed ${seed} (reproduce: ORG_PROPERTY_SEED=${seed})"
 status=0
 ORG_PROPERTY_SEED="${seed}" mise run test || status=$?

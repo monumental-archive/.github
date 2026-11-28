@@ -443,10 +443,11 @@ class TestMain:
             for task, extra in ((LINT, []), (FIX, ["--write"])):
                 err = io.StringIO()
                 with (
-                    hermetic.as_task(task),
+                    pytest.MonkeyPatch.context() as patched,
                     redirect_stdout(io.StringIO()),
                     redirect_stderr(err),
                 ):
+                    hermetic.name_task(patched, task)
                     assert bs.main([str(path), *extra]) == 1
                 assert err.getvalue() == f"{task}: {path}: not TOML: {why}\n"
 

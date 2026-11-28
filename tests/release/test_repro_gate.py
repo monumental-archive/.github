@@ -21,11 +21,9 @@ as `mise run test`, which `ci` collects.
 
 import os
 import subprocess
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
-
 
 from belt import decoded, workflow_yaml
 from tests import hermetic

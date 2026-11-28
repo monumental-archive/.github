@@ -80,9 +80,9 @@ def report(errors: dict[str, list[dict[str, object]]]) -> str:
     return json.dumps(doc, indent=2)
 
 
-def same[T](case: unittest.TestCase, got: T, want: T, msg: str = "") -> None:
+def same[T](got: T, want: T, msg: str = "") -> None:
     """Assert two values equal, `want` typed by `got` (mypy.ini: no Any)."""
-    case.assertEqual(got, want, msg or None)
+    assert got == want, msg or None
 
 
 def records(file: Path) -> list[dict[str, object]]:
@@ -100,12 +100,12 @@ def records(file: Path) -> list[dict[str, object]]:
     ]
 
 
-def refused(case: unittest.TestCase, file: Path, stderr: str) -> None:
+def refused(file: Path, stderr: str) -> None:
     """Hold a refusal to one record: its own, none of the report's (#1934)."""
     got = records(file)
-    same(case, len(got), 1)
-    same(case, got[0]["subject"], "")
-    case.assertIn(f"{TASK}: {got[0]['message']}\n", stderr)
+    same(len(got), 1)
+    same(got[0]["subject"], "")
+    assert f"{TASK}: {got[0]['message']}\n" in stderr
 
 
 class TestAdapter:
@@ -157,7 +157,7 @@ class TestAdapter:
         """One entry: one record, the line in the detail, lychee's 2."""
         doc = report({"a.md": [entry("file:///t/missing.md", NOT_FOUND, 3)]})
         done = self.run_adapter(doc, 2)
-        same(self, done.returncode, 2, done.stderr)
+        same(done.returncode, 2, done.stderr)
         want: list[dict[str, object]] = [
             {
                 "v": 1,
@@ -167,9 +167,8 @@ class TestAdapter:
                 "detail": ["line 3"],
             }
         ]
-        same(self, records(self.file), want)
+        same(records(self.file), want)
         same(
-            self,
             done.stderr.splitlines(),
             [
                 "stub lychee: checking",
@@ -177,14 +176,14 @@ class TestAdapter:
                 "  line 3",
             ],
         )
-        same(self, done.stdout, f"{TASK}: lychee: 1 broken link(s)\n")
+        same(done.stdout, f"{TASK}: lychee: 1 broken link(s)\n")
 
     def test_a_clean_report_records_nothing(self) -> None:
         """An empty `error_map`: no record, lychee's 0."""
         done = self.run_adapter(report({}), 0)
-        same(self, done.returncode, 0, done.stderr)
-        same(self, records(self.file), [])
-        same(self, done.stdout, f"{TASK}: lychee: 0 broken link(s)\n")
+        same(done.returncode, 0, done.stderr)
+        same(records(self.file), [])
+        same(done.stdout, f"{TASK}: lychee: 0 broken link(s)\n")
 
     def test_every_entry_is_a_record_in_order(self) -> None:
         """Two files, three entries: three records in the report's order."""
@@ -196,34 +195,34 @@ class TestAdapter:
             "a.md": [entry("file:///t/c.md", NOT_FOUND, 1)],
         })
         done = self.run_adapter(doc, 2)
-        same(self, done.returncode, 2, done.stderr)
+        same(done.returncode, 2, done.stderr)
         got = [(r["subject"], r["message"], r["detail"]) for r in records(self.file)]
         want: list[tuple[object, object, object]] = [
             ("b.md", "https://x.invalid/: Network error", ["line 9"]),
             ("b.md", "file:///t/b.md#gone: Cannot find fragment", ["line 2"]),
             ("a.md", f"file:///t/c.md: {NOT_FOUND}", ["line 1"]),
         ]
-        same(self, got, want)
+        same(got, want)
 
     def test_an_unknown_shape_is_refused_by_name(self) -> None:
         """A report with no `error_map`: refused by name, exit 1, its one record."""
         done = self.run_adapter('{"fail_map": {}}', 2)
-        same(self, done.returncode, 1, done.stderr)
+        same(done.returncode, 1, done.stderr)
         assert (
             f"{TASK}: lychee exited 2: the output is not lychee's report:"
             " error_map is not an object"
         ) in done.stderr
-        refused(self, self.file, done.stderr)
-        same(self, done.stdout, "")
+        refused(self.file, done.stderr)
+        same(done.stdout, "")
 
     def test_output_that_is_not_json_is_refused_by_name(self) -> None:
         """A human report: refused with lychee's status, exit 1."""
         done = self.run_adapter("[a.md]:\n  [ERROR] missing.md\n", 2)
-        same(self, done.returncode, 1, done.stderr)
+        same(done.returncode, 1, done.stderr)
         assert (
             f"{TASK}: lychee exited 2: the output is not lychee's report" in done.stderr
         )
-        refused(self, self.file, done.stderr)
+        refused(self.file, done.stderr)
 
     def test_a_malformed_entry_records_none(self) -> None:
         """One entry without a line: refused, none of the report's recorded."""
@@ -231,23 +230,22 @@ class TestAdapter:
         del bad["span"]
         doc = report({"a.md": [entry("file:///t/y.md", NOT_FOUND, 1), bad]})
         done = self.run_adapter(doc, 2)
-        same(self, done.returncode, 1, done.stderr)
+        same(done.returncode, 1, done.stderr)
         assert "error_map[a.md][1]: span is not an object" in done.stderr
-        refused(self, self.file, done.stderr)
+        refused(self.file, done.stderr)
 
     def test_lychee_s_status_is_the_exit(self) -> None:
         """A 3 from lychee with an empty report exits 3."""
         done = self.run_adapter(report({}), 3)
-        same(self, done.returncode, 3, done.stderr)
-        same(self, records(self.file), [])
+        same(done.returncode, 3, done.stderr)
+        same(records(self.file), [])
 
     def test_arguments_pass_unchanged_after_the_format(self) -> None:
         """The adapter calls `lychee --format json` and the arguments, once."""
         args = ["--no-progress", "--config", "a b.toml", "a.md", "b.md"]
         done = self.run_adapter(report({}), 0, *args)
-        same(self, done.returncode, 0, done.stderr)
+        same(done.returncode, 0, done.stderr)
         same(
-            self,
             self.log.read_text(encoding="utf-8").splitlines(),
             ["\t".join(["--format", "json", *args])],
         )
@@ -255,9 +253,9 @@ class TestAdapter:
     def test_no_lychee_is_refused_by_name(self) -> None:
         """No lychee on PATH: refused by name, exit 1, its one record."""
         done = self.run_adapter(report({}), 0, path=str(self.dir / "empty"))
-        same(self, done.returncode, 1, done.stderr)
+        same(done.returncode, 1, done.stderr)
         assert f"{TASK}: lychee is not on PATH" in done.stderr
-        refused(self, self.file, done.stderr)
+        refused(self.file, done.stderr)
 
 
 class TestTask:
@@ -308,7 +306,7 @@ class TestTask:
     def test_a_broken_link_is_the_record_and_lychee_s_red(self) -> None:
         """`other.md` missing: one record read back, lychee's 2."""
         done = self.run_task()
-        same(self, done.returncode, 2, done.stderr)
+        same(done.returncode, 2, done.stderr)
         url = (self.root / "other.md").as_uri()
         want: list[dict[str, object]] = [
             {
@@ -319,12 +317,12 @@ class TestTask:
                 "detail": ["line 3"],
             }
         ]
-        same(self, records(self.file), want)
+        same(records(self.file), want)
 
     def test_a_sound_link_is_no_record_and_lychee_s_green(self) -> None:
         """`other.md` present: no record, lychee's 0."""
         (self.root / "other.md").write_text("# other\n", encoding="utf-8")
         done = self.run_task()
-        same(self, done.returncode, 0, done.stderr)
-        same(self, records(self.file), [])
-        same(self, done.stdout, f"{TASK}: lychee: 0 broken link(s)\n")
+        same(done.returncode, 0, done.stderr)
+        same(records(self.file), [])
+        same(done.stdout, f"{TASK}: lychee: 0 broken link(s)\n")

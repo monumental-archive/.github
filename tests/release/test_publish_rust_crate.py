@@ -52,7 +52,6 @@ stdlib `unittest`, matching the rest of release/. Run through the gate
 as `mise run test`, which `ci` collects.
 """
 
-import contextlib
 import hashlib
 import io
 import json
@@ -65,14 +64,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
-from unittest import mock
-
-from belt.release import publish_crates
-
 
 import pytest
 
 from belt import decoded, findings
+from belt.release import publish_crates
 from tests import hermetic
 
 if TYPE_CHECKING:
@@ -121,22 +117,20 @@ esac
 """
 
 
-_NAMED = contextlib.ExitStack()
+@pytest.fixture
+def _outside_mise(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Name the helper by its command, as a run outside mise does (#1934).
 
-
-def setUpModule() -> None:
-    """Name the helper by its file, as a run outside mise does (#1934).
-
-    An in-process call reads argv, whatever task runs this suite.
+    An in-process call reads argv, whatever task runs this suite; an
+    empty ORG_FINDINGS records nothing (unset on a runner records to the
+    job's file, #1976).
     """
-    _NAMED.enter_context(mock.patch.object(sys, "argv", ["publish_crates.py"]))
-    for key in ("MISE_TASK_NAME", "ORG_FINDINGS"):
-        if key in os.environ:
-            _NAMED.callback(os.environ.__setitem__, key, os.environ.pop(key))
-    # Empty, not unset: unset on a runner records to the job's file (#1976).
-    os.environ["ORG_FINDINGS"] = ""
-    _NAMED.callback(os.environ.pop, "ORG_FINDINGS", None)
-    unittest.addModuleCleanup(_NAMED.close)
+    monkeypatch.setattr(sys, "argv", ["publish-crates"])
+    monkeypatch.delenv("MISE_TASK_NAME", raising=False)
+    monkeypatch.setenv("ORG_FINDINGS", "")
+
+
+pytestmark = pytest.mark.usefixtures("_outside_mise")
 
 
 @dataclass
@@ -368,7 +362,7 @@ class TestPublishResumes:
         run = run_publish(CORE | WASM, crate=planted)
         assert run.returncode != 0
         assert (
-            f"::error::publish_crates.py: edtf-core 1.3.3 is on crates.io with"
+            f"::error::publish-crates: edtf-core 1.3.3 is on crates.io with"
             f" checksum {CORE_CKSUM},"
             f" but this tree packages {hashlib.sha256(planted).hexdigest()}\n"
         ) == run.stderr
@@ -379,7 +373,7 @@ class TestPublishResumes:
         run = run_publish({"ed/tf/edtf-core": "503"} | WASM)
         assert run.returncode != 0
         assert run.stderr == (
-            "::error::publish_crates.py: the crates.io index answered 503 for edtf-core"
+            "::error::publish-crates: the crates.io index answered 503 for edtf-core"
             " (https://index.crates.io/ed/tf/edtf-core); an unread index"
             ' is not "not published"\n'
         )
@@ -475,7 +469,7 @@ class TestPublishMintsItsOwnToken:
         run = run_publish(WASM, exchange=403)
         assert run.returncode == 1
         assert run.stderr == (
-            "::error::publish_crates.py: the crates.io token exchange answered 403 —"
+            "::error::publish-crates: the crates.io token exchange answered 403 —"
             " if 403, check"
             " the User-Agent before the publisher config (#907)\n"
         )
@@ -486,8 +480,7 @@ class TestPublishMintsItsOwnToken:
         run = run_publish(WASM, oidc=500)
         assert run.returncode == 1
         assert run.stderr == (
-            "::error::publish_crates.py: the runner's OIDC token endpoint answered"
-            " 500\n"
+            "::error::publish-crates: the runner's OIDC token endpoint answered 500\n"
         )
         urls = [u for u, _ in run.curl]
         assert publish_crates.EXCHANGE not in urls
@@ -543,9 +536,10 @@ class TestPublishMintsItsOwnToken:
         """What answered is not an HTTP response: refused by name (#1682)."""
         url = "https://index.crates.io/ed/tf/edtf-core"
         with (
-            mock.patch.object(urllib.request, "urlopen", return_value=None),
+            pytest.MonkeyPatch.context() as patched,
             pytest.raises(publish_crates.RefusalError) as caught,
         ):
+            patched.setattr(urllib.request, "urlopen", hermetic.returning(None))
             publish_crates.http("GET", url, {})
         assert f"{url} answered NoneType, not an HTTP response" == str(caught.value)
 
@@ -554,7 +548,7 @@ class TestPublishMintsItsOwnToken:
         run = run_publish({"ed/tf/edtf-core": "000"} | WASM)
         assert run.returncode == 1
         assert (
-            "::error::publish_crates.py: the crates.io index answered nothing for"
+            "::error::publish-crates: the crates.io index answered nothing for"
             " edtf-core"
         ) in run.stderr
 
@@ -576,10 +570,9 @@ class TestMain:
 
         """
         out = io.StringIO()
-        with (
-            mock.patch.object(publish_crates, "run", side_effect=failure),
-            mock.patch.object(sys, "stderr", out),
-        ):
+        with pytest.MonkeyPatch.context() as patched:
+            patched.setattr(publish_crates, "run", failure)
+            patched.setattr(sys, "stderr", out)
             code = publish_crates.main()
         return code, out.getvalue()
 
@@ -587,7 +580,7 @@ class TestMain:
         """The refusal's own line, exit 1."""
         assert self.main(publish_crates.RefusalError("stop")) == (
             1,
-            "::error::publish_crates.py: stop\n",
+            "::error::publish-crates: stop\n",
         )
 
     def test_a_failed_command_names_itself_and_its_status(self) -> None:
@@ -595,13 +588,12 @@ class TestMain:
         failed = publish_crates.CommandError(["cargo", "package", "-p", "x"], 101)
         assert self.main(failed) == (
             101,
-            "::error::publish_crates.py: cargo package -p x exited 101\n",
+            "::error::publish-crates: cargo package -p x exited 101\n",
         )
 
     def test_success_is_run_s_exit(self) -> None:
         """Without a failure, main returns what run returned."""
-        with (
-            mock.patch.object(publish_crates, "run", return_value=0),
-            mock.patch.object(sys, "stdout", io.StringIO()),
-        ):
+        with pytest.MonkeyPatch.context() as patched:
+            patched.setattr(publish_crates, "run", hermetic.returning(0))
+            patched.setattr(sys, "stdout", io.StringIO())
             assert publish_crates.main() == 0

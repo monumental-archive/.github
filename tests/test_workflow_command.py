@@ -24,7 +24,8 @@ import tempfile
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from typing import TYPE_CHECKING
-from unittest import mock
+
+import pytest
 
 from belt import workflow_command
 from tests import hermetic
@@ -208,11 +209,12 @@ class TestAHelperQuotingOutsideText:
             table.write_text("[build]\n", "utf-8")
             err = io.StringIO()
             with (
-                hermetic.as_task(""),
-                mock.patch.object(sys, "argv", ["pgrx_images.py"]),
+                pytest.MonkeyPatch.context() as patched,
                 redirect_stdout(io.StringIO()),
                 redirect_stderr(err),
             ):
+                hermetic.name_task(patched, "")
+                patched.setattr(sys, "argv", ["pgrx_images.py"])
                 code = pgrx_images.main([
                     "base-image",
                     "--pg",
