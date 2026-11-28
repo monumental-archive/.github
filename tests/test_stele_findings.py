@@ -10,7 +10,6 @@ PURL: the row that meets the real tool.
 
 import json
 import os
-import subprocess
 import sys
 from pathlib import Path
 
@@ -114,12 +113,9 @@ def same[T](got: T, want: T, msg: str = "") -> None:
 class Adapter:
     """The adapter over a stub stele."""
 
-    def __init__(
-        self, tmp_path: Path, capfd: pytest.CaptureFixture[str], *, env: support.Env
-    ) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Lay out a stub stele, its log, and the findings file."""
         self.make_env = env
-        self.capfd = capfd
         self.dir = Path(str(tmp_path))
         self.bin = self.dir / "bin"
         self.bin.mkdir()
@@ -130,37 +126,26 @@ class Adapter:
         self.doc = self.dir / "doc.json"
         self.file = self.dir / "findings" / "job.jsonl"
 
-    def adapt(
-        self, argv: list[str], env: dict[str, str]
-    ) -> subprocess.CompletedProcess[str]:
-        """Call the adapter as a task runs it, in process, under `env`.
+    def enter(self, monkeypatch: pytest.MonkeyPatch, env: dict[str, str]) -> None:
+        """Stand in the row's directory as a task runs the adapter, under `env`.
 
         The tool is looked up on `env`'s PATH, as a process started with
         it would find it.
-
-        Returns:
-            Its status and what it wrote, as a finished process's.
-
         """
         found = support.optional_tool("stele", path=env["PATH"]) or "stele"
-        with pytest.MonkeyPatch.context() as patched:
-            for name, value in env.items():
-                patched.setenv(name, value)
-            patched.setattr(stele_findings, "STELE", found)
-            patched.chdir(self.dir)
-            status = stele_findings.main(argv)
-        out, err = self.capfd.readouterr()
-        return subprocess.CompletedProcess(argv, status, out, err)
+        for name, value in env.items():
+            monkeypatch.setenv(name, value)
+        monkeypatch.setattr(stele_findings, "STELE", found)
+        monkeypatch.chdir(self.dir)
 
-    def run_adapter(
-        self, document: str, status: int, *args: str, path: str | None = None
-    ) -> subprocess.CompletedProcess[str]:
-        """Run the adapter as a task runs it, the stub answering.
-
-        Returns:
-            The finished process.
-
-        """
+    def answer(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        document: str,
+        status: int,
+        path: str | None = None,
+    ) -> None:
+        """Have the stub answer `document` and `status` when the adapter runs."""
         self.doc.write_text(document, encoding="utf-8")
         env = self.make_env(
             PATH=path or f"{self.bin}{os.pathsep}{os.environ['PATH']}",
@@ -171,8 +156,7 @@ class Adapter:
             STUB_RC=str(status),
             PYTHONUTF8="1",
         )
-        argv = list(args) or ["assert", "inventory", "a.spdx.json"]
-        return self.adapt([*argv], env)
+        self.enter(monkeypatch, env)
 
     def records(self) -> list[dict[str, object]]:
         """Read every record the adapter appended.
@@ -201,21 +185,23 @@ class Adapter:
 
 
 @fixture
-def adapter(
-    tmp_path: Path, capfd: pytest.CaptureFixture[str], env: support.Env
-) -> Adapter:
+def adapter(tmp_path: Path, env: support.Env) -> Adapter:
     """Give each row its own Adapter."""
-    return Adapter(tmp_path, capfd, env=env)
+    return Adapter(tmp_path, env=env)
 
 
-def test_the_quoted_document_is_one_record(adapter: Adapter) -> None:
+def test_the_quoted_document_is_one_record(
+    adapter: Adapter, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """The document the issue quotes: one record, the line, the verdict, 1."""
-    done = adapter.run_adapter(json.dumps(QUOTED), 1)
-    same(done.returncode, 1, done.stderr)
+    adapter.answer(monkeypatch, json.dumps(QUOTED), 1)
+    status = stele_findings.main(["assert", "inventory", "a.spdx.json"])
+    out, err = capfd.readouterr()
+    same(status, 1, err)
     want: list[dict[str, object]] = [QUOTED_RECORD]
     same(adapter.records(), want)
     same(
-        done.stderr.splitlines(),
+        err.splitlines(),
         [
             "stub stele: walking",
             f"{TASK}: a.spdx.json: versioned-purl: {DETAIL}",
@@ -223,21 +209,29 @@ def test_the_quoted_document_is_one_record(adapter: Adapter) -> None:
             "  actual: pkg:cargo/a",
         ],
     )
-    same(done.stdout, f"{TASK}: stele: FAIL\n")
+    same(out, f"{TASK}: stele: FAIL\n")
 
 
-def test_a_pass_records_nothing(adapter: Adapter) -> None:
+def test_a_pass_records_nothing(
+    adapter: Adapter, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """PASS with no findings: no record, exit 0."""
-    done = adapter.run_adapter(report("PASS"), 0)
-    same(done.returncode, 0, done.stderr)
+    adapter.answer(monkeypatch, report("PASS"), 0)
+    status = stele_findings.main(["assert", "inventory", "a.spdx.json"])
+    out, err = capfd.readouterr()
+    same(status, 0, err)
     same(adapter.records(), [])
-    same(done.stdout, f"{TASK}: stele: PASS\n")
+    same(out, f"{TASK}: stele: PASS\n")
 
 
-def test_cannot_judge_without_findings_is_one_record(adapter: Adapter) -> None:
+def test_cannot_judge_without_findings_is_one_record(
+    adapter: Adapter, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """A verdict other than PASS with no findings is one finding."""
-    done = adapter.run_adapter(report("CANNOT_JUDGE"), 1)
-    same(done.returncode, 1, done.stderr)
+    adapter.answer(monkeypatch, report("CANNOT_JUDGE"), 1)
+    status = stele_findings.main(["assert", "inventory", "a.spdx.json"])
+    out, err = capfd.readouterr()
+    same(status, 1, err)
     want: list[dict[str, object]] = [
         {
             "v": 1,
@@ -248,18 +242,22 @@ def test_cannot_judge_without_findings_is_one_record(adapter: Adapter) -> None:
         }
     ]
     same(adapter.records(), want)
-    same(done.stdout, f"{TASK}: stele: CANNOT_JUDGE\n")
+    same(out, f"{TASK}: stele: CANNOT_JUDGE\n")
 
 
-def test_three_findings_are_three_records_in_order(adapter: Adapter) -> None:
+def test_three_findings_are_three_records_in_order(
+    adapter: Adapter, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """Each entry one record, in the document's order, fields as present."""
     entries: list[dict[str, object]] = [
         {"subject": "b", "assertion": "first", "detail": "one"},
         {"subject": "a", "assertion": "second", "actual": "x"},
         {"subject": "c", "assertion": "third", "expected": "y"},
     ]
-    done = adapter.run_adapter(report("FAIL", *entries), 1)
-    same(done.returncode, 1, done.stderr)
+    adapter.answer(monkeypatch, report("FAIL", *entries), 1)
+    status = stele_findings.main(["assert", "inventory", "a.spdx.json"])
+    out, err = capfd.readouterr()
+    same(status, 1, err)
     got = [(r["subject"], r["message"], r["detail"]) for r in adapter.records()]
     want: list[tuple[object, object, object]] = [
         ("b", "first: one", []),
@@ -269,89 +267,122 @@ def test_three_findings_are_three_records_in_order(adapter: Adapter) -> None:
     same(got, want)
 
 
-def test_another_schema_is_refused_by_name(adapter: Adapter) -> None:
+def test_another_schema_is_refused_by_name(
+    adapter: Adapter, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """Schema 10: refused, both numbers named, exit 1, only that recorded."""
-    done = adapter.run_adapter(report("PASS", schema=10), 0)
-    same(done.returncode, 1, done.stderr)
-    assert "the report is schema 10; this adapter reads schema 9" in done.stderr
+    adapter.answer(monkeypatch, report("PASS", schema=10), 0)
+    status = stele_findings.main(["assert", "inventory", "a.spdx.json"])
+    out, err = capfd.readouterr()
+    same(status, 1, err)
+    assert "the report is schema 10; this adapter reads schema 9" in err
     subject, message = adapter.refusal()
     same(subject, "")
     assert "the report is schema 10" in message
-    same(done.stdout, "")
+    same(out, "")
 
 
-def test_output_that_is_not_json_is_refused_by_name(adapter: Adapter) -> None:
+def test_output_that_is_not_json_is_refused_by_name(
+    adapter: Adapter, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """Not one JSON document: refused with stele's status, exit 1."""
-    done = adapter.run_adapter("assert: FAIL\n", 3)
-    same(done.returncode, 1, done.stderr)
+    adapter.answer(monkeypatch, "assert: FAIL\n", 3)
+    status = stele_findings.main(["assert", "inventory", "a.spdx.json"])
+    out, err = capfd.readouterr()
+    same(status, 1, err)
     assert (
         f"{TASK}: stele assert inventory exited 3: the output is not stele's report"
-    ) in done.stderr
+    ) in err
     subject, message = adapter.refusal()
     same(subject, "")
     assert "exited 3: the output is not stele's report" in message
 
 
-def test_a_malformed_finding_records_none(adapter: Adapter) -> None:
+def test_a_malformed_finding_records_none(
+    adapter: Adapter, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """One entry that is not a finding: refused before any of stele's is."""
     entries: list[dict[str, object]] = [
         {"subject": "a", "assertion": "fine"},
         {"subject": "b"},
     ]
-    done = adapter.run_adapter(report("FAIL", *entries), 1)
-    same(done.returncode, 1, done.stderr)
-    assert "findings[1]: assertion" in done.stderr
+    adapter.answer(monkeypatch, report("FAIL", *entries), 1)
+    status = stele_findings.main(["assert", "inventory", "a.spdx.json"])
+    out, err = capfd.readouterr()
+    same(status, 1, err)
+    assert "findings[1]: assertion" in err
     _, message = adapter.refusal()
     assert "findings[1]: assertion" in message
 
 
-def test_stele_s_status_is_the_exit(adapter: Adapter) -> None:
+def test_stele_s_status_is_the_exit(
+    adapter: Adapter, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """A status of 2 from stele with a PASS document exits 2."""
-    done = adapter.run_adapter(report("PASS"), 2)
-    same(done.returncode, 2, done.stderr)
+    adapter.answer(monkeypatch, report("PASS"), 2)
+    status = stele_findings.main(["assert", "inventory", "a.spdx.json"])
+    out, err = capfd.readouterr()
+    same(status, 2, err)
     same(adapter.records(), [])
 
 
-def test_arguments_pass_unchanged_after_json(adapter: Adapter) -> None:
+def test_arguments_pass_unchanged_after_json(
+    adapter: Adapter, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """The adapter calls `stele assert <target> --json` and the arguments."""
     args = ["--org", "an org", "--policy", "p.json", "--depth", "full", "--"]
-    done = adapter.run_adapter(report("PASS"), 0, "assert", "evidence", *args)
-    same(done.returncode, 0, done.stderr)
+    adapter.answer(monkeypatch, report("PASS"), 0)
+    status = stele_findings.main(["assert", "evidence", *args])
+    out, err = capfd.readouterr()
+    same(status, 0, err)
     same(
         adapter.log.read_text(encoding="utf-8").splitlines(),
         ["\t".join(["assert", "evidence", "--json", *args])],
     )
 
 
-def test_no_assertion_is_a_usage_refusal(adapter: Adapter) -> None:
+def test_no_assertion_is_a_usage_refusal(
+    adapter: Adapter, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """Arguments that name no assertion: usage, exit 1, stele not run."""
-    done = adapter.run_adapter(report("PASS"), 0, "inventory")
-    same(done.returncode, 1, done.stderr)
-    assert "usage: belt stele-findings assert <target>" in done.stderr
+    adapter.answer(monkeypatch, report("PASS"), 0)
+    status = stele_findings.main(["inventory"])
+    out, err = capfd.readouterr()
+    same(status, 1, err)
+    assert "usage: belt stele-findings assert <target>" in err
     assert not adapter.log.exists()
 
 
-def test_no_stele_is_refused_by_name(adapter: Adapter) -> None:
+def test_no_stele_is_refused_by_name(
+    adapter: Adapter, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """No stele on PATH: refused by name, exit 1, only that recorded."""
-    done = adapter.run_adapter(report("PASS"), 0, path=str(adapter.dir / "empty"))
-    same(done.returncode, 1, done.stderr)
-    assert "stele is not on PATH" in done.stderr
+    adapter.answer(monkeypatch, report("PASS"), 0, path=str(adapter.dir / "empty"))
+    status = stele_findings.main(["assert", "inventory", "a.spdx.json"])
+    out, err = capfd.readouterr()
+    same(status, 1, err)
+    assert "stele is not on PATH" in err
     same(adapter.refusal(), ("stele assert inventory", "stele is not on PATH"))
 
 
 def test_the_pinned_stele_gives_the_one_record(
-    adapter: Adapter, env: support.Env
+    adapter: Adapter,
+    env: support.Env,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
 ) -> None:
     """A versionless PURL, judged by stele itself: the quoted record."""
     stele = support.optional_tool("stele")
     if stele is None:
         pytest.skip("the belt's stele is not on PATH")
     (adapter.dir / "a.spdx.json").write_text(json.dumps(SPDX), encoding="utf-8")
-    done = adapter.adapt(
-        ["assert", "inventory", "a.spdx.json"],
+    adapter.enter(
+        monkeypatch,
         env(ORG_FINDINGS=str(adapter.file), MISE_TASK_NAME=TASK, PYTHONUTF8="1"),
     )
-    same(done.returncode, 1, done.stderr)
+    status = stele_findings.main(["assert", "inventory", "a.spdx.json"])
+    out, err = capfd.readouterr()
+    same(status, 1, err)
     want: list[dict[str, object]] = [QUOTED_RECORD]
     same(adapter.records(), want)
-    same(done.stdout, f"{TASK}: stele: FAIL\n")
+    same(out, f"{TASK}: stele: FAIL\n")

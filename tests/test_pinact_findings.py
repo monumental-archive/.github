@@ -212,12 +212,9 @@ def refused(file: Path, stderr: str) -> None:
 class Stubbed:
     """A stub pinact on PATH, its log, the findings file."""
 
-    def __init__(
-        self, tmp_path: Path, capfd: pytest.CaptureFixture[str], *, env: support.Env
-    ) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Lay out the stub, its log, and the findings file."""
         self.make_env = env
-        self.capfd = capfd
         self.dir = tmp_path
         self.bin = self.dir / "bin"
         self.bin.mkdir()
@@ -230,27 +227,17 @@ class Stubbed:
         (self.dir / ".github" / "workflows").mkdir(parents=True)
         (self.dir / WORKFLOW).write_text(SOURCE, encoding="utf-8")
 
-    def adapt(
-        self, argv: list[str], env: dict[str, str]
-    ) -> subprocess.CompletedProcess[str]:
-        """Call the adapter as a task runs it, in process, under `env`.
+    def enter(self, monkeypatch: pytest.MonkeyPatch, env: dict[str, str]) -> None:
+        """Stand in the row's directory as a task runs the adapter, under `env`.
 
         The tool is looked up on `env`'s PATH, as a process started with
         it would find it.
-
-        Returns:
-            Its status and what it wrote, as a finished process's.
-
         """
         found = support.optional_tool("pinact", path=env["PATH"]) or "pinact"
-        with pytest.MonkeyPatch.context() as patched:
-            for name, value in env.items():
-                patched.setenv(name, value)
-            patched.setattr(pinact_findings, "PINACT", found)
-            patched.chdir(self.dir)
-            status = pinact_findings.main(argv)
-        out, err = self.capfd.readouterr()
-        return subprocess.CompletedProcess(argv, status, out, err)
+        for name, value in env.items():
+            monkeypatch.setenv(name, value)
+        monkeypatch.setattr(pinact_findings, "PINACT", found)
+        monkeypatch.chdir(self.dir)
 
     def stub_env(self, document: str, status: int, path: str | None) -> dict[str, str]:
         """Give a run the stub's answer and the findings file.
@@ -272,45 +259,42 @@ class Stubbed:
 
 
 @fixture
-def stubbed(
-    tmp_path: Path, capfd: pytest.CaptureFixture[str], env: support.Env
-) -> Stubbed:
+def stubbed(tmp_path: Path, env: support.Env) -> Stubbed:
     """Give each row its own Stubbed."""
-    return Stubbed(tmp_path, capfd, env=env)
+    return Stubbed(tmp_path, env=env)
 
 
 class Adapter(Stubbed):
     """The adapter over a stub pinact."""
 
-    def run_adapter(
-        self, document: str, status: int, *args: str, path: str | None = None
-    ) -> subprocess.CompletedProcess[str]:
-        """Run the adapter as a task runs it, the stub answering.
-
-        Returns:
-            The finished process.
-
-        """
-        return self.adapt(
-            [*(args or (WORKFLOW,))], self.stub_env(document, status, path)
-        )
+    def answer(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        document: str,
+        status: int,
+        path: str | None = None,
+    ) -> None:
+        """Have the stub answer `document` and `status` when the adapter runs."""
+        self.enter(monkeypatch, self.stub_env(document, status, path))
 
 
 @fixture
-def adapter(
-    tmp_path: Path, capfd: pytest.CaptureFixture[str], env: support.Env
-) -> Adapter:
+def adapter(tmp_path: Path, env: support.Env) -> Adapter:
     """Give each row its own Adapter."""
-    return Adapter(tmp_path, capfd, env=env)
+    return Adapter(tmp_path, env=env)
 
 
-def test_the_quoted_report_is_two_records(adapter: Adapter) -> None:
+def test_the_quoted_report_is_two_records(
+    adapter: Adapter, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """The real run's log: two records, the lines in the detail, its 3."""
-    done = adapter.run_adapter(QUOTED, 3)
-    same(done.returncode, 3, done.stderr)
+    adapter.answer(monkeypatch, QUOTED, 3)
+    status = pinact_findings.main([WORKFLOW])
+    out, err = capfd.readouterr()
+    same(status, 3, err)
     same(records(adapter.file), QUOTED_RECORDS)
     same(
-        done.stderr.splitlines(),
+        err.splitlines(),
         [
             "-       - uses: actions/checkout@v4",
             f"{TASK}: {WORKFLOW}: {LIED_LINE}",
@@ -321,113 +305,160 @@ def test_the_quoted_report_is_two_records(adapter: Adapter) -> None:
             "  line 7",
         ],
     )
-    same(done.stdout, f"{TASK}: pinact: 2 finding(s)\n")
+    same(out, f"{TASK}: pinact: 2 finding(s)\n")
 
 
-def test_a_clean_report_records_nothing(adapter: Adapter) -> None:
+def test_a_clean_report_records_nothing(
+    adapter: Adapter, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """No results: no record, pinact's 0."""
-    done = adapter.run_adapter(sarif(), 0)
-    same(done.returncode, 0, done.stderr)
+    adapter.answer(monkeypatch, sarif(), 0)
+    status = pinact_findings.main([WORKFLOW])
+    out, err = capfd.readouterr()
+    same(status, 0, err)
     same(records(adapter.file), [])
-    same(done.stdout, f"{TASK}: pinact: 0 finding(s)\n")
+    same(out, f"{TASK}: pinact: 0 finding(s)\n")
 
 
-def test_another_sarif_version_is_refused_by_name(adapter: Adapter) -> None:
+def test_another_sarif_version_is_refused_by_name(
+    adapter: Adapter, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """SARIF 2.2: refused, both versions named, exit 1, its one record."""
-    done = adapter.run_adapter(sarif(version="2.2.0"), 0)
-    same(done.returncode, 1, done.stderr)
-    assert "the report is SARIF 2.2.0; this adapter reads SARIF 2.1.0" in done.stderr
-    refused(adapter.file, done.stderr)
-    same(done.stdout, "")
+    adapter.answer(monkeypatch, sarif(version="2.2.0"), 0)
+    status = pinact_findings.main([WORKFLOW])
+    out, err = capfd.readouterr()
+    same(status, 1, err)
+    assert "the report is SARIF 2.2.0; this adapter reads SARIF 2.1.0" in err
+    refused(adapter.file, err)
+    same(out, "")
 
 
-def test_an_unknown_shape_is_refused_by_name(adapter: Adapter) -> None:
+def test_an_unknown_shape_is_refused_by_name(
+    adapter: Adapter, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """A log with no `runs`: refused by name, exit 1, its one record."""
-    done = adapter.run_adapter('{"version": "2.1.0"}', 3)
-    same(done.returncode, 1, done.stderr)
+    adapter.answer(monkeypatch, '{"version": "2.1.0"}', 3)
+    status = pinact_findings.main([WORKFLOW])
+    out, err = capfd.readouterr()
+    same(status, 1, err)
     assert (
         f"{TASK}: pinact exited 3: the output is not pinact's report:"
         " runs is not a list"
-    ) in done.stderr
-    refused(adapter.file, done.stderr)
-    same(done.stdout, "")
+    ) in err
+    refused(adapter.file, err)
+    same(out, "")
 
 
-def test_output_that_is_not_json_is_refused_by_name(adapter: Adapter) -> None:
+def test_output_that_is_not_json_is_refused_by_name(
+    adapter: Adapter, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """A human report: refused with pinact's status, exit 1."""
-    done = adapter.run_adapter("ERROR failed to handle a line\n", 3)
-    same(done.returncode, 1, done.stderr)
-    assert f"{TASK}: pinact exited 3: the output is not pinact's report" in done.stderr
-    refused(adapter.file, done.stderr)
+    adapter.answer(monkeypatch, "ERROR failed to handle a line\n", 3)
+    status = pinact_findings.main([WORKFLOW])
+    out, err = capfd.readouterr()
+    same(status, 1, err)
+    assert f"{TASK}: pinact exited 3: the output is not pinact's report" in err
+    refused(adapter.file, err)
 
 
-def test_a_malformed_result_records_none(adapter: Adapter) -> None:
+def test_a_malformed_result_records_none(
+    adapter: Adapter, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """One result with no location: refused, none of the report's recorded."""
     bad = result("parse-error", MISMATCH, 6) | {"locations": []}
-    done = adapter.run_adapter(sarif(result("parse-error", "x", 1), bad), 3)
-    same(done.returncode, 1, done.stderr)
-    assert "runs[0].results[1]: locations is empty" in done.stderr
-    refused(adapter.file, done.stderr)
+    adapter.answer(monkeypatch, sarif(result("parse-error", "x", 1), bad), 3)
+    status = pinact_findings.main([WORKFLOW])
+    out, err = capfd.readouterr()
+    same(status, 1, err)
+    assert "runs[0].results[1]: locations is empty" in err
+    refused(adapter.file, err)
 
 
-def test_another_resolved_sha_leaves_the_message(adapter: Adapter) -> None:
+def test_another_resolved_sha_leaves_the_message(
+    adapter: Adapter, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """A release moves the SHA in the text: the message is unchanged."""
     later = UNPINNED.replace(FIXED, "f" * 40)
-    done = adapter.run_adapter(sarif(result("unpinned-action", later, 7)), 3)
-    same(done.returncode, 3, done.stderr)
+    adapter.answer(monkeypatch, sarif(result("unpinned-action", later, 7)), 3)
+    status = pinact_findings.main([WORKFLOW])
+    out, err = capfd.readouterr()
+    same(status, 3, err)
     got = [(r["message"], r["detail"]) for r in records(adapter.file)]
     want: list[tuple[object, object]] = [(UNPINNED_LINE, [later, "line 7"])]
     same(got, want)
 
 
-def test_a_missing_file_is_refused_by_name(adapter: Adapter) -> None:
+def test_a_missing_file_is_refused_by_name(
+    adapter: Adapter, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """A result naming a file that is not there: refused, 1, its one record."""
     (adapter.dir / WORKFLOW).unlink()
-    done = adapter.run_adapter(QUOTED, 3)
-    same(done.returncode, 1, done.stderr)
+    adapter.answer(monkeypatch, QUOTED, 3)
+    status = pinact_findings.main([WORKFLOW])
+    out, err = capfd.readouterr()
+    same(status, 1, err)
     assert (
         f"{TASK}: pinact exited 3: the output is not pinact's report:"
         f" runs[0].results[0]: locations[0]: {WORKFLOW} cannot be read"
-    ) in done.stderr
-    refused(adapter.file, done.stderr)
+    ) in err
+    refused(adapter.file, err)
 
 
-def test_a_line_past_the_end_is_refused_by_name(adapter: Adapter) -> None:
+def test_a_line_past_the_end_is_refused_by_name(
+    adapter: Adapter, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """A result past the file's last line: refused, 1, its one record."""
-    done = adapter.run_adapter(sarif(result("parse-error", MISMATCH, 8)), 3)
-    same(done.returncode, 1, done.stderr)
-    assert f"runs[0].results[0]: locations[0]: {WORKFLOW} has no line 8" in done.stderr
-    refused(adapter.file, done.stderr)
+    adapter.answer(monkeypatch, sarif(result("parse-error", MISMATCH, 8)), 3)
+    status = pinact_findings.main([WORKFLOW])
+    out, err = capfd.readouterr()
+    same(status, 1, err)
+    assert f"runs[0].results[0]: locations[0]: {WORKFLOW} has no line 8" in err
+    refused(adapter.file, err)
 
 
-def test_pinact_s_status_is_the_exit(adapter: Adapter) -> None:
+def test_pinact_s_status_is_the_exit(
+    adapter: Adapter, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """A 2 from pinact with a clean log exits 2."""
-    done = adapter.run_adapter(sarif(), 2)
-    same(done.returncode, 2, done.stderr)
+    adapter.answer(monkeypatch, sarif(), 2)
+    status = pinact_findings.main([WORKFLOW])
+    out, err = capfd.readouterr()
+    same(status, 2, err)
     same(records(adapter.file), [])
 
 
-def test_arguments_pass_unchanged_after_the_format(adapter: Adapter) -> None:
+def test_arguments_pass_unchanged_after_the_format(
+    adapter: Adapter, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """The adapter calls `pinact run --format sarif` and the arguments."""
     args = ["--config", "a b.yaml", "--fix=false", WORKFLOW, "x/action.yml"]
-    done = adapter.run_adapter(sarif(), 0, *args)
-    same(done.returncode, 0, done.stderr)
+    adapter.answer(monkeypatch, sarif(), 0)
+    status = pinact_findings.main([*args])
+    out, err = capfd.readouterr()
+    same(status, 0, err)
     same(
         adapter.log.read_text(encoding="utf-8").splitlines(),
         ["\t".join(["run", "--format", "sarif", *args])],
     )
 
 
-def test_no_pinact_is_refused_by_name(adapter: Adapter) -> None:
+def test_no_pinact_is_refused_by_name(
+    adapter: Adapter, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """No pinact on PATH: refused by name, exit 1, its one record."""
-    done = adapter.run_adapter(sarif(), 0, path=str(adapter.dir / "empty"))
-    same(done.returncode, 1, done.stderr)
-    assert f"{TASK}: pinact is not on PATH" in done.stderr
-    refused(adapter.file, done.stderr)
+    adapter.answer(monkeypatch, sarif(), 0, path=str(adapter.dir / "empty"))
+    status = pinact_findings.main([WORKFLOW])
+    out, err = capfd.readouterr()
+    same(status, 1, err)
+    assert f"{TASK}: pinact is not on PATH" in err
+    refused(adapter.file, err)
 
 
 def test_the_pinned_pinact_offline_gives_two_messages(
-    adapter: Adapter, env: support.Env
+    adapter: Adapter,
+    env: support.Env,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
 ) -> None:
     """Two unpinned actions in one file, judged by pinact with `--no-api`.
 
@@ -441,11 +472,13 @@ def test_the_pinned_pinact_offline_gives_two_messages(
         "      - uses: actions/setup-go@v5\n",
         encoding="utf-8",
     )
-    done = adapter.adapt(
-        ["--fix=false", "--no-api", WORKFLOW],
+    adapter.enter(
+        monkeypatch,
         env(ORG_FINDINGS=str(adapter.file), MISE_TASK_NAME=TASK, PYTHONUTF8="1"),
     )
-    assert done.returncode != 0, done.stderr
+    status = pinact_findings.main(["--fix=false", "--no-api", WORKFLOW])
+    out, err = capfd.readouterr()
+    assert status != 0, err
     cannot = "failed to handle a line: action can't be pinned"
     want: list[dict[str, object]] = [
         {
@@ -500,9 +533,9 @@ class Task(Stubbed):
 
 
 @fixture
-def task(tmp_path: Path, capfd: pytest.CaptureFixture[str], env: support.Env) -> Task:
+def task(tmp_path: Path, env: support.Env) -> Task:
     """Give each row its own Task."""
-    return Task(tmp_path, capfd, env=env)
+    return Task(tmp_path, env=env)
 
 
 def test_the_quoted_report_is_the_records_and_pinact_s_red(task: Task) -> None:

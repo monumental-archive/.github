@@ -167,12 +167,9 @@ def vitest_key(path: str) -> str:
 class Runner:
     """A stand-in on PATH, the adapter run against it shard by shard."""
 
-    def __init__(
-        self, tmp_path: Path, capfd: pytest.CaptureFixture[str], *, env: support.Env
-    ) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Make the stand-ins' directory and the reports directory."""
         self.make_env = env
-        self.capfd = capfd
         self.base = tmp_path
         self.bin = self.base / "bin"
         self.bin.mkdir()
@@ -190,16 +187,10 @@ class Runner:
             stub.write_text(f"#!{sys.executable}\n{body}", encoding="utf-8")
             stub.chmod(0o755)
 
-    def adapt(
-        self, spec: str, command: list[str], fixture: dict[str, str]
-    ) -> tuple[int, str, str]:
-        """Call the adapter for one shard of a command.
-
-        Returns:
-            Its status and both streams: stdout is the command,
-            NUL-separated.
-
-        """
+    def enter(
+        self, monkeypatch: pytest.MonkeyPatch, spec: str, fixture: dict[str, str]
+    ) -> None:
+        """Stand in the tree as shard `spec` of `test:suite`, the stubs answering."""
         env = self.make_env(
             PATH=f"{self.bin}:/usr/bin:/bin",
             ORG_SHARD=spec,
@@ -208,46 +199,34 @@ class Runner:
             STUB_RAN=str(self.ran),
             **fixture,
         )
-        with pytest.MonkeyPatch.context() as patched:
-            for name, value in env.items():
-                patched.setenv(name, value)
-            patched.chdir(self.base)
-            status = shard_runner.main(["--", *command])
-        out, err = self.capfd.readouterr()
-        return status, out, err
+        for name, value in env.items():
+            monkeypatch.setenv(name, value)
+        monkeypatch.chdir(self.base)
 
-    def shards(
-        self, n: int, command: list[str], fixture: dict[str, str]
-    ) -> list[list[str]]:
-        """Adapt and run every shard of a command, as the gate's rows do.
+    def share(self, argv: list[str], fixture: dict[str, str]) -> list[str]:
+        """Run what the adapter printed for one shard, as the gate's rows do.
 
         Returns:
-            What the runner ran on each shard, shard 1 first.
+            What the runner ran on that shard.
 
         """
-        shares: list[list[str]] = []
-        for k in range(1, n + 1):
-            status, out, err = self.adapt(f"{k}/{n}", command, fixture)
-            assert status == 0, err
-            argv = words(out)
-            self.ran.write_text("", encoding="utf-8")
-            if argv != ["true"]:
-                ran = subprocess.run(
-                    argv,
-                    cwd=self.base,
-                    env=self.make_env(
-                        PATH=f"{self.bin}:/usr/bin:/bin",
-                        STUB_RAN=str(self.ran),
-                        **fixture,
-                    ),
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                )
-                assert ran.returncode == 0, ran.stderr
-            lines = self.ran.read_text("utf-8").splitlines()
-            shares.append([line for line in lines if not line.startswith("argv ")])
-        return shares
+        self.ran.write_text("", encoding="utf-8")
+        if argv != ["true"]:
+            ran = subprocess.run(
+                argv,
+                cwd=self.base,
+                env=self.make_env(
+                    PATH=f"{self.bin}:/usr/bin:/bin",
+                    STUB_RAN=str(self.ran),
+                    **fixture,
+                ),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            assert ran.returncode == 0, ran.stderr
+        lines = self.ran.read_text("utf-8").splitlines()
+        return [line for line in lines if not line.startswith("argv ")]
 
     def whole(self, n: int, shares: list[list[str]], population: list[str]) -> None:
         """Hold the shards to the population and the reports to the shares."""
@@ -267,11 +246,9 @@ class Runner:
 
 
 @fixture
-def runner(
-    tmp_path: Path, capfd: pytest.CaptureFixture[str], env: support.Env
-) -> Runner:
+def runner(tmp_path: Path, env: support.Env) -> Runner:
     """Give each row its own Runner."""
-    return Runner(tmp_path, capfd, env=env)
+    return Runner(tmp_path, env=env)
 
 
 FILES = [
@@ -284,39 +261,62 @@ FILES = [
 
 
 @pytest.mark.parametrize("n", [2, 3])
-def test_two_and_three_shards_run_the_suite_once(runner: Runner, n: object) -> None:
+def test_two_and_three_shards_run_the_suite_once(
+    runner: Runner,
+    n: object,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """1/2 and 2/2, then 1/3 to 3/3: every file once, as reported."""
     for old in runner.reports.glob("*") if runner.reports.is_dir() else []:
         old.unlink()
     fixture = {"STUB_FILES": " ".join(FILES)}
-    shares = runner.shards(n, ["vitest", "run", "src"], fixture)
+    shares: list[list[str]] = []
+    for k in range(1, n + 1):
+        runner.enter(monkeypatch, f"{k}/{n}", fixture)
+        status = shard_runner.main(["--", "vitest", "run", "src"])
+        out, err = capfd.readouterr()
+        assert status == 0, err
+        shares.append(runner.share(words(out), fixture))
     runner.whole(n, shares, FILES)
 
 
-def test_the_contract_the_stand_in_keeps(runner: Runner) -> None:
+def test_the_contract_the_stand_in_keeps(
+    runner: Runner, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """The first N mod n slices are one longer, in sha1 order."""
     order = sorted(FILES, key=vitest_key)
-    shares = runner.shards(2, ["vitest", "run"], {"STUB_FILES": " ".join(FILES)})
+    shares: list[list[str]] = []
+    for k in range(1, 2 + 1):
+        runner.enter(monkeypatch, f"{k}/{2}", {"STUB_FILES": " ".join(FILES)})
+        status = shard_runner.main(["--", "vitest", "run"])
+        out, err = capfd.readouterr()
+        assert status == 0, err
+        shares.append(runner.share(words(out), {"STUB_FILES": " ".join(FILES)}))
     want: list[list[str]] = [sorted(order[:3]), sorted(order[3:])]
     got: list[list[str]] = [sorted(s) for s in shares]
     assert want == got
 
 
-def test_the_command_gains_the_flag(runner: Runner) -> None:
+def test_the_command_gains_the_flag(
+    runner: Runner, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """`run` and the repository's own arguments kept, `--shard` appended."""
-    status, out, err = runner.adapt(
-        "2/2", ["vitest", "--project", "unit"], {"STUB_FILES": " ".join(FILES)}
-    )
+    runner.enter(monkeypatch, "2/2", {"STUB_FILES": " ".join(FILES)})
+    status = shard_runner.main(["--", "vitest", "--project", "unit"])
+    out, err = capfd.readouterr()
     assert status == 0, err
     want: list[str] = ["vitest", "run", "--project", "unit", "--shard=2/2"]
     assert want == words(out)
 
 
-def test_more_shards_than_files_is_red(runner: Runner) -> None:
+def test_more_shards_than_files_is_red(
+    runner: Runner, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """More shards than files: vitest refuses, so the adapter is red, by name."""
-    status, _out, err = runner.adapt(
-        "1/9", ["vitest", "run"], {"STUB_FILES": " ".join(FILES)}
-    )
+    runner.enter(monkeypatch, "1/9", {"STUB_FILES": " ".join(FILES)})
+    status = shard_runner.main(["--", "vitest", "run"])
+    err = capfd.readouterr().err
     assert status == 1
     assert "--shard <count> must be a smaller than count of test files" in err
     assert "so the share cannot be listed" in err
@@ -333,23 +333,32 @@ TESTS = [
 
 @pytest.mark.parametrize("n", [2, 3])
 def test_nextest_two_and_three_shards_run_the_suite_once(
-    runner: Runner, n: object
+    runner: Runner,
+    n: object,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
 ) -> None:
     """Every test once, across binaries, as reported."""
     for old in runner.reports.glob("*") if runner.reports.is_dir() else []:
         old.unlink()
     fixture = {"STUB_TESTS": "\n".join(TESTS)}
-    shares = runner.shards(n, ["cargo", "nextest", "run", "--workspace"], fixture)
+    shares: list[list[str]] = []
+    for k in range(1, n + 1):
+        runner.enter(monkeypatch, f"{k}/{n}", fixture)
+        status = shard_runner.main(["--", "cargo", "nextest", "run", "--workspace"])
+        out, err = capfd.readouterr()
+        assert status == 0, err
+        shares.append(runner.share(words(out), fixture))
     runner.whole(n, shares, TESTS)
 
 
-def test_the_command_gains_the_partition(runner: Runner) -> None:
+def test_the_command_gains_the_partition(
+    runner: Runner, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """`--partition slice:k/n`, after the repository's own arguments."""
-    status, out, err = runner.adapt(
-        "1/2",
-        ["cargo", "nextest", "run", "-p", "x"],
-        {"STUB_TESTS": "\n".join(TESTS)},
-    )
+    runner.enter(monkeypatch, "1/2", {"STUB_TESTS": "\n".join(TESTS)})
+    status = shard_runner.main(["--", "cargo", "nextest", "run", "-p", "x"])
+    out, err = capfd.readouterr()
     assert status == 0, err
     want: list[str] = [
         "cargo",
@@ -363,11 +372,13 @@ def test_the_command_gains_the_partition(runner: Runner) -> None:
     assert want == words(out)
 
 
-def test_a_shard_dealt_nothing_runs_true(runner: Runner) -> None:
+def test_a_shard_dealt_nothing_runs_true(
+    runner: Runner, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """Two tests on three shards: the third runs `true`, never exit 4."""
-    status, out, err = runner.adapt(
-        "3/3", ["cargo", "nextest", "run"], {"STUB_TESTS": "\n".join(TESTS[:2])}
-    )
+    runner.enter(monkeypatch, "3/3", {"STUB_TESTS": "\n".join(TESTS[:2])})
+    status = shard_runner.main(["--", "cargo", "nextest", "run"])
+    out, err = capfd.readouterr()
     assert status == 0, err
     assert words(out) == TRUE
 
@@ -390,23 +401,41 @@ TEST_FILES = [
 
 @pytest.mark.parametrize("n", [2, 3])
 def test_the_share_is_this_shards_files_and_the_union_the_population(
-    runner: Runner, n: int
+    runner: Runner,
+    n: int,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
 ) -> None:
     """Each shard runs its own files; together, every file once."""
     fixture = {"STUB_FILES": " ".join(TEST_FILES)}
     command = ["pytest", "-c", "mise/pytest.toml", "-n", "auto", "tests"]
-    shares = runner.shards(n, command, fixture)
+    shares: list[list[str]] = []
+    for k in range(1, n + 1):
+        runner.enter(monkeypatch, f"{k}/{n}", fixture)
+        status = shard_runner.main(["--", *command])
+        out, err = capfd.readouterr()
+        assert status == 0, err
+        shares.append(runner.share(words(out), fixture))
     runner.whole(n, shares, TEST_FILES)
     assert shares[0] == sorted(TEST_FILES)[::n]
 
 
-def test_options_stay_and_paths_become_files(runner: Runner) -> None:
+def test_options_stay_and_paths_become_files(
+    runner: Runner, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """A valued option's value is not a path; the paths become the share."""
-    status, out, err = runner.adapt(
-        "1/2",
-        ["python3", "-m", "pytest", "-c", "cfg.toml", "--durations=10", "tests"],
-        {"STUB_FILES": " ".join(TEST_FILES)},
-    )
+    runner.enter(monkeypatch, "1/2", {"STUB_FILES": " ".join(TEST_FILES)})
+    status = shard_runner.main([
+        "--",
+        "python3",
+        "-m",
+        "pytest",
+        "-c",
+        "cfg.toml",
+        "--durations=10",
+        "tests",
+    ])
+    out, err = capfd.readouterr()
     assert status == 0, err
     want: list[str] = [
         "python3", "-m", "pytest", "-c", "cfg.toml", "--durations=10",
@@ -415,34 +444,55 @@ def test_options_stay_and_paths_become_files(runner: Runner) -> None:
     assert want == words(out)
 
 
-def test_pytest_a_shard_dealt_nothing_runs_true(runner: Runner) -> None:
+def test_pytest_a_shard_dealt_nothing_runs_true(
+    runner: Runner, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """One file on two shards: the second runs `true`, not every test."""
-    status, out, err = runner.adapt(
-        "2/2", ["pytest", "tests"], {"STUB_FILES": TEST_FILES[0]}
-    )
+    runner.enter(monkeypatch, "2/2", {"STUB_FILES": TEST_FILES[0]})
+    status = shard_runner.main(["--", "pytest", "tests"])
+    out, err = capfd.readouterr()
     assert status == 0, err
     assert words(out) == TRUE
 
 
 @pytest.mark.parametrize("n", [2, 3])
 def test_go_test_two_and_three_shards_run_the_suite_once(
-    runner: Runner, n: object
+    runner: Runner,
+    n: object,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
 ) -> None:
     """Every package once, as reported."""
     for old in runner.reports.glob("*") if runner.reports.is_dir() else []:
         old.unlink()
     fixture = {"STUB_PACKAGES": " ".join(PACKAGES)}
-    shares = runner.shards(n, ["go", "test", "-run", "X", "./..."], fixture)
+    shares: list[list[str]] = []
+    for k in range(1, n + 1):
+        runner.enter(monkeypatch, f"{k}/{n}", fixture)
+        status = shard_runner.main(["--", "go", "test", "-run", "X", "./..."])
+        out, err = capfd.readouterr()
+        assert status == 0, err
+        shares.append(runner.share(words(out), fixture))
     runner.whole(n, shares, PACKAGES)
 
 
-def test_flags_stay_and_patterns_become_packages(runner: Runner) -> None:
+def test_flags_stay_and_patterns_become_packages(
+    runner: Runner, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """A valued flag's value is not a package; `-args` and after stay."""
-    status, out, err = runner.adapt(
-        "1/2",
-        ["go", "test", "-run", "X", "-v", "./...", "-args", "-x"],
-        {"STUB_PACKAGES": " ".join(PACKAGES)},
-    )
+    runner.enter(monkeypatch, "1/2", {"STUB_PACKAGES": " ".join(PACKAGES)})
+    status = shard_runner.main([
+        "--",
+        "go",
+        "test",
+        "-run",
+        "X",
+        "-v",
+        "./...",
+        "-args",
+        "-x",
+    ])
+    out, err = capfd.readouterr()
     assert status == 0, err
     want: list[str] = [
         "go", "test", "-run", "X", "-v",
@@ -451,35 +501,48 @@ def test_flags_stay_and_patterns_become_packages(runner: Runner) -> None:
     assert want == words(out)
 
 
-def test_go_test_a_shard_dealt_nothing_runs_true(runner: Runner) -> None:
+def test_go_test_a_shard_dealt_nothing_runs_true(
+    runner: Runner, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """One package on two shards: the second runs `true`, not `go test .`."""
-    status, out, err = runner.adapt(
-        "2/2", ["go", "test", "./..."], {"STUB_PACKAGES": "example.com/m/a"}
-    )
+    runner.enter(monkeypatch, "2/2", {"STUB_PACKAGES": "example.com/m/a"})
+    status = shard_runner.main(["--", "go", "test", "./..."])
+    out, err = capfd.readouterr()
     assert status == 0, err
     assert words(out) == TRUE
 
 
-def test_no_adapter_passes_through(runner: Runner) -> None:
+def test_no_adapter_passes_through(
+    runner: Runner, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """A setup line under a shard: unchanged, no report."""
-    status, out, err = runner.adapt("1/2", ["python3", "setup.py"], {})
+    runner.enter(monkeypatch, "1/2", {})
+    status = shard_runner.main(["--", "python3", "setup.py"])
+    out, err = capfd.readouterr()
     assert status == 0, err
     assert argv_of("python3", "setup.py") == words(out)
     assert not runner.reports.exists()
 
 
-def test_no_shard_passes_through(runner: Runner) -> None:
+def test_no_shard_passes_through(
+    runner: Runner, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """ORG_SHARD empty: the vitest run as given."""
-    _status, out, _err = runner.adapt("", ["vitest", "run"], {"STUB_FILES": "a"})
+    runner.enter(monkeypatch, "", {"STUB_FILES": "a"})
+    status = shard_runner.main(["--", "vitest", "run"])
+    out = capfd.readouterr().out
+    assert status == 0
     assert argv_of("vitest", "run") == words(out)
 
 
-def test_usage(runner: Runner, as_task: Callable[[str], None]) -> None:
+def test_usage(
+    as_task: Callable[[str], None], capfd: pytest.CaptureFixture[str]
+) -> None:
     """No `--`: the usage exit."""
     as_task("test")
     status = shard_runner.main(["vitest"])
     assert status == USAGE
-    assert runner.capfd.readouterr().err == (
+    assert capfd.readouterr().err == (
         "test: usage: belt shard-runner -- <command> [<argument>…]\n"
     )
 
