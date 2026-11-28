@@ -13,6 +13,8 @@ istanbul's own rounding, and each refusal to its message.
 stdlib `unittest`, run by `mise run test`.
 """
 
+import contextlib
+import io
 import shutil
 import subprocess
 import tempfile
@@ -169,7 +171,7 @@ class Measured(unittest.TestCase):
         ):
             self.measure(task, spec)
             # Every row measures at one path, as every gate row does; the
-            # job downloads each row's artifact into a directory of its own.
+            # artifact carries its row's directory, merged flat (#2178).
             shutil.move(self.run_dir, rows / f"coverage-run-{index}")
         merged = self.base / "merged"
         none: list[str] = []
@@ -183,6 +185,31 @@ class Measured(unittest.TestCase):
         whole = self.figure(self.run_dir)
         self.assertEqual(whole, split)
         self.assertLess(split[1], 100.0)  # `h(0)` is never run: a branch is missed
+
+    def test_one_row_merges_as_one_row(self) -> None:
+        """A rows directory holding one `coverage-run-<n>/` is one row.
+
+        The layout a lone match downloads to (#2178): the artifact
+        carries its row's directory, so one row is never read as its
+        own subdirectories.
+        """
+        self.measure("one", "")
+        rows = self.base / "rows"
+        rows.mkdir()
+        shutil.move(self.run_dir, rows / "coverage-run-6")
+        merged = self.base / "merged"
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = coverage_merge.main([str(rows), str(merged)])
+        self.assertEqual(0, code)
+        self.assertEqual(
+            f"coverage_merge: 1 row(s) gathered into {merged}\n", out.getvalue()
+        )
+        shutil.move(merged, self.run_dir)
+        split = self.figure(self.run_dir)
+        shutil.rmtree(self.run_dir)
+        self.measure("one", "")
+        self.assertEqual(self.figure(self.run_dir), split)
 
 
 ONE = """SF:a.ts
