@@ -13,7 +13,8 @@ say so, and only those shapes are read.
   script beside it. A file name in a message, a table or a usage line
   runs nothing.
 - A TOOL is called when its command is a literal tool lookup
-  (`shutil.which("x")`, `support.tool("x")`, or a module function
+  (`shutil.which("x")`, `typed_std.on_path("x")`, the one way a helper
+  starts a tool, `support.tool("x")`, or a module function
   that hands its parameter to `shutil.which`), or the literal first
   element (one word) of a list or tuple, wherever it stands: an argv,
   a module constant splatted later (`[*SHFMT, "-"]`), a list a
@@ -45,6 +46,7 @@ SUBPROCESS = frozenset(
 # The calls that find a tool by its command name.
 LOOKUPS = frozenset({
     "shutil.which",
+    "belt.typed_std.on_path",
     "tests.support.tool",
     "tests.support.optional_tool",
 })

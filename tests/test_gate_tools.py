@@ -1217,3 +1217,16 @@ def test_a_well_formed_row_decodes() -> None:
     assert b1 == gate_tools.commands("b", got["b"])
     a: list[str] = ["a"]
     assert a == gate_tools.commands("a", got["a"])
+
+
+def test_a_tool_started_by_its_path_on_path_is_a_call() -> None:
+    """`typed_std.on_path("x")`, the one way a helper starts a tool, reads as x."""
+    text = (
+        "import subprocess\n"
+        "from belt import typed_std\n"
+        'subprocess.run([typed_std.on_path("shellcheck"), "-"], check=True)\n'
+        "print(typed_std.on_path)\n"
+    )
+    runs = python_runs.python_code(text)
+    want: set[str] = {"shellcheck"}
+    assert runs.commands - runs.imports == want

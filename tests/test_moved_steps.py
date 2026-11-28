@@ -481,7 +481,10 @@ def test_the_cells_are_pushed_to_the_levels_branch(
     expected: list[str] = ["init", "config", "config", "add", "commit", "push"]
     assert levels_publish.pushed() == expected
     push = levels_publish.calls()[-1]
-    assert "https://x-access-token:planted@github.com/org/repo.git" in push
+    assert (
+        f"https://x-access-token:{support.FAKE_CREDENTIAL}@github.com/org/repo.git"
+        in push
+    )
     assert push[-1] == "levels:levels"
 
 
