@@ -1391,7 +1391,7 @@ def test_an_unreadable_helper_fails_by_name() -> None:
 
 
 def test_a_tool_in_a_string_is_not_a_call(
-    canon: support.Canon, env: support.Env
+    canon: support.Canon, env: support.Env, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Measured on #1895: a message naming a belt tool. Red on main."""
     helper = (
@@ -1399,11 +1399,13 @@ def test_a_tool_in_a_string_is_not_a_call(
         'print("a ruff check must name it")\n'
         'subprocess.run(["git", "status"], check=True)\n'
     )
-    assert strings() == planted_uninstalled(helper, canon=canon, env=env)
+    assert strings() == planted_uninstalled(
+        helper, canon=canon, env=env, monkeypatch=monkeypatch
+    )
 
 
 def test_a_function_or_variable_name_is_not_a_call(
-    canon: support.Canon, env: support.Env
+    canon: support.Canon, env: support.Env, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """`def ruff()` and `coverage = 1` read code. Red on main."""
     helper = (
@@ -1412,19 +1414,27 @@ def test_a_function_or_variable_name_is_not_a_call(
         "coverage = 1\n"
         'subprocess.run(["git", "status"], check=True)\n'
     )
-    assert strings() == planted_uninstalled(helper, canon=canon, env=env)
+    assert strings() == planted_uninstalled(
+        helper, canon=canon, env=env, monkeypatch=monkeypatch
+    )
 
 
 @pytest.mark.parametrize("line", ["import ruff.api", "from ruff import api"])
 def test_an_imported_tool_module_is_a_call(
-    line: object, canon: support.Canon, env: support.Env
+    line: object,
+    canon: support.Canon,
+    env: support.Env,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A helper that imports a belt tool's module needs it installed."""
-    assert planted_uninstalled(f"{line}\n", canon=canon, env=env) == PLANTED_RED
+    assert (
+        planted_uninstalled(f"{line}\n", canon=canon, env=env, monkeypatch=monkeypatch)
+        == PLANTED_RED
+    )
 
 
 def test_a_script_handed_to_script_is_followed(
-    canon: support.Canon, env: support.Env
+    canon: support.Canon, env: support.Env, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """`script()` reaches a script; a string or a docstring does not (#2037).
 
@@ -1442,11 +1452,17 @@ def test_a_script_handed_to_script_is_followed(
         ('"""Runs planted-next.sh, once."""\n', strings()),
     ):
         assert red == planted_uninstalled(
-            helper, {"release/planted-next.sh": nxt}, canon=canon, env=env
+            helper,
+            {"release/planted-next.sh": nxt},
+            canon=canon,
+            env=env,
+            monkeypatch=monkeypatch,
         )
 
 
-def test_a_task_in_an_argv_is_followed(canon: support.Canon, env: support.Env) -> None:
+def test_a_task_in_an_argv_is_followed(
+    canon: support.Canon, env: support.Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A task a subprocess call runs is reached; one a message names is not."""
     git = 'subprocess.run(["git", "status"], check=True)\n'
     for helper, red in (
@@ -1454,7 +1470,10 @@ def test_a_task_in_an_argv_is_followed(canon: support.Canon, env: support.Env) -
         (f'print("run mise run audit:deny by hand")\n{git}', strings()),
     ):
         assert red == planted_uninstalled(
-            f"import subprocess\n{helper}", canon=canon, env=env
+            f"import subprocess\n{helper}",
+            canon=canon,
+            env=env,
+            monkeypatch=monkeypatch,
         )
 
 
@@ -1476,6 +1495,7 @@ def planted_uninstalled(
     *,
     canon: support.Canon,
     env: support.Env,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> list[str]:
     """Plant `helper` as `belt planted-call` and read the attach job (#1499).
 
@@ -1495,15 +1515,20 @@ def planted_uninstalled(
                 "run": '"${ORG_PYTHON}" -I .org-canon/belt planted-call',
             },
         )
-        with pytest.MonkeyPatch.context() as patched:
-            patched.setattr(f"{__name__}.CANON", root)
-            return uninstalled("attach-release.yml", "attach", job, env=env)
+        monkeypatch.setattr(f"{__name__}.CANON", root)
+        return uninstalled("attach-release.yml", "attach", job, env=env)
 
 
 UNSET_RED = ["attach-release.yml attach: calls lefthook and does not install it"]
 
 
-def planted_shell(helper: str, *, canon: support.Canon, env: support.Env) -> list[str]:
+def planted_shell(
+    helper: str,
+    *,
+    canon: support.Canon,
+    env: support.Env,
+    monkeypatch: pytest.MonkeyPatch,
+) -> list[str]:
     """Plant `helper` as release/planted-call.sh and read the attach job (#1782).
 
     Returns:
@@ -1519,9 +1544,8 @@ def planted_shell(helper: str, *, canon: support.Canon, env: support.Env) -> lis
                 "run": 'bash "${GITHUB_WORKSPACE}/release/planted-call.sh"',
             },
         )
-        with pytest.MonkeyPatch.context() as patched:
-            patched.setattr(f"{__name__}.CANON", root)
-            return uninstalled("attach-release.yml", "attach", job, env=env)
+        monkeypatch.setattr(f"{__name__}.CANON", root)
+        return uninstalled("attach-release.yml", "attach", job, env=env)
 
 
 # A `${NAME:?message}` message is prose, not a call (#1782).
@@ -1530,37 +1554,46 @@ def planted_shell(helper: str, *, canon: support.Canon, env: support.Env) -> lis
 # not install, in the message of an unset expansion. The shell prints
 # that message and exits; it runs nothing in it.
 def test_a_local_assignment_message_is_not_a_call(
-    canon: support.Canon, env: support.Env
+    canon: support.Canon, env: support.Env, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """`local x="${V:?…}"`, the pgrx-env.sh shape."""
     helper = 'f() {\n  local x="${V:?run: lefthook run post-checkout}"\n}\n'
-    assert strings() == planted_shell(helper, canon=canon, env=env)
+    assert strings() == planted_shell(
+        helper, canon=canon, env=env, monkeypatch=monkeypatch
+    )
 
 
 def test_a_colon_command_message_is_not_a_call(
-    canon: support.Canon, env: support.Env
+    canon: support.Canon, env: support.Env, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """`: "${V:?…}"`, the identity.sh shape."""
     helper = ': "${V:?run: lefthook run post-checkout}"\n'
-    assert strings() == planted_shell(helper, canon=canon, env=env)
+    assert strings() == planted_shell(
+        helper, canon=canon, env=env, monkeypatch=monkeypatch
+    )
 
 
 @pytest.mark.parametrize("op", [":?", "?"])
 def test_a_sourced_path_message_is_not_a_call(
-    op: object, canon: support.Canon, env: support.Env
+    op: object, canon: support.Canon, env: support.Env, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """`. "${V:?…}/f.sh"`, the audit-badges.sh shape; `?` alone too."""
     helper = f'. "${{V{op}run: lefthook run post-checkout}}/f.sh"\n'
-    assert strings() == planted_shell(helper, canon=canon, env=env)
+    assert strings() == planted_shell(
+        helper, canon=canon, env=env, monkeypatch=monkeypatch
+    )
 
 
 @pytest.mark.parametrize("sub", ["$(lefthook version)", "`lefthook version`"])
 def test_a_substitution_in_a_message_is_a_call(
-    sub: object, canon: support.Canon, env: support.Env
+    sub: object, canon: support.Canon, env: support.Env, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """`${V:?$(lefthook …)}`: the shell runs it, so it stays code."""
     helper = f': "${{V:?{sub}}}"\n'
-    assert planted_shell(helper, canon=canon, env=env) == UNSET_RED
+    assert (
+        planted_shell(helper, canon=canon, env=env, monkeypatch=monkeypatch)
+        == UNSET_RED
+    )
 
 
 # What is prose in shell is read from shfmt's tree (#1785).
@@ -1577,10 +1610,16 @@ def test_a_substitution_in_a_message_is_a_call(
     ],
 )
 def test_a_call_beside_prose_is_named(
-    helper: object, canon: support.Canon, env: support.Env
+    helper: object,
+    canon: support.Canon,
+    env: support.Env,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A quoted substitution and a pipe out of a print are calls."""
-    assert planted_shell(helper, canon=canon, env=env) == UNSET_RED
+    assert (
+        planted_shell(helper, canon=canon, env=env, monkeypatch=monkeypatch)
+        == UNSET_RED
+    )
 
 
 @pytest.mark.parametrize(
@@ -1591,10 +1630,15 @@ def test_a_call_beside_prose_is_named(
     ],
 )
 def test_a_remedy_line_names_nothing(
-    helper: object, canon: support.Canon, env: support.Env
+    helper: object,
+    canon: support.Canon,
+    env: support.Env,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A quoted literal assigned or printed is prose."""
-    assert strings() == planted_shell(helper, canon=canon, env=env)
+    assert strings() == planted_shell(
+        helper, canon=canon, env=env, monkeypatch=monkeypatch
+    )
 
 
 @pytest.mark.parametrize(
@@ -1668,21 +1712,34 @@ def test_a_job_is_only_uncommented() -> None:
 # Each planted helper sits beside the real release scripts in a scratch
 # canon root whose mise/ is the real belt, and the attach job gains a
 # step that runs it. The job installs no ruff.
-def test_a_list_argv_is_a_call(canon: support.Canon, env: support.Env) -> None:
+def test_a_list_argv_is_a_call(
+    canon: support.Canon, env: support.Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """`subprocess.run(["ruff", "check"])`: red on main, which saw nothing."""
     helper = 'import subprocess\nsubprocess.run(["ruff", "check"], check=True)\n'
-    assert planted_uninstalled(helper, canon=canon, env=env) == PLANTED_RED
+    assert (
+        planted_uninstalled(helper, canon=canon, env=env, monkeypatch=monkeypatch)
+        == PLANTED_RED
+    )
 
 
-def test_a_string_command_is_a_call(canon: support.Canon, env: support.Env) -> None:
+def test_a_string_command_is_a_call(
+    canon: support.Canon, env: support.Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The first word of a string argv is the command."""
     helper = 'import subprocess\nsubprocess.run("ruff check .", shell=True)\n'
-    assert planted_uninstalled(helper, canon=canon, env=env) == PLANTED_RED
+    assert (
+        planted_uninstalled(helper, canon=canon, env=env, monkeypatch=monkeypatch)
+        == PLANTED_RED
+    )
 
 
 @pytest.mark.parametrize("binding", ['"ruff"', 'shutil.which("ruff") or "ruff"'])
 def test_a_module_constant_argv_is_a_call(
-    binding: object, canon: support.Canon, env: support.Env
+    binding: object,
+    canon: support.Canon,
+    env: support.Env,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A module name bound to the command, plain or through which()."""
     helper = (
@@ -1690,11 +1747,14 @@ def test_a_module_constant_argv_is_a_call(
         f"RUFF = {binding}\n"
         'subprocess.check_output([RUFF, "check"])\n'
     )
-    assert planted_uninstalled(helper, canon=canon, env=env) == PLANTED_RED
+    assert (
+        planted_uninstalled(helper, canon=canon, env=env, monkeypatch=monkeypatch)
+        == PLANTED_RED
+    )
 
 
 def test_a_name_in_a_message_is_not_a_call(
-    canon: support.Canon, env: support.Env
+    canon: support.Canon, env: support.Env, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A tool named in a message string runs nothing (#1903)."""
     helper = (
@@ -1702,7 +1762,9 @@ def test_a_name_in_a_message_is_not_a_call(
         'print("ruff: not run here")\n'
         'subprocess.run(["git", "status"], check=True)\n'
     )
-    assert strings() == planted_uninstalled(helper, canon=canon, env=env)
+    assert strings() == planted_uninstalled(
+        helper, canon=canon, env=env, monkeypatch=monkeypatch
+    )
 
 
 @pytest.mark.parametrize(
@@ -1717,14 +1779,20 @@ def test_a_name_in_a_message_is_not_a_call(
     ],
 )
 def test_a_tool_headed_list_is_a_call_wherever_it_stands(
-    helper: object, canon: support.Canon, env: support.Env
+    helper: object,
+    canon: support.Canon,
+    env: support.Env,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """An argv literal is a call in a constant or a wrapper's list (#2037).
 
     belt_shell.py splats `SHFMT`, and rust_lint.py hands its argvs
     to rust_task.run: the list is the call, not the subprocess line.
     """
-    assert planted_uninstalled(helper, canon=canon, env=env) == PLANTED_RED
+    assert (
+        planted_uninstalled(helper, canon=canon, env=env, monkeypatch=monkeypatch)
+        == PLANTED_RED
+    )
 
 
 def test_every_import_form_is_read() -> None:

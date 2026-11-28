@@ -23,6 +23,7 @@ import sys
 import tempfile
 import zipfile
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -30,6 +31,9 @@ from belt import coverage_floor
 from belt.release import coverage_figures as figures
 from belt.typed_pytest import fixture
 from tests import support
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterator
 
 HERE = support.RELEASE
 BASH = support.tool("bash")
@@ -283,29 +287,29 @@ def test_the_command_line_takes_only_a_pgrx_leg() -> None:
 
 
 # main(), in process: each subcommand over what is piped to it.
-def main(argv: list[str], data: bytes) -> tuple[int, str, str]:
-    """Run the command line with `data` as its standard input.
+@fixture
+def pipe(monkeypatch: pytest.MonkeyPatch) -> Iterator[Callable[[bytes], None]]:
+    """Pipe bytes to the command's standard input, as the step does.
 
-    Returns:
-        The exit status, stdout and stderr.
+    Yields:
+        A function that puts `data` on the command's stdin.
 
     """
-    with tempfile.TemporaryFile() as piped:
-        piped.write(data)
-        piped.seek(0)
-        out, err = io.StringIO(), io.StringIO()
-        with (
-            pytest.MonkeyPatch.context() as patched,
-            contextlib.redirect_stdout(out),
-            contextlib.redirect_stderr(err),
-        ):
-            patched.setattr(figures, "STDIN", piped.fileno())
-            patched.setattr(sys, "argv", [COMMAND])
-            status = figures.main(argv)
-    return status, out.getvalue(), err.getvalue()
+    with contextlib.ExitStack() as opened:
+
+        def feed(data: bytes) -> None:
+            piped = opened.enter_context(tempfile.TemporaryFile())
+            piped.write(data)
+            piped.seek(0)
+            monkeypatch.setattr(figures, "STDIN", piped.fileno())
+            monkeypatch.setattr(sys, "argv", [COMMAND])
+
+        yield feed
 
 
-def test_each_subcommand_answers() -> None:
+def test_each_subcommand_answers(
+    capfd: pytest.CaptureFixture[str], pipe: Callable[[bytes], None]
+) -> None:
     """choose, judge and figures print what the script reads."""
     listed = json.dumps(listing(artifact(SHA, SHA))).encode()
     ran = json.dumps(run_record(SHA)).encode()
@@ -323,12 +327,18 @@ def test_each_subcommand_answers() -> None:
             "pgrx-pg17 96.5\n",
         ),
     ):
-        assert (0, said, "") == main(argv, data)
+        pipe(data)
+        status = figures.main(argv)
+        assert (0, said, "") == (status, *capfd.readouterr())
 
 
-def test_a_refusal_is_one_line_and_status_one() -> None:
+def test_a_refusal_is_one_line_and_status_one(
+    capfd: pytest.CaptureFixture[str], pipe: Callable[[bytes], None]
+) -> None:
     """The reason, labelled, on stderr; nothing on stdout."""
-    status, out, err = main(["judge", SHA], json.dumps(run_record(OTHER)).encode())
+    pipe(json.dumps(run_record(OTHER)).encode())
+    status = figures.main(["judge", SHA])
+    out, err = capfd.readouterr()
     assert (status, out) == (1, "")
     assert (
         f"release:coverage-floor: not reading the gate's figures:"
@@ -336,9 +346,13 @@ def test_a_refusal_is_one_line_and_status_one() -> None:
     ) == err
 
 
-def test_a_forge_answer_that_is_not_json_is_refused() -> None:
+def test_a_forge_answer_that_is_not_json_is_refused(
+    capfd: pytest.CaptureFixture[str], pipe: Callable[[bytes], None]
+) -> None:
     """decoded.py's refusal becomes the step's."""
-    status, _, err = main(["choose", SHA], b"<html>rate limited</html>")
+    pipe(b"<html>rate limited</html>")
+    status = figures.main(["choose", SHA])
+    err = capfd.readouterr().err
     assert status == 1
     assert "the forge answered with something that is not JSON" in err
 
@@ -352,9 +366,13 @@ def test_a_forge_answer_that_is_not_json_is_refused() -> None:
         ["figures", SHA, "python"],
     ],
 )
-def test_usage_errors_are_status_two(argv: object) -> None:
+def test_usage_errors_are_status_two(
+    argv: object, capfd: pytest.CaptureFixture[str], pipe: Callable[[bytes], None]
+) -> None:
     """No sha, a short sha, an unknown command, a leg that is not pgrx."""
-    status, out, err = main(argv, b"")
+    pipe(b"")
+    status = figures.main(argv)
+    out, err = capfd.readouterr()
     assert (status, out) == (2, "")
     assert f"{COMMAND}: usage: belt {COMMAND} " in err
 
@@ -447,6 +465,7 @@ class Derive:
         self,
         tmp_path: Path,
         capfd: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
         *,
         canon: support.Canon,
         env: support.Env,
@@ -472,15 +491,13 @@ class Derive:
         self.tree.mkdir()
         (self.tree / "a.py").write_text("", encoding="utf-8")
         env = self.make_env(self.base / "home")
-        with pytest.MonkeyPatch.context() as patched:
-            patched.chdir(self.tree)
-            patched.setattr(sys, "stdin", io.StringIO(LEGS))
-            assert not coverage_floor.main([
-                "write",
-                "--adopt",
-                "--provenance",
-                "v1.0.0",
-            ])
+        monkeypatch.setattr(sys, "stdin", io.StringIO(LEGS))
+        assert not coverage_floor.main(
+            [
+                *("--path", str(self.tree / ".coverage-floor")),
+                *("write", "--adopt", "--provenance", "v1.0.0"),
+            ]
+        )
         capfd.readouterr()
         for argv in (
             [GIT, "init", "-q"],
@@ -580,11 +597,12 @@ class Derive:
 def derive_state(
     tmp_path: Path,
     capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
     canon: support.Canon,
     env: support.Env,
 ) -> Derive:
     """Give each row its own Derive."""
-    return Derive(tmp_path, capfd, canon=canon, env=env)
+    return Derive(tmp_path, capfd, monkeypatch, canon=canon, env=env)
 
 
 def test_the_commits_artifact_is_read_and_nothing_measured(
