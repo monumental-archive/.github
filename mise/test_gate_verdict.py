@@ -114,8 +114,7 @@ class EveryPartPassed(unittest.TestCase):
         self.assertEqual(done.returncode, 1)
         self.assertEqual(
             done.stdout,
-            "::error::a job the gate needs did not succeed\n"
-            "  job mutants: failure\n",
+            "::error::a job the gate needs did not succeed\n  job mutants: failure\n",
         )
 
     def test_no_legs_planned_and_none_ran(self) -> None:
