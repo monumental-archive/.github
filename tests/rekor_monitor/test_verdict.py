@@ -74,27 +74,19 @@ def finding(index: int, condition: str) -> dict[str, object]:
     return {"subject": f"CT index {index}", "assertion": condition, "detail": "x"}
 
 
-def call(
-    argv: list[str], *, capfd: pytest.CaptureFixture[str], env: support.Env
-) -> tuple[int, str, str]:
-    """Call the helper's main in this process, as the leg starts it.
+def as_the_leg(
+    monkeypatch: pytest.MonkeyPatch, argv: list[str], env: support.Env
+) -> None:
+    """Set the world the leg starts the helper's main in.
 
     The leg runs `belt verdict` with no mise task around it, so the
     finding writer names the command (#1934): argv[0] is its name, and
     the environment is the allow-list's, never the running suite's
     MISE_TASK_NAME or ORG_FINDINGS.
-
-    Returns:
-        Its exit status and output, captured.
-
     """
-    with pytest.MonkeyPatch.context() as patched:
-        patched.setattr(sys, "argv", [COMMAND, *argv])
-        for name, value in env().items():
-            patched.setenv(name, value)
-        status = verdict.main(argv)
-    out, err = capfd.readouterr()
-    return status, out, err
+    monkeypatch.setattr(sys, "argv", [COMMAND, *argv])
+    for name, value in env().items():
+        monkeypatch.setenv(name, value)
 
 
 class Verdict:
@@ -105,24 +97,24 @@ class Verdict:
         self.make_env = env
         self.report = Path(str(tmp_path)) / "report.json"
 
-    def run_helper(
+    def enter(
         self,
+        monkeypatch: pytest.MonkeyPatch,
         code: str,
         doc: dict[str, object] | None,
         saved: str = "true",
-        *,
-        capfd: pytest.CaptureFixture[str],
-    ) -> tuple[int, str, str]:
-        """Write the report (None: stele wrote none) and call the helper.
+    ) -> list[str]:
+        """Write the report (None: stele wrote none) and set the leg's world.
 
         Returns:
-            Its exit status and output.
+            The argv the run is given.
 
         """
         text = json.dumps(doc) if doc is not None else ""
         self.report.write_text(text, encoding="utf-8")
         argv = ["--exit-code", code, "--report", str(self.report), "--saved", saved]
-        return call(argv, capfd=capfd, env=self.make_env)
+        as_the_leg(monkeypatch, argv, self.make_env)
+        return argv
 
 
 @fixture
@@ -132,22 +124,30 @@ def verdict_state(tmp_path: Path, env: support.Env) -> Verdict:
 
 
 def test_judged_to_the_head(
-    verdict_state: Verdict, capfd: pytest.CaptureFixture[str]
+    verdict_state: Verdict,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Exit 0, saved: green."""
-    status, out, _err = verdict_state.run_helper(
-        "0", load("report-pass.json"), capfd=capfd
-    )
+    argv = verdict_state.enter(monkeypatch, "0", load("report-pass.json"))
+    status = verdict.main(argv)
+    out = capfd.readouterr().out
     assert status == 0, out
     assert out.strip() == "verdict: green: judged to the head of the log"
 
 
-def test_fail_is_red(verdict_state: Verdict, capfd: pytest.CaptureFixture[str]) -> None:
+def test_fail_is_red(
+    verdict_state: Verdict,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Exit 1, saved: red by the findings."""
     doc = load("report-pass.json")
     doc["verdict"] = "FAIL"
     doc["findings"] = [finding(448221200, "foreign"), finding(448221200, "chain")]
-    status, _out, err = verdict_state.run_helper("1", doc, capfd=capfd)
+    argv = verdict_state.enter(monkeypatch, "1", doc)
+    status = verdict.main(argv)
+    err = capfd.readouterr().err
     assert status == 1
     assert err.strip() == (
         "::error::verdict: 2 finding(s): a certificate did not reconcile;"
@@ -156,10 +156,14 @@ def test_fail_is_red(verdict_state: Verdict, capfd: pytest.CaptureFixture[str]) 
 
 
 def test_advanced_is_green(
-    verdict_state: Verdict, capfd: pytest.CaptureFixture[str]
+    verdict_state: Verdict,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Exit 4, advanced, no finding: green, the outstanding range named."""
-    status, out, _err = verdict_state.run_helper("4", advanced(), capfd=capfd)
+    argv = verdict_state.enter(monkeypatch, "4", advanced())
+    status = verdict.main(argv)
+    out = capfd.readouterr().out
     assert status == 0, out
     assert (
         out.strip()
@@ -168,12 +172,16 @@ def test_advanced_is_green(
 
 
 def test_finding_under_cannot_judge_is_red(
-    verdict_state: Verdict, capfd: pytest.CaptureFixture[str]
+    verdict_state: Verdict,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Exit 4, advanced, a finding: red whatever the exit code."""
     doc = advanced()
     doc["findings"] = [finding(448200000, "run")]
-    status, _out, err = verdict_state.run_helper("4", doc, capfd=capfd)
+    argv = verdict_state.enter(monkeypatch, "4", doc)
+    status = verdict.main(argv)
+    err = capfd.readouterr().err
     assert status == 1
     assert err.strip() == (
         "::error::verdict: 1 finding(s): a certificate did not reconcile;"
@@ -182,26 +190,32 @@ def test_finding_under_cannot_judge_is_red(
 
 
 def test_judged_nothing_is_green(
-    verdict_state: Verdict, capfd: pytest.CaptureFixture[str]
+    verdict_state: Verdict,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Exit 4, saved, no finding, nothing judged: green, stele's reason printed.
 
     A leg is red only for its own failure (#1967): whether the run
     gained is judged once, after the last leg (gain.py).
     """
-    status, out, err = verdict_state.run_helper(
-        "4", load("report-budget.json"), capfd=capfd
-    )
+    argv = verdict_state.enter(monkeypatch, "4", load("report-budget.json"))
+    status = verdict.main(argv)
+    out, err = capfd.readouterr()
     assert status == 0, err
     assert err == ""
     assert out.strip() == f"verdict: green: stele judged nothing ({STOPPED})"
 
 
 def test_killed_is_red(
-    verdict_state: Verdict, capfd: pytest.CaptureFixture[str]
+    verdict_state: Verdict,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """No exit status (cancelled or timed out): red."""
-    status, _out, err = verdict_state.run_helper("", None, saved="false", capfd=capfd)
+    argv = verdict_state.enter(monkeypatch, "", None, saved="false")
+    status = verdict.main(argv)
+    err = capfd.readouterr().err
     assert status == 1
     assert err.strip() == (
         "::error::verdict: stele did not finish: no exit status was"
@@ -211,10 +225,14 @@ def test_killed_is_red(
 
 
 def test_no_report_is_red(
-    verdict_state: Verdict, capfd: pytest.CaptureFixture[str]
+    verdict_state: Verdict,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Stele refused (exit 2, empty stdout), nothing saved: red, named."""
-    status, _out, err = verdict_state.run_helper("2", None, saved="false", capfd=capfd)
+    argv = verdict_state.enter(monkeypatch, "2", None, saved="false")
+    status = verdict.main(argv)
+    err = capfd.readouterr().err
     assert status == 1
     assert err.strip() == (
         "::error::verdict: stele exited 2 and the checkpoint was not saved:"
@@ -223,12 +241,16 @@ def test_no_report_is_red(
 
 
 def test_filing_failed_is_red(
-    verdict_state: Verdict, capfd: pytest.CaptureFixture[str]
+    verdict_state: Verdict,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A report, but the checkpoint not saved: a finding was not filed."""
-    status, _out, err = verdict_state.run_helper(
-        "0", load("report-pass.json"), saved="false", capfd=capfd
+    argv = verdict_state.enter(
+        monkeypatch, "0", load("report-pass.json"), saved="false"
     )
+    status = verdict.main(argv)
+    err = capfd.readouterr().err
     assert status == 1
     assert err.strip() == (
         "::error::verdict: stele exited 0 and the checkpoint was not saved:"
@@ -237,18 +259,22 @@ def test_filing_failed_is_red(
 
 
 def test_other_exit_is_red(
-    verdict_state: Verdict, capfd: pytest.CaptureFixture[str]
+    verdict_state: Verdict,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A saved leg that exited 3: red, named."""
-    status, _out, err = verdict_state.run_helper(
-        "3", load("report-budget.json"), capfd=capfd
-    )
+    argv = verdict_state.enter(monkeypatch, "3", load("report-budget.json"))
+    status = verdict.main(argv)
+    err = capfd.readouterr().err
     assert status == 1
     assert err.strip() == "::error::verdict: stele exited 3"
 
 
 def test_facts_not_stele_shape_is_red(
-    verdict_state: Verdict, capfd: pytest.CaptureFixture[str]
+    verdict_state: Verdict,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Saved, a finding, facts that are not stele's: red, not green.
 
@@ -258,7 +284,9 @@ def test_facts_not_stele_shape_is_red(
     doc = load("report-pass.json")
     doc["findings"] = [finding(448221200, "chain")]
     doc["facts"] = [1]
-    status, _out, err = verdict_state.run_helper("0", doc, capfd=capfd)
+    argv = verdict_state.enter(monkeypatch, "0", doc)
+    status = verdict.main(argv)
+    err = capfd.readouterr().err
     assert status == 1
     assert err.strip() == (
         "::error::verdict: stele exited 0 and its report could not be judged:"
@@ -267,7 +295,10 @@ def test_facts_not_stele_shape_is_red(
 
 
 def test_report_nested_past_the_parser(
-    verdict_state: Verdict, capfd: pytest.CaptureFixture[str], env: support.Env
+    verdict_state: Verdict,
+    capfd: pytest.CaptureFixture[str],
+    env: support.Env,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """JSON nested past the parser's depth: red by name, no traceback."""
     verdict_state.report.write_bytes(b"[" * 100_000)
@@ -279,7 +310,9 @@ def test_report_nested_past_the_parser(
         "--saved",
         "true",
     ]
-    status, out, err = call(argv, capfd=capfd, env=env)
+    as_the_leg(monkeypatch, argv, env)
+    status = verdict.main(argv)
+    out, err = capfd.readouterr()
     assert status == 1, err
     assert out == ""
     assert err.strip() == (
@@ -289,7 +322,10 @@ def test_report_nested_past_the_parser(
 
 
 def test_a_report_not_of_stele_s_shape_is_unreadable(
-    verdict_state: Verdict, capfd: pytest.CaptureFixture[str], env: support.Env
+    verdict_state: Verdict,
+    capfd: pytest.CaptureFixture[str],
+    env: support.Env,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Each wrong shape, read where the report is decoded: one refusal (#1683)."""
     target = json.dumps("assert signer-certificates")
@@ -316,7 +352,9 @@ def test_a_report_not_of_stele_s_shape_is_unreadable(
     ]
     for text in rows.values():
         verdict_state.report.write_text(text, encoding="utf-8")
-        status, out, err = call(argv, capfd=capfd, env=env)
+        as_the_leg(monkeypatch, argv, env)
+        status = verdict.main(argv)
+        out, err = capfd.readouterr()
         assert status == 1, err
         assert out == ""
         assert err.strip() == (
@@ -326,12 +364,16 @@ def test_a_report_not_of_stele_s_shape_is_unreadable(
 
 
 def test_report_from_another_target(
-    verdict_state: Verdict, capfd: pytest.CaptureFixture[str]
+    verdict_state: Verdict,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Another verb's report: named, never read on."""
     doc = load("report-budget.json")
     doc["target"] = "assert tags"
-    status, _out, err = verdict_state.run_helper("4", doc, saved="false", capfd=capfd)
+    argv = verdict_state.enter(monkeypatch, "4", doc, saved="false")
+    status = verdict.main(argv)
+    err = capfd.readouterr().err
     assert status == 1
     assert err.strip() == (
         "::error::verdict: stele exited 4 and the checkpoint was not saved:"

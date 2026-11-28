@@ -102,17 +102,11 @@ class Harness:
             STUB_LIST="[]",
         )
 
-    def run_helper(
-        self, *, capfd: pytest.CaptureFixture[str], **env: str
-    ) -> tuple[int, str, str]:
-        """Write the report and call the helper's main in this process.
-
-        The process's environment is the row's for the call (the stub gh
-        first on PATH, the repository, the stub's own variables), so gh
-        is started as the workflow starts it (#1673, #1699).
+    def enter(self, monkeypatch: pytest.MonkeyPatch, **env: str) -> list[str]:
+        """Write the report and set the leg's world for the helper's main.
 
         Returns:
-            Its exit status and output, captured.
+            The argv the run is given.
 
         """
         if self.write_report:
@@ -120,13 +114,10 @@ class Harness:
         argv = ["--report", str(self.report), "--run-url", RUN]
         # The leg runs `belt certificate-issues` with no mise task around
         # it, so the finding writer names the command (#1934).
-        with pytest.MonkeyPatch.context() as patched:
-            patched.setattr(sys, "argv", [COMMAND, *argv])
-            for name, value in {**self.env, **env}.items():
-                patched.setenv(name, value)
-            status = certificate_issues.main(argv)
-        out, err = capfd.readouterr()
-        return status, out, err
+        monkeypatch.setattr(sys, "argv", [COMMAND, *argv])
+        for name, value in {**self.env, **env}.items():
+            monkeypatch.setenv(name, value)
+        return argv
 
     def gh_calls(self) -> list[list[str]]:
         """Read what the stub gh was called with.
@@ -154,17 +145,19 @@ def harness(tmp_path: Path, env: support.Env) -> Harness:
 
 
 def test_no_findings_files_nothing(
-    harness: Harness, capfd: pytest.CaptureFixture[str]
+    harness: Harness, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The real report, no findings: exit 0, gh never called."""
-    status, out, err = harness.run_helper(capfd=capfd)
+    argv = harness.enter(monkeypatch)
+    status = certificate_issues.main(argv)
+    out, err = capfd.readouterr()
     assert status == 0, err
     assert harness.gh_calls() == list[list[str]]()
     assert out.strip() == "findings: 0 certificate(s) did not reconcile"
 
 
 def test_one_issue_per_certificate(
-    harness: Harness, capfd: pytest.CaptureFixture[str]
+    harness: Harness, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Two conditions of one certificate and one of another: two issues."""
     harness.doc["findings"] = [
@@ -172,7 +165,9 @@ def test_one_issue_per_certificate(
         finding(448200001, "chain", "no candidate pins the signer at the digest"),
         finding(448199999, "run", "the forge answers 404 for run 1"),
     ]
-    status, out, err = harness.run_helper(capfd=capfd)
+    argv = harness.enter(monkeypatch)
+    status = certificate_issues.main(argv)
+    out, err = capfd.readouterr()
     assert status == 0, err
     calls = harness.gh_calls()
     pairs = [["issue", "list"], ["issue", "create"]] * 2
@@ -201,7 +196,7 @@ def test_one_issue_per_certificate(
 
 
 def test_one_condition_twice_is_one_line(
-    harness: Harness, capfd: pytest.CaptureFixture[str]
+    harness: Harness, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Two findings of one condition: one line, both reasons (#1557).
 
@@ -212,7 +207,9 @@ def test_one_condition_twice_is_one_line(
         finding(448200001, "chain", "no candidate pins the signer"),
         finding(448200001, "chain", "the digest is\nnot the release's"),
     ]
-    status, _out, err = harness.run_helper(capfd=capfd)
+    argv = harness.enter(monkeypatch)
+    status = certificate_issues.main(argv)
+    err = capfd.readouterr().err
     assert status == 0, err
     calls = harness.gh_calls()
     assert calls[1][5] == f"{PREFIX} 448200001 did not reconcile (chain)"
@@ -223,7 +220,7 @@ def test_one_condition_twice_is_one_line(
 
 
 def test_already_filed_is_not_filed_again(
-    harness: Harness, capfd: pytest.CaptureFixture[str]
+    harness: Harness, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """An issue for the index, open or closed: no second one."""
     harness.doc["findings"] = [finding(448200001, "run", "gone")]
@@ -231,7 +228,9 @@ def test_already_filed_is_not_filed_again(
         {"number": 5, "title": f"{PREFIX} 4482000010 did not reconcile (run)"},
         {"number": 6, "title": f"{PREFIX} 448200001 did not reconcile (run)"},
     ]
-    status, out, err = harness.run_helper(STUB_LIST=json.dumps(listing), capfd=capfd)
+    argv = harness.enter(monkeypatch, STUB_LIST=json.dumps(listing))
+    status = certificate_issues.main(argv)
+    out, err = capfd.readouterr()
     assert status == 0, err
     searched: list[list[str]] = [search(448200001)]
     assert harness.gh_calls() == searched
@@ -239,25 +238,29 @@ def test_already_filed_is_not_filed_again(
 
 
 def test_a_longer_index_is_not_this_one(
-    harness: Harness, capfd: pytest.CaptureFixture[str]
+    harness: Harness, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A title for CT index 4482000010 does not dedupe CT index 448200001."""
     harness.doc["findings"] = [finding(448200001, "run", "gone")]
     listing = [
         {"number": 5, "title": f"{PREFIX} 4482000010 did not reconcile (run)"},
     ]
-    status, _out, err = harness.run_helper(STUB_LIST=json.dumps(listing), capfd=capfd)
+    argv = harness.enter(monkeypatch, STUB_LIST=json.dumps(listing))
+    status = certificate_issues.main(argv)
+    err = capfd.readouterr().err
     assert status == 0, err
     create: list[str] = ["issue", "create"]
     assert harness.gh_calls()[1][:2] == create
 
 
 def test_search_failure_saves_nothing(
-    harness: Harness, capfd: pytest.CaptureFixture[str]
+    harness: Harness, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The dedupe search failing: exit 2 by name, nothing created."""
     harness.doc["findings"] = [finding(448200001, "run", "gone")]
-    status, _out, err = harness.run_helper(STUB_LIST_FAIL="1", capfd=capfd)
+    argv = harness.enter(monkeypatch, STUB_LIST_FAIL="1")
+    status = certificate_issues.main(argv)
+    err = capfd.readouterr().err
     assert status == 2
     searched: list[list[str]] = [search(448200001)]
     assert harness.gh_calls() == searched
@@ -269,11 +272,13 @@ def test_search_failure_saves_nothing(
 
 
 def test_create_failure_saves_nothing(
-    harness: Harness, capfd: pytest.CaptureFixture[str]
+    harness: Harness, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """An issue that cannot be created: exit 2 by name."""
     harness.doc["findings"] = [finding(448200001, "run", "gone")]
-    status, _out, err = harness.run_helper(STUB_CREATE_FAIL="1", capfd=capfd)
+    argv = harness.enter(monkeypatch, STUB_CREATE_FAIL="1")
+    status = certificate_issues.main(argv)
+    err = capfd.readouterr().err
     assert status == 2
     assert err.strip() == (
         "certificate-issues:"
@@ -282,11 +287,15 @@ def test_create_failure_saves_nothing(
     )
 
 
-def test_no_report(harness: Harness, capfd: pytest.CaptureFixture[str]) -> None:
+def test_no_report(
+    harness: Harness, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Stele refused before judging (empty stdout): exit 2 by name."""
     harness.write_report = False
     harness.report.write_text("", encoding="utf-8")
-    status, _out, err = harness.run_helper(capfd=capfd)
+    argv = harness.enter(monkeypatch)
+    status = certificate_issues.main(argv)
+    err = capfd.readouterr().err
     assert status == 2
     assert harness.gh_calls() == list[list[str]]()
     assert err.strip() == (
@@ -296,46 +305,58 @@ def test_no_report(harness: Harness, capfd: pytest.CaptureFixture[str]) -> None:
     )
 
 
-def test_report_not_json(harness: Harness, capfd: pytest.CaptureFixture[str]) -> None:
+def test_report_not_json(
+    harness: Harness, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A report that is not JSON: exit 2 by name."""
     harness.write_report = False
     text = "stele assert: the run could not see enough\n"
     harness.report.write_text(text, encoding="utf-8")
-    status, _out, err = harness.run_helper(capfd=capfd)
+    argv = harness.enter(monkeypatch)
+    status = certificate_issues.main(argv)
+    err = capfd.readouterr().err
     assert status == 2
     prefix = "certificate-issues: stele's report is not JSON: "
     assert err.startswith(prefix)
 
 
-def test_report_not_utf8(harness: Harness, capfd: pytest.CaptureFixture[str]) -> None:
+def test_report_not_utf8(
+    harness: Harness, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A report that is not UTF-8: exit 2 by name, never a traceback.
 
     prop_certificate_issues.py's shrunk example (#1557): the one byte 0x80.
     """
     harness.write_report = False
     harness.report.write_bytes(b"\x80")
-    status, _out, err = harness.run_helper(capfd=capfd)
+    argv = harness.enter(monkeypatch)
+    status = certificate_issues.main(argv)
+    err = capfd.readouterr().err
     assert status == 2, err
     assert err.startswith("certificate-issues: stele's report is not JSON: ")
 
 
 def test_report_nested_past_the_parser(
-    harness: Harness, capfd: pytest.CaptureFixture[str]
+    harness: Harness, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """JSON nested past the parser's depth: exit 2 by name (#1557)."""
     harness.write_report = False
     harness.report.write_bytes(b"[" * 100_000)
-    status, _out, err = harness.run_helper(capfd=capfd)
+    argv = harness.enter(monkeypatch)
+    status = certificate_issues.main(argv)
+    err = capfd.readouterr().err
     assert status == 2, err
     assert err.startswith("certificate-issues: stele's report is not JSON: ")
 
 
 def test_report_from_another_target(
-    harness: Harness, capfd: pytest.CaptureFixture[str]
+    harness: Harness, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Another verb's report: exit 2 by name, nothing filed."""
     harness.doc["target"] = "assert tags"
-    status, _out, err = harness.run_helper(capfd=capfd)
+    argv = harness.enter(monkeypatch)
+    status = certificate_issues.main(argv)
+    err = capfd.readouterr().err
     assert status == 2
     assert err.strip() == (
         "certificate-issues:"
@@ -345,13 +366,15 @@ def test_report_from_another_target(
 
 
 def test_subject_not_a_ct_index(
-    harness: Harness, capfd: pytest.CaptureFixture[str]
+    harness: Harness, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A finding whose subject is not a CT index: exit 2, nothing filed."""
     harness.doc["findings"] = [
         {"subject": "population", "assertion": "run", "detail": "x"}
     ]
-    status, _out, err = harness.run_helper(capfd=capfd)
+    argv = harness.enter(monkeypatch)
+    status = certificate_issues.main(argv)
+    err = capfd.readouterr().err
     assert status == 2
     assert harness.gh_calls() == list[list[str]]()
     assert err.strip() == (
@@ -361,16 +384,20 @@ def test_subject_not_a_ct_index(
     )
 
 
-def test_no_repository(harness: Harness, capfd: pytest.CaptureFixture[str]) -> None:
+def test_no_repository(
+    harness: Harness, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
     """GITHUB_REPOSITORY unset: exit 2 by name, gh never called."""
-    status, _out, err = harness.run_helper(GITHUB_REPOSITORY="", capfd=capfd)
+    argv = harness.enter(monkeypatch, GITHUB_REPOSITORY="")
+    status = certificate_issues.main(argv)
+    err = capfd.readouterr().err
     assert status == 2
     assert harness.gh_calls() == list[list[str]]()
     assert err.strip() == f"{COMMAND}: GITHUB_REPOSITORY is not set"
 
 
 def test_a_search_answer_that_is_not_a_list_of_issues(
-    harness: Harness, capfd: pytest.CaptureFixture[str]
+    harness: Harness, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Each wrong shape of the search's answer: exit 2 by name."""
     harness.doc["findings"] = [finding(448200001, "run", "gone")]
@@ -382,7 +409,9 @@ def test_a_search_answer_that_is_not_a_list_of_issues(
         f'[{{"number": "7", "title": {title}}}]': ("issue 0: number is not an integer"),
     }
     for answer, why in rows.items():
-        status, _out, err = harness.run_helper(STUB_LIST=answer, capfd=capfd)
+        argv = harness.enter(monkeypatch, STUB_LIST=answer)
+        status = certificate_issues.main(argv)
+        err = capfd.readouterr().err
         assert status == 2
         assert err.strip() == (
             "certificate-issues:"
@@ -392,11 +421,13 @@ def test_a_search_answer_that_is_not_a_list_of_issues(
 
 
 def test_a_search_answer_that_is_not_json(
-    harness: Harness, capfd: pytest.CaptureFixture[str]
+    harness: Harness, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A search answer that is not strict JSON: exit 2 by name."""
     harness.doc["findings"] = [finding(448200001, "run", "gone")]
-    status, _out, err = harness.run_helper(STUB_LIST='{"a": 1, "a": 2}', capfd=capfd)
+    argv = harness.enter(monkeypatch, STUB_LIST='{"a": 1, "a": 2}')
+    status = certificate_issues.main(argv)
+    err = capfd.readouterr().err
     assert status == 2
     assert err.strip() == (
         "certificate-issues: gh issue list answered something that is not JSON:"
@@ -405,13 +436,15 @@ def test_a_search_answer_that_is_not_json(
 
 
 def test_findings_that_are_not_a_list(
-    harness: Harness, capfd: pytest.CaptureFixture[str]
+    harness: Harness, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Findings of another kind, falsy or not: exit 2 by name (#1683)."""
     values: tuple[object, ...] = ("", 0, dict[str, object](), "ab")
     for value in values:
         harness.doc["findings"] = value
-        status, _out, err = harness.run_helper(capfd=capfd)
+        argv = harness.enter(monkeypatch)
+        status = certificate_issues.main(argv)
+        err = capfd.readouterr().err
         assert status == 2
         assert err.strip() == (
             "certificate-issues:"
@@ -421,12 +454,14 @@ def test_findings_that_are_not_a_list(
 
 
 def test_report_with_a_key_twice(
-    harness: Harness, capfd: pytest.CaptureFixture[str]
+    harness: Harness, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A report that is not strict JSON is not JSON here: exit 2 by name."""
     harness.write_report = False
     harness.report.write_text('{"target": "x", "target": "y"}', encoding="utf-8")
-    status, _out, err = harness.run_helper(capfd=capfd)
+    argv = harness.enter(monkeypatch)
+    status = certificate_issues.main(argv)
+    err = capfd.readouterr().err
     assert status == 2
     assert err.strip() == (
         "certificate-issues:"
