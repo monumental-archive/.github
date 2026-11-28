@@ -13,7 +13,6 @@ The rows that run actionlint use the belt's, so this file runs under the
 belt's tools (`mise run test`, or `mise x --`).
 """
 
-import subprocess
 from typing import TYPE_CHECKING
 
 import pytest
@@ -66,10 +65,9 @@ def names(tree: Path) -> list[str]:
 class ActionsLint:
     """One planted workflow; actionlint's verdict through the helper."""
 
-    def __init__(self, tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Plant an empty workflows directory."""
         self.tree = tmp_path
-        self.capfd = capfd
         (self.tree / ".github" / "workflows").mkdir(parents=True)
 
     def plant(self, text: str) -> str:
@@ -83,50 +81,49 @@ class ActionsLint:
         (self.tree / rel).write_text(text, encoding="utf-8")
         return rel
 
-    def run_helper(self, *argv: str, **env: str) -> subprocess.CompletedProcess[str]:
-        """Run the helper as the task does, in the planted tree, in process.
-
-        Returns:
-            Its status and what it wrote, as a finished process's.
-
-        """
-        with pytest.MonkeyPatch.context() as patched:
-            for name, value in ({"ORG_CANON_DIR": str(CANON_DIR)} | env).items():
-                patched.setenv(name, value)
-            patched.chdir(self.tree)
-            status = actions_lint.main(list(argv))
-        out, err = self.capfd.readouterr()
-        return subprocess.CompletedProcess(list(argv), status, out, err)
+    def enter(self, monkeypatch: pytest.MonkeyPatch, **env: str) -> None:
+        """Set the task's world in the planted tree."""
+        for name, value in ({"ORG_CANON_DIR": str(CANON_DIR)} | env).items():
+            monkeypatch.setenv(name, value)
+        monkeypatch.chdir(self.tree)
 
 
 @fixture
-def actions_lint_state(
-    tmp_path: Path, capfd: pytest.CaptureFixture[str]
-) -> ActionsLint:
+def actions_lint_state(tmp_path: Path) -> ActionsLint:
     """Give each row its own ActionsLint."""
-    return ActionsLint(tmp_path, capfd)
+    return ActionsLint(tmp_path)
 
 
 def test_a_clean_workflow_passes_and_writes_nothing(
     actions_lint_state: ActionsLint,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
 ) -> None:
     """`$/` and ubuntu-26.04 pass under the two ignores; the tree is untouched."""
     rel = actions_lint_state.plant(CLEAN)
     before = names(actions_lint_state.tree)
-    done = actions_lint_state.run_helper(rel)
-    assert done.returncode == 0, done.stdout + done.stderr
-    assert (done.stdout, done.stderr) == ("", "")
+    actions_lint_state.enter(monkeypatch)
+    status = actions_lint.main([rel])
+    out, err = capfd.readouterr()
+    assert status == 0, out + err
+    assert (out, err) == ("", "")
     assert names(actions_lint_state.tree) == before
 
 
-def test_a_finding_names_the_fix(actions_lint_state: ActionsLint) -> None:
+def test_a_finding_names_the_fix(
+    actions_lint_state: ActionsLint,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """Actionlint's report, then the one finding, exit 1."""
     rel = actions_lint_state.plant(CLEAN.replace("echo ok", 'echo "${{ nope.x }}"'))
-    done = actions_lint_state.run_helper(rel)
-    assert done.returncode == actions_lint.EXIT_RED
-    assert "nope" in done.stdout
+    actions_lint_state.enter(monkeypatch)
+    status = actions_lint.main([rel])
+    out, err = capfd.readouterr()
+    assert status == actions_lint.EXIT_RED
+    assert "nope" in out
     fix: list[str] = [FIX]
-    assert done.stderr.splitlines() == fix
+    assert err.splitlines() == fix
 
 
 @pytest.mark.usefixtures("actions_lint_state")
@@ -151,18 +148,24 @@ def test_no_workflow_is_a_usage_error(
     assert err.splitlines() == usage
 
 
-def test_no_canon_tree_is_refused(actions_lint_state: ActionsLint) -> None:
+def test_no_canon_tree_is_refused(
+    actions_lint_state: ActionsLint,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """No ORG_CANON_DIR: exit 2, named."""
     rel = actions_lint_state.plant(CLEAN)
-    done = actions_lint_state.run_helper(rel, ORG_CANON_DIR="")
-    assert done.returncode == actions_lint.EXIT_ERROR
+    actions_lint_state.enter(monkeypatch, ORG_CANON_DIR="")
+    status = actions_lint.main([rel])
+    out, err = capfd.readouterr()
+    assert status == actions_lint.EXIT_ERROR
     refused: list[str] = [
         (
             "lint:actions: ORG_CANON_DIR is unset — no canon tree for"
             " shellcheck to follow"
         )
     ]
-    assert done.stderr.splitlines() == refused
+    assert err.splitlines() == refused
 
 
 def test_no_actionlint_is_refused(

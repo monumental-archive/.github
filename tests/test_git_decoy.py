@@ -221,22 +221,11 @@ class Helper:
             "XDG_CONFIG_HOME": str(self.work),
         }
 
-    def leak(
-        self, script: str, *, capfd: pytest.CaptureFixture[str]
-    ) -> tuple[int, str]:
-        """Call the helper in-process to run a script under the decoy (#1697).
-
-        Returns:
-            The helper's exit status and its standard error.
-
-        """
-        with pytest.MonkeyPatch.context() as patched:
-            for name, value in (self.leak_env()).items():
-                patched.setenv(name, value)
-            patched.chdir(self.work)
-            status = gd.main(["run", str(self.decoy), "--", BASH, "-c", script])
-        _out, err = capfd.readouterr()
-        return status, err
+    def enter(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Set the world the helper runs a script under the decoy in (#1697)."""
+        for name, value in (self.leak_env()).items():
+            monkeypatch.setenv(name, value)
+        monkeypatch.chdir(self.work)
 
 
 @fixture
@@ -297,10 +286,16 @@ def test_run_with_no_command_is_a_usage_error(
     ],
 )
 def test_each_change_is_named(
-    helper: Helper, script: str, wanted: list[str], capfd: pytest.CaptureFixture[str]
+    helper: Helper,
+    script: str,
+    wanted: list[str],
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Commit, branch, switch, stage and config each red with what changed."""
-    status, err = helper.leak(script, capfd=capfd)
+    helper.enter(monkeypatch)
+    status = gd.main(["run", str(helper.decoy), "--", BASH, "-c", script])
+    err = capfd.readouterr().err
     assert status == 1, err
     assert gd.MESSAGE in err
     for line in wanted:
@@ -308,17 +303,22 @@ def test_each_change_is_named(
 
 
 def test_no_git_passes_the_status_through(
-    helper: Helper, capfd: pytest.CaptureFixture[str]
+    helper: Helper, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A run that leaves the decoy alone answers with its own status."""
-    assert helper.leak("exit 0", capfd=capfd) == (0, "")
-    status, err = helper.leak("exit 3", capfd=capfd)
+    helper.enter(monkeypatch)
+    status = gd.main(["run", str(helper.decoy), "--", BASH, "-c", "exit 0"])
+    out, err = capfd.readouterr()
+    assert (status, err) == (0, "")
+    helper.enter(monkeypatch)
+    status = gd.main(["run", str(helper.decoy), "--", BASH, "-c", "exit 3"])
+    err = capfd.readouterr().err
     assert status == 3
     assert gd.MESSAGE not in err
 
 
 def test_the_child_sees_the_decoy_and_no_other_git(
-    helper: Helper, capfd: pytest.CaptureFixture[str]
+    helper: Helper, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """GIT_DIR and GIT_INDEX_FILE name the decoy; GIT_WORK_TREE is unset."""
     script = (
@@ -327,7 +327,16 @@ def test_the_child_sees_the_decoy_and_no_other_git(
         '&& test -z "${GIT_WORK_TREE+set}" '
         '|| { echo "env: $(env | grep ^GIT_)" >&2; exit 9; }'
     )
-    status, err = helper.leak(
-        script.replace("$D", str(helper.decoy.resolve())), capfd=capfd
+    helper.enter(monkeypatch)
+    status = gd.main(
+        [
+            "run",
+            str(helper.decoy),
+            "--",
+            BASH,
+            "-c",
+            script.replace("$D", str(helper.decoy.resolve())),
+        ]
     )
+    err = capfd.readouterr().err
     assert (status, err) == (0, "")
