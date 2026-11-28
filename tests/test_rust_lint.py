@@ -656,28 +656,16 @@ class Planted:
             subprocess.run([GIT, "init", "-q"], cwd=self.tree, env=self.env, check=True)
         subprocess.run([GIT, "add", "."], cwd=self.tree, env=self.env, check=True)
 
-    def call(
-        self, *argv: str, capfd: pytest.CaptureFixture[str], **stub: str
-    ) -> tuple[int, str, str]:
-        """Call rust_lint.py's main in the tree, from the planted belt.
+    def enter(self, monkeypatch: pytest.MonkeyPatch, **stub: str) -> None:
+        """Stand in the tree from the planted belt, the row's stubs set.
 
-        Returns:
-            Its status and what it wrote.
-
+        The derivation resolves cargo when it is imported; here, the
+        stub on the row's PATH is the cargo it asks.
         """
-        # The derivation resolves cargo when it is imported; here, the
-        # stub on the row's PATH is the cargo it asks.
-        with pytest.MonkeyPatch.context() as patched:
-            patched.setattr(rust_workspaces, "CARGO", str(self.bins / "cargo"))
-            with pytest.MonkeyPatch.context() as patched:
-                for name, value in (
-                    self.env | {"ORG_BELT_DIR": str(self.belt)} | stub
-                ).items():
-                    patched.setenv(name, value)
-                patched.chdir(self.tree)
-                status = rust_lint.main(list(argv))
-            out, err = capfd.readouterr()
-            return status, out, err
+        monkeypatch.setattr(rust_workspaces, "CARGO", str(self.bins / "cargo"))
+        for name, value in (self.env | {"ORG_BELT_DIR": str(self.belt)} | stub).items():
+            monkeypatch.setenv(name, value)
+        monkeypatch.chdir(self.tree)
 
     def logged(self) -> list[str]:
         """Read what the stubs were asked.
@@ -690,15 +678,15 @@ class Planted:
             return []
         return self.log.read_text(encoding="utf-8").splitlines()
 
-    def assert_finding(
-        self, called: tuple[int, str, str], status: int, *lines: str
-    ) -> None:
-        """Assert the status, and the finding's lines in order on stderr."""
-        code, out, err = called
-        assert status == code, out + err
+    def finding(self, *lines: str) -> str:
+        """Say a finding as the task writes it to stderr.
+
+        Returns:
+            Its head line, then each detail line indented.
+
+        """
         head, *detail = lines
-        want = f"{self.task}: {head}\n" + "".join(f"  {line}\n" for line in detail)
-        assert want in err
+        return f"{self.task}: {head}\n" + "".join(f"  {line}\n" for line in detail)
 
 
 @fixture
@@ -713,76 +701,106 @@ def planted_state(
 
 
 def test_cargo_missing_is_red(
-    planted_state: Planted, capfd: pytest.CaptureFixture[str]
+    planted_state: Planted,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """No cargo on PATH: the toolchain is broken, never a skip."""
     (planted_state.bins / "cargo").unlink()
-    done = planted_state.call("lint", capfd=capfd)
-    planted_state.assert_finding(
-        done, 1, "Cargo.toml present but cargo missing — pin rust in mise.toml"
+    planted_state.enter(monkeypatch)
+    status = rust_lint.main(["lint"])
+    out, err = capfd.readouterr()
+    assert status == 1, out + err
+    assert (
+        planted_state.finding(
+            "Cargo.toml present but cargo missing — pin rust in mise.toml"
+        )
+        in err
     )
     assert planted_state.logged() == NOT_ASKED
 
 
 def test_clippy_missing_is_red(
-    planted_state: Planted, capfd: pytest.CaptureFixture[str]
+    planted_state: Planted,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A rustup that lists no clippy: the remedy names the pin."""
-    done = planted_state.call("lint", STUB_COMPONENTS="rustfmt-host\\n", capfd=capfd)
-    planted_state.assert_finding(
-        done,
-        1,
-        "clippy component missing — declare it with the rust pin in mise.toml:",
-        'rust = { version = "1.xx.x", components = "clippy,rustfmt,llvm-tools" }',
-        "(installed with the toolchain, before tasks run — never mid-run)",
+    planted_state.enter(monkeypatch, STUB_COMPONENTS="rustfmt-host\\n")
+    status = rust_lint.main(["lint"])
+    out, err = capfd.readouterr()
+    assert status == 1, out + err
+    assert (
+        planted_state.finding(
+            "clippy component missing — declare it with the rust pin in mise.toml:",
+            'rust = { version = "1.xx.x", components = "clippy,rustfmt,llvm-tools" }',
+            "(installed with the toolchain, before tasks run — never mid-run)",
+        )
+        in err
     )
 
 
 def test_no_rustup_reads_as_no_clippy(
-    planted_state: Planted, capfd: pytest.CaptureFixture[str]
+    planted_state: Planted,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """No rustup: no component is installed."""
     (planted_state.bins / "rustup").unlink()
-    status, _out, err = planted_state.call("lint", capfd=capfd)
+    planted_state.enter(monkeypatch)
+    status = rust_lint.main(["lint"])
+    err = capfd.readouterr().err
     assert status == 1
     assert "lint:rust: clippy component missing" in err
 
 
 def test_a_failing_rustup_reads_as_no_clippy(
-    planted_state: Planted, capfd: pytest.CaptureFixture[str]
+    planted_state: Planted,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A rustup that exits nonzero: what it printed is not believed."""
     (planted_state.bins / "rustup").write_text(
         "#!/usr/bin/env bash\necho clippy-host\nexit 1\n", encoding="utf-8"
     )
-    status, _out, err = planted_state.call("lint", capfd=capfd)
+    planted_state.enter(monkeypatch)
+    status = rust_lint.main(["lint"])
+    err = capfd.readouterr().err
     assert status == 1
     assert "lint:rust: clippy component missing" in err
 
 
 def test_a_local_clippy_toml_is_red(
-    planted_state: Planted, capfd: pytest.CaptureFixture[str]
+    planted_state: Planted,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A tracked clippy.toml lowers the org's knobs: red, by name."""
     planted_state.plant({"clippy.toml": "\n", "crates/a/rustfmt.toml": "\n"})
-    done = planted_state.call("lint", capfd=capfd)
-    planted_state.assert_finding(
-        done,
-        1,
-        "repo-local Rust tool configuration is not the org's:",
-        "clippy.toml",
-        "crates/a/rustfmt.toml",
-        "the knobs live in the canon's mise/clippy.toml and mise/rustfmt.toml,",
-        "delivered through CLIPPY_CONF_DIR and rustfmt's --config-path",
-        (
-            "a setting this repo genuinely needs is argued into the canon,"
-            " not kept locally"
-        ),
+    planted_state.enter(monkeypatch)
+    status = rust_lint.main(["lint"])
+    out, err = capfd.readouterr()
+    assert status == 1, out + err
+    assert (
+        planted_state.finding(
+            "repo-local Rust tool configuration is not the org's:",
+            "clippy.toml",
+            "crates/a/rustfmt.toml",
+            "the knobs live in the canon's mise/clippy.toml and mise/rustfmt.toml,",
+            "delivered through CLIPPY_CONF_DIR and rustfmt's --config-path",
+            (
+                "a setting this repo genuinely needs is argued into the canon,"
+                " not kept locally"
+            ),
+        )
+        in err
     )
 
 
 def test_the_canon_holds_its_delivered_configs(
-    planted_state: Planted, capfd: pytest.CaptureFixture[str]
+    planted_state: Planted,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """With the identity tracked, mise/clippy.toml is the belt's own (#746)."""
     planted_state.plant({
@@ -790,142 +808,188 @@ def test_the_canon_holds_its_delivered_configs(
         "mise/clippy.toml": "\n",
         "mise/rustfmt.toml": "\n",
     })
-    status, _out, err = planted_state.call("lint", capfd=capfd)
+    planted_state.enter(monkeypatch)
+    status = rust_lint.main(["lint"])
+    err = capfd.readouterr().err
     assert status == 0, err
 
 
 def test_a_consumer_mise_clippy_toml_is_red(
-    planted_state: Planted, capfd: pytest.CaptureFixture[str]
+    planted_state: Planted,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Without the identity, mise/clippy.toml is a shadow config."""
     planted_state.plant({"mise/clippy.toml": "\n"})
-    status, _out, err = planted_state.call("lint", capfd=capfd)
+    planted_state.enter(monkeypatch)
+    status = rust_lint.main(["lint"])
+    err = capfd.readouterr().err
     assert status == 1
     assert "lint:rust: repo-local Rust tool configuration" in err
     assert "  mise/clippy.toml\n" in err
 
 
 def test_rustfmt_missing_is_red(
-    planted_state: Planted, capfd: pytest.CaptureFixture[str]
+    planted_state: Planted,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A rustup that lists no rustfmt: the remedy names the pin."""
-    done = planted_state.call("lint", STUB_COMPONENTS="clippy-host\\n", capfd=capfd)
-    planted_state.assert_finding(
-        done,
-        1,
-        "rustfmt component missing — declare it with the rust pin in mise.toml:",
-        'rust = { version = "1.xx.x", components = "clippy,rustfmt,llvm-tools" }',
+    planted_state.enter(monkeypatch, STUB_COMPONENTS="clippy-host\\n")
+    status = rust_lint.main(["lint"])
+    out, err = capfd.readouterr()
+    assert status == 1, out + err
+    assert (
+        planted_state.finding(
+            "rustfmt component missing — declare it with the rust pin in mise.toml:",
+            'rust = { version = "1.xx.x", components = "clippy,rustfmt,llvm-tools" }',
+        )
+        in err
     )
 
 
 def test_a_whole_file_skip_is_red(
-    planted_state: Planted, capfd: pytest.CaptureFixture[str]
+    planted_state: Planted,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """`#![rustfmt::skip]`, indented: never allowed."""
     planted_state.plant({"src/lib.rs": "  #![rustfmt::skip]\n"})
-    done = planted_state.call("lint", capfd=capfd)
-    planted_state.assert_finding(
-        done,
-        1,
-        "formatting suppressed without a written decision: src/lib.rs(whole-file)",
-        *SKIP_MESSAGE,
+    planted_state.enter(monkeypatch)
+    status = rust_lint.main(["lint"])
+    out, err = capfd.readouterr()
+    assert status == 1, out + err
+    assert (
+        planted_state.finding(
+            "formatting suppressed without a written decision: src/lib.rs(whole-file)",
+            *SKIP_MESSAGE,
+        )
+        in err
     )
     assert planted_state.logged() == NOT_ASKED
 
 
 def test_a_narrow_skip_without_a_marker_is_red(
-    planted_state: Planted, capfd: pytest.CaptureFixture[str]
+    planted_state: Planted,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """`#[rustfmt::skip]` with no `rustfmt-skip:` comment: red."""
     planted_state.plant({"src/a.rs": "#[rustfmt::skip]\nfn f() {}\n", "src/b.rs": "\n"})
-    done = planted_state.call("lint", capfd=capfd)
-    planted_state.assert_finding(
-        done,
-        1,
-        "formatting suppressed without a written decision: src/a.rs(no marker)",
-        *SKIP_MESSAGE,
+    planted_state.enter(monkeypatch)
+    status = rust_lint.main(["lint"])
+    out, err = capfd.readouterr()
+    assert status == 1, out + err
+    assert (
+        planted_state.finding(
+            "formatting suppressed without a written decision: src/a.rs(no marker)",
+            *SKIP_MESSAGE,
+        )
+        in err
     )
 
 
 def test_a_narrow_skip_with_a_marker_passes(
-    planted_state: Planted, capfd: pytest.CaptureFixture[str]
+    planted_state: Planted,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """`// rustfmt-skip: <why>` above it: green."""
     text = "// rustfmt-skip: a table\n#[rustfmt::skip]\nfn f() {}\n"
     planted_state.plant({"src/a.rs": text})
-    status, _out, err = planted_state.call("lint", capfd=capfd)
+    planted_state.enter(monkeypatch)
+    status = rust_lint.main(["lint"])
+    err = capfd.readouterr().err
     assert status == 0, err
 
 
 def test_a_vendored_skip_is_not_read(
-    planted_state: Planted, capfd: pytest.CaptureFixture[str]
+    planted_state: Planted,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """vendor/ is not the repository's code; a deleted file is passed over."""
     planted_state.plant({"vendor/x/lib.rs": "#![rustfmt::skip]\n", "src/gone.rs": "\n"})
     (planted_state.tree / "src" / "gone.rs").unlink()
-    status, _out, err = planted_state.call("lint", capfd=capfd)
+    planted_state.enter(monkeypatch)
+    status = rust_lint.main(["lint"])
+    err = capfd.readouterr().err
     assert status == 0, err
 
 
 def test_a_rustfmt_warning_is_red(
-    planted_state: Planted, capfd: pytest.CaptureFixture[str]
+    planted_state: Planted,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A rustfmt warning with exit 0: an ignored option is a weaker format."""
     warning = "Warning: Unknown configuration option `x`\n"
-    done = planted_state.call("lint", STUB_FMT_OUT=warning, capfd=capfd)
-    planted_state.assert_finding(
-        done,
-        1,
-        "Cargo.toml: rustfmt warned — an ignored option means a weaker format,"
-        " silently",
+    planted_state.enter(monkeypatch, STUB_FMT_OUT=warning)
+    status = rust_lint.main(["lint"])
+    out, err = capfd.readouterr()
+    assert status == 1, out + err
+    assert (
+        planted_state.finding(
+            "Cargo.toml: rustfmt warned — an ignored option means a weaker format,"
+            " silently"
+        )
+        in err
     )
-    _status, _out, err = done
     assert warning in err
 
 
 def test_unformatted_code_is_red(
-    planted_state: Planted, capfd: pytest.CaptureFixture[str]
+    planted_state: Planted,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A failing format check: the diff is shown and fix:rust named."""
     diff = "Diff in src/lib.rs at line 1:\n"
-    done = planted_state.call(
-        "lint", STUB_FMT_OUT=diff, STUB_FMT_STATUS="1", capfd=capfd
+    planted_state.enter(monkeypatch, STUB_FMT_OUT=diff, STUB_FMT_STATUS="1")
+    status = rust_lint.main(["lint"])
+    out, err = capfd.readouterr()
+    assert status == 1, out + err
+    assert (
+        planted_state.finding(
+            "Cargo.toml: formatting differs from the org's — run 'mise run fix:rust'"
+        )
+        in err
     )
-    planted_state.assert_finding(
-        done,
-        1,
-        "Cargo.toml: formatting differs from the org's — run 'mise run fix:rust'",
-    )
-    _status, out, err = done
     assert diff in err
     assert "formatting clean" not in out
 
 
 def test_a_suppression_clippy_cannot_see_is_red(
-    planted_state: Planted, capfd: pytest.CaptureFixture[str]
+    planted_state: Planted,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """rust_suppressions.py reads every tracked manifest and source."""
     planted_state.plant({"src/lib.rs": "#![allow(dead_code)]\n"})
-    status, _out, err = planted_state.call("lint", capfd=capfd)
+    planted_state.enter(monkeypatch)
+    status = rust_lint.main(["lint"])
+    err = capfd.readouterr().err
     assert status == 1
     assert UNSEEN in err
     assert "cargo fetch" not in "\n".join(planted_state.logged())
 
 
 def test_a_failing_ladder_keeps_its_status(
-    planted_state: Planted, capfd: pytest.CaptureFixture[str]
+    planted_state: Planted, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The ladder cannot be read: nothing is linted."""
-    status, _out, _err = planted_state.call("lint", STUB_LADDER_FAILS="1", capfd=capfd)
+    planted_state.enter(monkeypatch, STUB_LADDER_FAILS="1")
+    status = rust_lint.main(["lint"])
     assert status == 3
     assert "cargo fetch" not in "\n".join(planted_state.logged())
 
 
 def test_a_failing_fetch_keeps_its_status(
-    planted_state: Planted, capfd: pytest.CaptureFixture[str]
+    planted_state: Planted, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A failing `cargo fetch`: its status, and no metadata read."""
-    status, _out, _err = planted_state.call("lint", STUB_FETCH_STATUS="7", capfd=capfd)
+    planted_state.enter(monkeypatch, STUB_FETCH_STATUS="7")
+    status = rust_lint.main(["lint"])
     assert status == 7
     assert (
         planted_state.logged()[-1] == "cargo fetch --locked --manifest-path Cargo.toml"
@@ -933,7 +997,7 @@ def test_a_failing_fetch_keeps_its_status(
 
 
 def test_unreadable_metadata_is_red(
-    planted_state: Planted, capfd: pytest.CaptureFixture[str]
+    planted_state: Planted, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Metadata that is not JSON: gate_surface.py's status, nothing linted.
 
@@ -941,30 +1005,41 @@ def test_unreadable_metadata_is_red(
     process does not capture; test_gate_surface.py asserts it.
     """
     planted_state.metadata.write_text("not json", encoding="utf-8")
-    status, _out, _err = planted_state.call("lint", capfd=capfd)
+    planted_state.enter(monkeypatch)
+    status = rust_lint.main(["lint"])
     assert status == 1
     assert "clippy" not in "\n".join(planted_state.logged())
 
 
 def test_a_workspace_of_no_member_is_red(
-    planted_state: Planted, capfd: pytest.CaptureFixture[str]
+    planted_state: Planted,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Metadata naming no member: never a pass over nothing."""
     planted_state.metadata.write_text(workspace(), encoding="utf-8")
-    done = planted_state.call("lint", capfd=capfd)
-    planted_state.assert_finding(
-        done,
-        1,
-        "Cargo.toml: a Cargo.toml is tracked but cargo metadata names no"
-        " workspace member",
+    planted_state.enter(monkeypatch)
+    status = rust_lint.main(["lint"])
+    out, err = capfd.readouterr()
+    assert status == 1, out + err
+    assert (
+        planted_state.finding(
+            "Cargo.toml: a Cargo.toml is tracked but cargo metadata names no"
+            " workspace member"
+        )
+        in err
     )
 
 
 def test_a_clean_workspace_prints_its_population(
-    planted_state: Planted, capfd: pytest.CaptureFixture[str]
+    planted_state: Planted,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Each plain member is linted; the extension and the excluded are named."""
-    status, out, err = planted_state.call("lint", capfd=capfd)
+    planted_state.enter(monkeypatch)
+    status = rust_lint.main(["lint"])
+    out, err = capfd.readouterr()
     assert status == 0, err
     said = [
         "lint:rust: Cargo.toml: formatting clean",
@@ -993,12 +1068,16 @@ def test_a_clean_workspace_prints_its_population(
 
 
 def test_clippy_features_replace_all_features(
-    planted_state: Planted, capfd: pytest.CaptureFixture[str]
+    planted_state: Planted,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """CLIPPY_FEATURES is split into words, in place of --all-features."""
-    status, _out, err = planted_state.call(
-        "lint", CLIPPY_FEATURES="--no-default-features  --features x", capfd=capfd
+    planted_state.enter(
+        monkeypatch, CLIPPY_FEATURES="--no-default-features  --features x"
     )
+    status = rust_lint.main(["lint"])
+    err = capfd.readouterr().err
     assert status == 0, err
     assert (
         "cargo clippy -p a@0.1.0 --no-deps --all-targets --no-default-features"
@@ -1008,97 +1087,128 @@ def test_clippy_features_replace_all_features(
 
 
 def test_a_red_member_is_named_with_clippys_status(
-    planted_state: Planted, capfd: pytest.CaptureFixture[str]
+    planted_state: Planted,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A red `a`: every member is still asked, and cargo's 101 is kept."""
-    done = planted_state.call("lint", STUB_RED="a", capfd=capfd)
-    planted_state.assert_finding(done, 101, "red: a (Cargo.toml)")
-    _status, out, _err = done
+    planted_state.enter(monkeypatch, STUB_RED="a")
+    status = rust_lint.main(["lint"])
+    out, err = capfd.readouterr()
+    assert status == 101, out + err
+    assert planted_state.finding("red: a (Cargo.toml)") in err
     assert "lint:rust: Cargo.toml: 2 crate(s) linted: a b\n" in out
     assert sum("cargo clippy" in line for line in planted_state.logged()) == 2
 
 
 def test_clippy_output_is_shown(
-    planted_state: Planted, capfd: pytest.CaptureFixture[str]
+    planted_state: Planted,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """What clippy prints reaches stdout as it comes."""
-    status, out, err = planted_state.call(
-        "lint", STUB_CLIPPY_OUT="warning: a note\n", capfd=capfd
-    )
+    planted_state.enter(monkeypatch, STUB_CLIPPY_OUT="warning: a note\n")
+    status = rust_lint.main(["lint"])
+    out, err = capfd.readouterr()
     assert status == 0, err
     assert out.count("warning: a note\n") == 2
 
 
 def test_a_feature_some_crate_lacks_is_red(
-    planted_state: Planted, capfd: pytest.CaptureFixture[str]
+    planted_state: Planted,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Cargo's `does not contain this feature`: the CLIPPY_FEATURES finding."""
     out = "error: package `a` does not contain this feature: x\n"
-    done = planted_state.call("lint", STUB_CLIPPY_OUT=out, capfd=capfd)
-    planted_state.assert_finding(
-        done,
-        1,
-        (
-            "Cargo.toml: CLIPPY_FEATURES names a feature some crate in this"
-            " workspace lacks"
-        ),
-        ("every crate is linted as its own package (#726), so the value has to be one"),
-        (
-            "each member accepts — --all-features, or --no-default-features"
-            " — and a crate"
-        ),
-        "that genuinely cannot take it is named in CLIPPY_EXCLUDE instead",
+    planted_state.enter(monkeypatch, STUB_CLIPPY_OUT=out)
+    status = rust_lint.main(["lint"])
+    out, err = capfd.readouterr()
+    assert status == 1, out + err
+    assert (
+        planted_state.finding(
+            (
+                "Cargo.toml: CLIPPY_FEATURES names a feature some crate in this"
+                " workspace lacks"
+            ),
+            (
+                "every crate is linted as its own package (#726), so the value has to be one"
+            ),
+            (
+                "each member accepts — --all-features, or --no-default-features"
+                " — and a crate"
+            ),
+            "that genuinely cannot take it is named in CLIPPY_EXCLUDE instead",
+        )
+        in err
     )
 
 
 def test_an_unknown_lint_name_is_red(
-    planted_state: Planted, capfd: pytest.CaptureFixture[str]
+    planted_state: Planted,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """E0602: the exclusion list names a lint this toolchain lacks."""
-    done = planted_state.call(
-        "lint", STUB_CLIPPY_OUT="warning[E0602]: unknown lint\n", capfd=capfd
-    )
-    planted_state.assert_finding(
-        done,
-        1,
-        (
-            "Cargo.toml: a lint name above is unknown to this toolchain"
-            " (see E0602/renamed above)"
-        ),
-        (
-            "clippy renamed or removed it — update the exclusion list"
-            " in mise/config.toml"
-        ),
+    planted_state.enter(monkeypatch, STUB_CLIPPY_OUT="warning[E0602]: unknown lint\n")
+    status = rust_lint.main(["lint"])
+    out, err = capfd.readouterr()
+    assert status == 1, out + err
+    assert (
+        planted_state.finding(
+            (
+                "Cargo.toml: a lint name above is unknown to this toolchain"
+                " (see E0602/renamed above)"
+            ),
+            (
+                "clippy renamed or removed it — update the exclusion list"
+                " in mise/config.toml"
+            ),
+        )
+        in err
     )
 
 
 def test_a_renamed_lint_name_is_red(
-    planted_state: Planted, capfd: pytest.CaptureFixture[str]
+    planted_state: Planted,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """`has been renamed to`: the same finding."""
     out = "warning: lint `x` has been renamed to `y`\n"
-    status, out, err = planted_state.call("lint", STUB_CLIPPY_OUT=out, capfd=capfd)
+    planted_state.enter(monkeypatch, STUB_CLIPPY_OUT=out)
+    status = rust_lint.main(["lint"])
+    out, err = capfd.readouterr()
     assert status == 1
     assert "lint:rust: Cargo.toml: a lint name above is unknown" in err
 
 
 def test_no_extension_and_no_exclusion_print_neither_line(
-    planted_state: Planted, capfd: pytest.CaptureFixture[str]
+    planted_state: Planted,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Only the lines that name something are printed."""
     planted_state.metadata.write_text(workspace(member("a")), encoding="utf-8")
-    status, out, err = planted_state.call("lint", capfd=capfd)
+    planted_state.enter(monkeypatch)
+    status = rust_lint.main(["lint"])
+    out, err = capfd.readouterr()
     assert status == 0, err
     assert "pgrx extension" not in out
     assert "excluded" not in out
 
 
 def test_no_subcommand_is_a_usage_error(
-    planted_state: Planted, capfd: pytest.CaptureFixture[str]
+    planted_state: Planted,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """No task named: status 2, the usage."""
-    done = planted_state.call(capfd=capfd)
-    planted_state.assert_finding(done, 2, "usage: belt rust-lint lint|fix")
+    planted_state.enter(monkeypatch)
+    status = rust_lint.main([])
+    out, err = capfd.readouterr()
+    assert status == 2, out + err
+    assert planted_state.finding("usage: belt rust-lint lint|fix") in err
 
 
 class FixBranches(Planted):
@@ -1120,13 +1230,21 @@ def fix_branches(
 
 
 def test_fix_branches_cargo_missing_is_red(
-    fix_branches: FixBranches, capfd: pytest.CaptureFixture[str]
+    fix_branches: FixBranches,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """No cargo on PATH: red, as the gate leg."""
     (fix_branches.bins / "cargo").unlink()
-    done = fix_branches.call("fix", capfd=capfd)
-    fix_branches.assert_finding(
-        done, 1, "Cargo.toml present but cargo missing — pin rust in mise.toml"
+    fix_branches.enter(monkeypatch)
+    status = rust_lint.main(["fix"])
+    out, err = capfd.readouterr()
+    assert status == 1, out + err
+    assert (
+        fix_branches.finding(
+            "Cargo.toml present but cargo missing — pin rust in mise.toml"
+        )
+        in err
     )
 
 
@@ -1142,42 +1260,59 @@ def test_each_missing_component_is_red(
     listed: object,
     missing: object,
     capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """clippy, then rustfmt, each named."""
-    done = fix_branches.call("fix", STUB_COMPONENTS=listed, capfd=capfd)
-    fix_branches.assert_finding(
-        done,
-        1,
-        f"{missing} component missing — declare it with the rust pin in mise.toml",
+    fix_branches.enter(monkeypatch, STUB_COMPONENTS=listed)
+    status = rust_lint.main(["fix"])
+    out, err = capfd.readouterr()
+    assert status == 1, out + err
+    assert (
+        fix_branches.finding(
+            f"{missing} component missing — declare it with the rust pin in mise.toml"
+        )
+        in err
     )
 
 
 def test_a_failing_format_keeps_its_status(
-    fix_branches: FixBranches, capfd: pytest.CaptureFixture[str]
+    fix_branches: FixBranches,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A failing `cargo fmt`: its status, and nothing fixed."""
     (fix_branches.bins / "cargo").write_text(LOCATE + "exit 4\n", encoding="utf-8")
-    status, out, _err = fix_branches.call("fix", capfd=capfd)
+    fix_branches.enter(monkeypatch)
+    status = rust_lint.main(["fix"])
+    out = capfd.readouterr().out
     assert status == 4
     assert "formatted" not in out
 
 
 def test_fix_branches_a_failing_ladder_keeps_its_status(
-    fix_branches: FixBranches, capfd: pytest.CaptureFixture[str]
+    fix_branches: FixBranches,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The ladder cannot be read: nothing formatted or fixed."""
-    status, out, _err = fix_branches.call("fix", STUB_LADDER_FAILS="1", capfd=capfd)
+    fix_branches.enter(monkeypatch, STUB_LADDER_FAILS="1")
+    status = rust_lint.main(["fix"])
+    out = capfd.readouterr().out
     assert status == 3
     assert out == ""
     assert fix_branches.logged() == NOT_ASKED
 
 
 def test_a_workspace_without_extensions(
-    fix_branches: FixBranches, capfd: pytest.CaptureFixture[str]
+    fix_branches: FixBranches,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """One --workspace pass, the excluded held out and named."""
     fix_branches.metadata.write_text(PLAIN, encoding="utf-8")
-    status, out, err = fix_branches.call("fix", capfd=capfd)
+    fix_branches.enter(monkeypatch)
+    status = rust_lint.main(["fix"])
+    out, err = capfd.readouterr()
     assert status == 0, err
     at = "--manifest-path Cargo.toml"
     want = [
@@ -1200,17 +1335,21 @@ def test_a_workspace_without_extensions(
 
 
 def test_nothing_left_to_fix_says_none(
-    fix_branches: FixBranches, capfd: pytest.CaptureFixture[str]
+    fix_branches: FixBranches,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Every member excluded: ` none`, and no exclusion of an extension."""
     fix_branches.metadata.write_text(workspace(member("held")), encoding="utf-8")
-    status, out, err = fix_branches.call("fix", capfd=capfd)
+    fix_branches.enter(monkeypatch)
+    status = rust_lint.main(["fix"])
+    out, err = capfd.readouterr()
     assert status == 0, err
     assert "fix:rust: Cargo.toml: none rewritten where clippy could\n" in out
 
 
 def test_a_failing_fix_pass_keeps_its_status(
-    fix_branches: FixBranches, capfd: pytest.CaptureFixture[str]
+    fix_branches: FixBranches, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The workspace pass fails: its status, no extension pass."""
     fix_branches.plant({})
@@ -1219,20 +1358,25 @@ def test_a_failing_fix_pass_keeps_its_status(
         '[[ $1 != metadata ]] || cat "${STUB_METADATA}"\n',
         encoding="utf-8",
     )
-    status, _out, _err = fix_branches.call("fix", capfd=capfd)
+    fix_branches.enter(monkeypatch)
+    status = rust_lint.main(["fix"])
     assert status == 6
     assert "prepare 16,17" not in fix_branches.logged()
 
 
 def test_the_extension_is_fixed_at_its_highest_major(
-    fix_branches: FixBranches, capfd: pytest.CaptureFixture[str]
+    fix_branches: FixBranches,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The extension is held out of the workspace pass and fixed at pg17.
 
     What the prepare exported reaches the compile, and so does the
     major's own environment.
     """
-    status, out, err = fix_branches.call("fix", capfd=capfd)
+    fix_branches.enter(monkeypatch)
+    status = rust_lint.main(["fix"])
+    out, err = capfd.readouterr()
     assert status == 0, err
     own = "--no-deps --all-targets --locked --no-default-features"
     want = [
@@ -1261,52 +1405,63 @@ def test_the_extension_is_fixed_at_its_highest_major(
 
 
 def test_a_failing_prepare_keeps_its_status(
-    fix_branches: FixBranches, capfd: pytest.CaptureFixture[str]
+    fix_branches: FixBranches, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The prepare fails: its status, and the extension never compiled."""
-    status, _out, _err = fix_branches.call("fix", STUB_PREPARE_FAILS="1", capfd=capfd)
+    fix_branches.enter(monkeypatch, STUB_PREPARE_FAILS="1")
+    status = rust_lint.main(["fix"])
     assert status == 5
     assert fix_branches.logged()[-1] == "prepare 17"
 
 
 def test_a_failing_pin_check_keeps_its_status(
-    fix_branches: FixBranches, capfd: pytest.CaptureFixture[str]
+    fix_branches: FixBranches,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A major with no Postgres pinned: the check's status."""
-    status, out, _err = fix_branches.call("fix", STUB_PIN_STATUS="8", capfd=capfd)
+    fix_branches.enter(monkeypatch, STUB_PIN_STATUS="8")
+    status = rust_lint.main(["fix"])
+    out = capfd.readouterr().out
     assert status == 8
     assert "ext(pg17)" not in out
 
 
 def test_a_failing_extension_fix_keeps_its_status(
-    fix_branches: FixBranches, capfd: pytest.CaptureFixture[str]
+    fix_branches: FixBranches,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The extension's own pass fails: its status."""
-    status, out, _err = fix_branches.call("fix", STUB_EXT_STATUS="9", capfd=capfd)
+    fix_branches.enter(monkeypatch, STUB_EXT_STATUS="9")
+    status = rust_lint.main(["fix"])
+    out = capfd.readouterr().out
     assert status == 9
     assert "ext(pg17)" not in out
 
 
 def test_a_failing_union_keeps_its_status(
-    fix_branches: FixBranches, capfd: pytest.CaptureFixture[str]
+    fix_branches: FixBranches, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The majors cannot be derived: no pass runs."""
     fix_branches.belt.joinpath("pgrx-env.sh").write_text(
         STUB_PGRX_ENV + "org_pgrx_union() { return 4; }\n", encoding="utf-8"
     )
-    status, _out, _err = fix_branches.call("fix", capfd=capfd)
+    fix_branches.enter(monkeypatch)
+    status = rust_lint.main(["fix"])
     assert status == 4
     assert "--fix" not in "\n".join(fix_branches.logged())
 
 
 def test_a_failing_highest_keeps_its_status(
-    fix_branches: FixBranches, capfd: pytest.CaptureFixture[str]
+    fix_branches: FixBranches, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Each extension's major cannot be derived: no pass runs."""
     fix_branches.belt.joinpath("pgrx-env.sh").write_text(
         STUB_PGRX_ENV + "org_pgrx_highest() { return 2; }\n", encoding="utf-8"
     )
-    status, _out, _err = fix_branches.call("fix", capfd=capfd)
+    fix_branches.enter(monkeypatch)
+    status = rust_lint.main(["fix"])
     assert status == 2
     assert "--fix" not in "\n".join(fix_branches.logged())
 
@@ -1364,10 +1519,14 @@ def every_workspace(
 
 
 def test_each_root_is_formatted_and_linted(
-    every_workspace: EveryWorkspace, capfd: pytest.CaptureFixture[str]
+    every_workspace: EveryWorkspace,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """An fmt and a clippy call for each root, one population line each."""
-    status, out, err = every_workspace.call("lint", capfd=capfd)
+    every_workspace.enter(monkeypatch)
+    status = rust_lint.main(["lint"])
+    out, err = capfd.readouterr()
     assert status == 0, err
     fmt = every_workspace.asked("fmt")
     assert len(fmt) == 2
@@ -1381,45 +1540,62 @@ def test_each_root_is_formatted_and_linted(
 
 
 def test_an_unformatted_fuzz_root_is_red(
-    every_workspace: EveryWorkspace, capfd: pytest.CaptureFixture[str]
+    every_workspace: EveryWorkspace,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A format check refused for fuzz/Cargo.toml only: red, naming it."""
-    done = every_workspace.call("lint", STUB_FMT_RED="fuzz/Cargo.toml", capfd=capfd)
-    every_workspace.assert_finding(
-        done,
-        1,
-        "fuzz/Cargo.toml: formatting differs from the org's — run 'mise run fix:rust'",
+    every_workspace.enter(monkeypatch, STUB_FMT_RED="fuzz/Cargo.toml")
+    status = rust_lint.main(["lint"])
+    out, err = capfd.readouterr()
+    assert status == 1, out + err
+    assert (
+        every_workspace.finding(
+            "fuzz/Cargo.toml: formatting differs from the org's — run 'mise run fix:rust'"
+        )
+        in err
     )
-    _status, out, _err = done
     assert "lint:rust: Cargo.toml: 2 crate(s) linted: a b\n" in out
 
 
 def test_a_red_fuzz_crate_leaves_the_root_linted(
-    every_workspace: EveryWorkspace, capfd: pytest.CaptureFixture[str]
+    every_workspace: EveryWorkspace,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Clippy refuses `parse` only: red names it, a and b were asked."""
-    done = every_workspace.call("lint", STUB_RED="parse", capfd=capfd)
-    every_workspace.assert_finding(done, 101, "red: parse (fuzz/Cargo.toml)")
+    every_workspace.enter(monkeypatch, STUB_RED="parse")
+    status = rust_lint.main(["lint"])
+    out, err = capfd.readouterr()
+    assert status == 101, out + err
+    assert every_workspace.finding("red: parse (fuzz/Cargo.toml)") in err
     clippy = [line.split()[3] for line in every_workspace.asked("clippy")]
     assert clippy == EVERY_CRATE
 
 
 def test_a_root_outside_the_tree_is_red(
-    every_workspace: EveryWorkspace, capfd: pytest.CaptureFixture[str]
+    every_workspace: EveryWorkspace,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """locate-project names a workspace above the checkout: red, exact."""
-    done = every_workspace.call(
-        "lint", STUB_FUZZ_ROOT="/elsewhere/Cargo.toml", capfd=capfd
-    )
-    every_workspace.assert_finding(done, 1, OUTSIDE, OUTSIDE_REMEDY)
+    every_workspace.enter(monkeypatch, STUB_FUZZ_ROOT="/elsewhere/Cargo.toml")
+    status = rust_lint.main(["lint"])
+    out, err = capfd.readouterr()
+    assert status == 1, out + err
+    assert every_workspace.finding(OUTSIDE, OUTSIDE_REMEDY) in err
     assert every_workspace.asked("clippy") == NOT_ASKED
 
 
 def test_a_failing_locate_project_says_cargos_words(
-    every_workspace: EveryWorkspace, capfd: pytest.CaptureFixture[str]
+    every_workspace: EveryWorkspace,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """locate-project exits nonzero: cargo's own text is in the output."""
-    status, _out, err = every_workspace.call("lint", STUB_LOCATE_FAILS="1", capfd=capfd)
+    every_workspace.enter(monkeypatch, STUB_LOCATE_FAILS="1")
+    status = rust_lint.main(["lint"])
+    err = capfd.readouterr().err
     assert status == 1
     assert "error: planted: Cargo.toml could not be read" in err
     assert every_workspace.asked("clippy") == NOT_ASKED
@@ -1438,41 +1614,54 @@ def test_git_failing_to_name_the_tree_is_red(
     )
     git.chmod(0o755)
     monkeypatch.setattr(rust_workspaces, "GIT", str(git))
-    done = every_workspace.call("lint", capfd=capfd)
-    every_workspace.assert_finding(
-        done, 1, "git could not name the tree", "fatal: planted"
+    every_workspace.enter(monkeypatch)
+    status = rust_lint.main(["lint"])
+    out, err = capfd.readouterr()
+    assert status == 1, out + err
+    assert (
+        every_workspace.finding("git could not name the tree", "fatal: planted") in err
     )
     assert every_workspace.asked("clippy") == NOT_ASKED
 
 
 def test_a_marked_fuzz_root_is_linted_with_cfg_fuzzing(
-    every_workspace: EveryWorkspace, capfd: pytest.CaptureFixture[str]
+    every_workspace: EveryWorkspace,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The cargo-fuzz marker: its clippy has the cfg, the root's has not."""
     every_workspace.plant(MARKED)
-    status, _out, err = every_workspace.call("lint", capfd=capfd)
+    every_workspace.enter(monkeypatch)
+    status = rust_lint.main(["lint"])
+    err = capfd.readouterr().err
     assert status == 0, err
     assert every_workspace.flags() == FUZZING
     assert "RUSTFLAGS" not in os.environ
 
 
 def test_a_fuzz_directory_without_the_marker_gets_no_cfg(
-    every_workspace: EveryWorkspace, capfd: pytest.CaptureFixture[str]
+    every_workspace: EveryWorkspace,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """fuzz/Cargo.toml with no marker: no call is given the cfg."""
-    status, _out, err = every_workspace.call("lint", capfd=capfd)
+    every_workspace.enter(monkeypatch)
+    status = rust_lint.main(["lint"])
+    err = capfd.readouterr().err
     assert status == 0, err
     assert every_workspace.flags() == UNMARKED
 
 
 def test_a_marked_root_keeps_the_rustflags_it_had(
-    every_workspace: EveryWorkspace, capfd: pytest.CaptureFixture[str]
+    every_workspace: EveryWorkspace,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """RUSTFLAGS=-Dwarnings set: the marked root's has the cfg appended."""
     every_workspace.plant(MARKED)
-    status, _out, err = every_workspace.call(
-        "lint", RUSTFLAGS="-Dwarnings", capfd=capfd
-    )
+    every_workspace.enter(monkeypatch, RUSTFLAGS="-Dwarnings")
+    status = rust_lint.main(["lint"])
+    err = capfd.readouterr().err
     assert status == 0, err
     want = [
         "Cargo.toml -Dwarnings",
@@ -1483,12 +1672,16 @@ def test_a_marked_root_keeps_the_rustflags_it_had(
 
 
 def test_fix_rust_fixes_a_marked_root_with_cfg_fuzzing(
-    every_workspace: EveryWorkspace, capfd: pytest.CaptureFixture[str]
+    every_workspace: EveryWorkspace,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """fix:rust: the marked root's clippy --fix has the cfg, the root's not."""
     (every_workspace.bins / "cargo").write_text(FIX_CARGO, encoding="utf-8")
     every_workspace.plant(MARKED)
-    status, _out, err = every_workspace.call("fix", capfd=capfd)
+    every_workspace.enter(monkeypatch)
+    status = rust_lint.main(["fix"])
+    err = capfd.readouterr().err
     assert status == 0, err
     seen = every_workspace.flags()
     fixed: list[str] = [line for line in seen if line.startswith("fuzz/")]
@@ -1498,11 +1691,15 @@ def test_fix_rust_fixes_a_marked_root_with_cfg_fuzzing(
 
 
 def test_fix_rust_formats_and_fixes_each_root(
-    every_workspace: EveryWorkspace, capfd: pytest.CaptureFixture[str]
+    every_workspace: EveryWorkspace,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """fix:rust: cargo fmt and clippy --fix for both roots."""
     (every_workspace.bins / "cargo").write_text(FIX_CARGO, encoding="utf-8")
-    status, out, err = every_workspace.call("fix", capfd=capfd)
+    every_workspace.enter(monkeypatch)
+    status = rust_lint.main(["fix"])
+    out, err = capfd.readouterr()
     assert status == 0, err
     fmt = every_workspace.asked("fmt")
     assert len(fmt) == 2

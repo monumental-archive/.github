@@ -151,28 +151,16 @@ class Planted:
         """Track every file the tree holds, as the derivation reads them."""
         subprocess.run([GIT, "add", "."], cwd=self.tree, env=self.env, check=True)
 
-    def call(
-        self, *argv: str, capfd: pytest.CaptureFixture[str], **stub: str
-    ) -> tuple[int, str, str]:
-        """Call pg_clippy.py's main in the tree, from the planted belt.
+    def enter(self, monkeypatch: pytest.MonkeyPatch, **stub: str) -> None:
+        """Stand in the tree from the planted belt, the row's stubs set.
 
-        Returns:
-            Its status and what it wrote.
-
+        The derivation resolves cargo when it is imported; here, the
+        stub on the row's PATH is the cargo it asks.
         """
-        # The derivation resolves cargo when it is imported; here, the
-        # stub on the row's PATH is the cargo it asks.
-        with pytest.MonkeyPatch.context() as patched:
-            patched.setattr(rust_workspaces, "CARGO", str(self.bins / "cargo"))
-            with pytest.MonkeyPatch.context() as patched:
-                for name, value in (
-                    self.env | {"ORG_BELT_DIR": str(self.belt)} | stub
-                ).items():
-                    patched.setenv(name, value)
-                patched.chdir(self.tree)
-                status = pg_clippy.main(list(argv))
-            out, err = capfd.readouterr()
-            return status, out, err
+        monkeypatch.setattr(rust_workspaces, "CARGO", str(self.bins / "cargo"))
+        for name, value in (self.env | {"ORG_BELT_DIR": str(self.belt)} | stub).items():
+            monkeypatch.setenv(name, value)
+        monkeypatch.chdir(self.tree)
 
     def logged(self) -> list[str]:
         """Read what the stubs were asked.
@@ -202,62 +190,86 @@ def planted_state(
     return Planted(tmp_path, monkeypatch, belt=belt, env=env)
 
 
-def assert_finding(called: tuple[int, str, str], status: int, *lines: str) -> None:
-    """Assert the status, and the finding's lines in order on stderr."""
-    code, out, err = called
-    assert status == code, out + err
+def finding(*lines: str) -> str:
+    """Say a finding as the task writes it to stderr.
+
+    Returns:
+        Its head line, then each detail line indented.
+
+    """
     head, *detail = lines
-    want = f"{TASK}: {head}\n" + "".join(f"  {line}\n" for line in detail)
-    assert want in err
+    return f"{TASK}: {head}\n" + "".join(f"  {line}\n" for line in detail)
 
 
 def test_an_argument_is_a_usage_error(
-    planted_state: Planted, capfd: pytest.CaptureFixture[str]
+    planted_state: Planted,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The task passes none; anything else is a caller's mistake."""
-    done = planted_state.call("lint", capfd=capfd)
-    assert_finding(done, 2, "usage: belt pg-clippy")
+    planted_state.enter(monkeypatch)
+    status = pg_clippy.main(["lint"])
+    out, err = capfd.readouterr()
+    assert status == 2, out + err
+    assert finding("usage: belt pg-clippy") in err
     planted_state.assert_logged()
 
 
 def test_cargo_missing_is_red(
-    planted_state: Planted, capfd: pytest.CaptureFixture[str]
+    planted_state: Planted,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """No cargo on PATH: the toolchain is broken, never a skip."""
     (planted_state.bins / "cargo").unlink()
-    done = planted_state.call(capfd=capfd)
-    assert_finding(
-        done, 1, "Cargo.toml present but cargo missing — pin rust in mise.toml"
+    planted_state.enter(monkeypatch)
+    status = pg_clippy.main([])
+    out, err = capfd.readouterr()
+    assert status == 1, out + err
+    assert (
+        finding("Cargo.toml present but cargo missing — pin rust in mise.toml") in err
     )
     planted_state.assert_logged()
 
 
 def test_a_red_fetch_keeps_its_status(
-    planted_state: Planted, capfd: pytest.CaptureFixture[str]
+    planted_state: Planted,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """`cargo fetch --locked` fails: nothing is derived after it."""
-    status, out, _err = planted_state.call(STUB_FETCH_STATUS="7", capfd=capfd)
+    planted_state.enter(monkeypatch, STUB_FETCH_STATUS="7")
+    status = pg_clippy.main([])
+    out = capfd.readouterr().out
     assert status == 7
     planted_state.assert_logged(FETCH)
     assert out == ""
 
 
 def test_a_red_metadata_is_never_a_workspace_with_no_extension(
-    planted_state: Planted, capfd: pytest.CaptureFixture[str]
+    planted_state: Planted,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A failing cargo metadata gives its status, not the skip."""
-    status, out, _err = planted_state.call(STUB_METADATA_STATUS="4", capfd=capfd)
+    planted_state.enter(monkeypatch, STUB_METADATA_STATUS="4")
+    status = pg_clippy.main([])
+    out = capfd.readouterr().out
     assert status == 4
     planted_state.assert_logged(FETCH, METADATA)
     assert "skipped" not in out
 
 
 def test_a_red_surface_is_never_a_workspace_with_no_extension(
-    planted_state: Planted, capfd: pytest.CaptureFixture[str]
+    planted_state: Planted,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """gate_surface.py refuses the metadata: its status, not the skip."""
     planted_state.metadata.write_text("not json", encoding="utf-8")
-    status, out, err = planted_state.call(capfd=capfd)
+    planted_state.enter(monkeypatch)
+    status = pg_clippy.main([])
+    out, err = capfd.readouterr()
     assert status == 1
     assert err.startswith("lint:pg-clippy: cargo metadata did not give JSON\n"), err
     planted_state.assert_logged(FETCH, METADATA)
@@ -265,10 +277,14 @@ def test_a_red_surface_is_never_a_workspace_with_no_extension(
 
 
 def test_a_major_that_is_not_a_number_is_red(
-    planted_state: Planted, capfd: pytest.CaptureFixture[str]
+    planted_state: Planted,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """pgrx-env.sh's union refuses it by name (#1795)."""
-    status, out, err = planted_state.call(STUB_BAD_MAJOR="1", capfd=capfd)
+    planted_state.enter(monkeypatch, STUB_BAD_MAJOR="1")
+    status = pg_clippy.main([])
+    out, err = capfd.readouterr()
     assert status == 1
     assert err == "lint:pg-clippy: ext@0.1.0 names no Postgres major: 'pg17'\n"
     planted_state.assert_logged(FETCH, METADATA)
@@ -276,64 +292,81 @@ def test_a_major_that_is_not_a_number_is_red(
 
 
 def test_no_extension_skips_clean(
-    planted_state: Planted, capfd: pytest.CaptureFixture[str]
+    planted_state: Planted,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A workspace of plain crates has nothing for this task."""
     planted_state.metadata.write_text(
         planted.workspace(planted.member("a")), encoding="utf-8"
     )
-    status, out, err = planted_state.call(capfd=capfd)
+    planted_state.enter(monkeypatch)
+    status = pg_clippy.main([])
+    out, err = capfd.readouterr()
     assert status == 0, err
     assert out == "lint:pg-clippy: no pgrx extension tracked, skipped\n"
     planted_state.assert_logged(FETCH, METADATA)
 
 
 def test_clippy_missing_is_red(
-    planted_state: Planted, capfd: pytest.CaptureFixture[str]
+    planted_state: Planted,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A rustup that lists no clippy: the remedy names the pin."""
-    done = planted_state.call(STUB_COMPONENTS="rustfmt-host\\n", capfd=capfd)
-    assert_finding(
-        done,
-        1,
-        "clippy component missing — declare it with the rust pin in mise.toml:",
-        'rust = { version = "1.xx.x", components = "clippy,rustfmt,llvm-tools" }',
+    planted_state.enter(monkeypatch, STUB_COMPONENTS="rustfmt-host\\n")
+    status = pg_clippy.main([])
+    out, err = capfd.readouterr()
+    assert status == 1, out + err
+    assert (
+        finding(
+            "clippy component missing — declare it with the rust pin in mise.toml:",
+            'rust = { version = "1.xx.x", components = "clippy,rustfmt,llvm-tools" }',
+        )
+        in err
     )
     planted_state.assert_logged(FETCH, METADATA)
 
 
 def test_a_red_ladder_keeps_its_status(
-    planted_state: Planted, capfd: pytest.CaptureFixture[str]
+    planted_state: Planted, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """clippy-ladder.sh fails: nothing is registered or linted."""
-    status, _out, _err = planted_state.call(STUB_LADDER_FAILS="1", capfd=capfd)
+    planted_state.enter(monkeypatch, STUB_LADDER_FAILS="1")
+    status = pg_clippy.main([])
     assert status == 3
     planted_state.assert_logged(FETCH, METADATA)
 
 
 def test_a_red_prepare_keeps_its_status(
-    planted_state: Planted, capfd: pytest.CaptureFixture[str]
+    planted_state: Planted, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The SDK or an ICU check fails: nothing is linted (#1774)."""
-    status, _out, _err = planted_state.call(STUB_PREPARE_FAILS="1", capfd=capfd)
+    planted_state.enter(monkeypatch, STUB_PREPARE_FAILS="1")
+    status = pg_clippy.main([])
     assert status == 5
     planted_state.assert_logged(FETCH, METADATA, "prepare 17")
 
 
 def test_a_missing_postgres_pin_keeps_its_status(
-    planted_state: Planted, capfd: pytest.CaptureFixture[str]
+    planted_state: Planted, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """pgrx_postgres.py reds a declared major with no pin (#1940)."""
-    status, _out, _err = planted_state.call(STUB_PIN_STATUS="6", capfd=capfd)
+    planted_state.enter(monkeypatch, STUB_PIN_STATUS="6")
+    status = pg_clippy.main([])
     assert status == 6
     planted_state.assert_logged(FETCH, METADATA, *REGISTER)
 
 
 def test_a_red_extension_keeps_clippys_status(
-    planted_state: Planted, capfd: pytest.CaptureFixture[str]
+    planted_state: Planted,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A refused extension gives cargo's 101, and no summary."""
-    status, out, _err = planted_state.call(STUB_RED="ext", capfd=capfd)
+    planted_state.enter(monkeypatch, STUB_RED="ext")
+    status = pg_clippy.main([])
+    out = capfd.readouterr().out
     assert status == 101
     planted_state.assert_logged(
         FETCH, METADATA, *REGISTER, clippy("ext@0.1.0", planted_state.belt)
@@ -342,14 +375,18 @@ def test_a_red_extension_keeps_clippys_status(
 
 
 def test_a_clean_extension_says_what_was_linted(
-    planted_state: Planted, capfd: pytest.CaptureFixture[str]
+    planted_state: Planted,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """At its highest major, with the canon's clippy.toml, under the ladder.
 
     `other` is excluded by CLIPPY_EXCLUDE and not linted; `a` is no
     extension.
     """
-    status, out, err = planted_state.call(capfd=capfd)
+    planted_state.enter(monkeypatch)
+    status = pg_clippy.main([])
+    out, err = capfd.readouterr()
     assert status == 0, err
     planted_state.assert_logged(
         FETCH, METADATA, *REGISTER, clippy("ext@0.1.0", planted_state.belt)
@@ -390,7 +427,9 @@ def test_the_manifest_path_reaches_every_cargo_command(
 
 
 def test_an_extension_in_a_second_root_is_linted_there(
-    planted_state: Planted, capfd: pytest.CaptureFixture[str]
+    planted_state: Planted,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A pgrx extension in fuzz/Cargo.toml, its own root: linted at it.
 
@@ -408,7 +447,9 @@ def test_an_extension_in_a_second_root_is_linted_there(
         "[workspace]\n", encoding="utf-8"
     )
     planted_state.track()
-    status, out, err = planted_state.call(capfd=capfd)
+    planted_state.enter(monkeypatch)
+    status = pg_clippy.main([])
+    out, err = capfd.readouterr()
     assert status == 0, err
     fuzz = "--manifest-path fuzz/Cargo.toml"
     planted_state.assert_logged(

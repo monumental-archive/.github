@@ -26,7 +26,7 @@ from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    pass
 
 BELT = support.MISE
 BASH = support.tool("bash")
@@ -124,35 +124,12 @@ class Planted:
             return []
         return self.log.read_text(encoding="utf-8").splitlines()
 
-    def call(
-        self,
-        run: Callable[[], int],
-        capfd: pytest.CaptureFixture[str],
-        cwd: Path | None = None,
-    ) -> tuple[int, str, str]:
-        """Call `run` in the tree (or `cwd`), under the planted environment.
-
-        Returns:
-            The status and both streams.
-
-        """
-        with pytest.MonkeyPatch.context() as patched:
-            patched.setattr(rust_workspaces, "CARGO", str(self.cargo))
-            for name, value in self.env.items():
-                patched.setenv(name, value)
-            patched.chdir(cwd or self.tree)
-            status = run()
-        out, err = capfd.readouterr()
-        return status, out, err
-
-    def main(self, capfd: pytest.CaptureFixture[str]) -> tuple[int, str, str]:
-        """Run the `roots` subcommand in this process, in the tree.
-
-        Returns:
-            The status and both streams.
-
-        """
-        return self.call(lambda: rust_workspaces.main(["roots"]), capfd)
+    def enter(self, monkeypatch: pytest.MonkeyPatch, cwd: Path | None = None) -> None:
+        """Stand in the tree (or `cwd`), under the planted environment."""
+        monkeypatch.setattr(rust_workspaces, "CARGO", str(self.cargo))
+        for name, value in self.env.items():
+            monkeypatch.setenv(name, value)
+        monkeypatch.chdir(cwd or self.tree)
 
     def read(self, shell: str) -> subprocess.CompletedProcess[str]:
         """Run `org_rust_workspace_roots` and print what it filled.
@@ -184,11 +161,16 @@ class Planted:
 
 # roots(): the distinct workspaces, the top one first.
 def test_two_roots_top_first_vendor_never_asked(
-    tmp_path: Path, capfd: pytest.CaptureFixture[str], env: support.Env
+    tmp_path: Path,
+    capfd: pytest.CaptureFixture[str],
+    env: support.Env,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Cargo.toml, then fuzz/Cargo.toml; the member folds into the top."""
     planted = Planted(tmp_path, env=env)
-    status, out, err = planted.main(capfd)
+    planted.enter(monkeypatch)
+    status = rust_workspaces.main(["roots"])
+    out, err = capfd.readouterr()
     assert (status, err) == (0, "")
     assert out == "Cargo.toml\0fuzz/Cargo.toml\0"
     asked: list[str] = sorted(planted.asked())
@@ -205,64 +187,77 @@ def test_a_tree_with_no_top_manifest_lists_the_rest_sorted() -> None:
 
 
 def test_a_root_outside_the_tree_is_red_by_name(
-    tmp_path: Path, capfd: pytest.CaptureFixture[str], env: support.Env
+    tmp_path: Path,
+    capfd: pytest.CaptureFixture[str],
+    env: support.Env,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """fuzz/Cargo.toml resolved outside: the message and remedy, exact."""
     planted = Planted(tmp_path / "outside", "outside", env=env)
-    status, out, err = planted.main(capfd)
+    planted.enter(monkeypatch)
+    status = rust_workspaces.main(["roots"])
+    out, err = capfd.readouterr()
     assert (status, out) == (1, "")
     want = OUTSIDE_MESSAGE.format(root=planted.outside / "Cargo.toml")
     assert want == err
 
 
 def test_a_failing_locate_project_carries_cargos_text(
-    tmp_path: Path, capfd: pytest.CaptureFixture[str], env: support.Env
+    tmp_path: Path,
+    capfd: pytest.CaptureFixture[str],
+    env: support.Env,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Cargo exits 101: its own words, and every other manifest still asked."""
     planted = Planted(tmp_path, "fail", env=env)
-    status, out, err = planted.main(capfd)
+    planted.enter(monkeypatch)
+    status = rust_workspaces.main(["roots"])
+    out, err = capfd.readouterr()
     assert (status, out) == (1, "")
     assert err == FAILED_MESSAGE
     assert len(planted.asked()) == 3
 
 
 def test_git_failing_is_red_with_gits_words(
-    tmp_path: Path, capfd: pytest.CaptureFixture[str], env: support.Env
+    tmp_path: Path,
+    capfd: pytest.CaptureFixture[str],
+    env: support.Env,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Outside a repository: git's error, never an empty list."""
     planted = Planted(tmp_path, env=env)
     outside = planted.base / "plain"
     outside.mkdir()
-    status, out, err = planted.call(
-        lambda: rust_workspaces.main(["roots"]), capfd, outside
-    )
+    planted.enter(monkeypatch, outside)
+    status = rust_workspaces.main(["roots"])
+    out, err = capfd.readouterr()
     assert (status, out) == (1, "")
     assert "lint:rust: git could not name the tree\n" in err
     assert "not a git repository" in err
 
 
 def test_resolved_is_the_roots_or_none_having_said_why(
-    tmp_path: Path, capfd: pytest.CaptureFixture[str], env: support.Env
+    tmp_path: Path,
+    capfd: pytest.CaptureFixture[str],
+    env: support.Env,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The roots; None on an unresolved manifest; None on git, said."""
     planted = Planted(tmp_path, env=env)
     roots: list[str] = ["Cargo.toml", "fuzz/Cargo.toml"]
-    status, out, err = planted.call(
-        lambda: 0 if rust_workspaces.resolved() == roots else 3, capfd
-    )
-    assert (status, err) == (0, "")
+    planted.enter(monkeypatch)
+    assert rust_workspaces.resolved() == roots
+    assert not capfd.readouterr().err
     refused = Planted(tmp_path / "outside", "outside", env=env)
-    status, out, err = refused.call(
-        lambda: 0 if rust_workspaces.resolved() is None else 3, capfd
-    )
-    assert status == 0
+    refused.enter(monkeypatch)
+    assert rust_workspaces.resolved() is None
+    err = capfd.readouterr().err
     assert "belongs to a workspace outside this tree" in err
     outside = planted.base / "plain"
     outside.mkdir()
-    status, _out, err = planted.call(
-        lambda: 0 if rust_workspaces.resolved() is None else 3, capfd, outside
-    )
-    assert status == 0
+    planted.enter(monkeypatch, outside)
+    assert rust_workspaces.resolved() is None
+    err = capfd.readouterr().err
     assert "lint:rust: git could not name the tree\n" in err
 
 

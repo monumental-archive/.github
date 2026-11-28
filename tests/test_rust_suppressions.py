@@ -8,7 +8,6 @@ shape that is or is not a lint table.
 """
 
 import io
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -178,63 +177,73 @@ def test_a_group_suppression_is_found_on_its_own_line() -> None:
 
 
 # The command: paths on stdin, findings and remedy on stderr.
-def run_helper(
-    root: Path, names: str, capfd: pytest.CaptureFixture[str]
-) -> subprocess.CompletedProcess[str]:
-    """Run the helper in `root` with `names` on stdin, in process.
+@fixture
+def listed(monkeypatch: pytest.MonkeyPatch) -> Callable[[Path, str], None]:
+    """Stand each row in a tree as the task does, the files named on stdin.
 
     Returns:
-        Its status and what it wrote, as a finished process's.
+        A function that steps into `root` with `names` on stdin.
 
     """
-    with pytest.MonkeyPatch.context() as patched:
-        patched.setenv("MISE_TASK_NAME", TASK)
-        patched.chdir(root)
-        patched.setattr(sys, "stdin", io.StringIO(names))
-        status = rsup.main([])
-    out, err = capfd.readouterr()
-    return subprocess.CompletedProcess([], status, out, err)
+
+    def stand(root: Path, names: str) -> None:
+        monkeypatch.setenv("MISE_TASK_NAME", TASK)
+        monkeypatch.chdir(root)
+        monkeypatch.setattr(sys, "stdin", io.StringIO(names))
+
+    return stand
 
 
 def test_findings_name_each_file_and_the_remedy(
-    capfd: pytest.CaptureFixture[str],
+    capfd: pytest.CaptureFixture[str], listed: Callable[[Path, str], None]
 ) -> None:
     """Both kinds reported together; exit 1."""
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         (root / "Cargo.toml").write_text('[lints.rust]\nx = "allow"\n')
         (root / "lib.rs").write_text("\n#![allow(y)]\n")
-        done = run_helper(root, "Cargo.toml\0\0lib.rs\0gone.rs\0", capfd)
-    assert done.returncode == 1
-    assert done.stdout == ""
+        listed(root, "Cargo.toml\0\0lib.rs\0gone.rs\0")
+        status = rsup.main([])
+        out, err = capfd.readouterr()
+    assert status == 1
+    assert out == ""
     assert (
         "lint:rust: suppression clippy's allow_attributes cannot see:\n"
         '  Cargo.toml: [lints.rust] x = "allow"\n'
         "  lib.rs:2: #![allow(y)]\n" + "".join(f"{line}\n" for line in rsup.REMEDY)
-    ) == done.stderr
+    ) == err
 
 
-def test_clean_input_prints_nothing(capfd: pytest.CaptureFixture[str]) -> None:
+def test_clean_input_prints_nothing(
+    capfd: pytest.CaptureFixture[str], listed: Callable[[Path, str], None]
+) -> None:
     """No finding: exit 0, silent."""
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         (root / "lib.rs").write_text('#![expect(y, reason = "z")]\n')
-        done = run_helper(root, "lib.rs\0", capfd)
-    assert (done.returncode, done.stdout, done.stderr) == (0, "", "")
+        listed(root, "lib.rs\0")
+        status = rsup.main([])
+        out, err = capfd.readouterr()
+    assert (status, out, err) == (0, "", "")
 
 
 @pytest.mark.parametrize(
     ("name", "raw"), [("Cargo.toml", b"[lints\n"), ("lib.rs", b"\xff\n")]
 )
 def test_undecodable_files_are_refused_by_name(
-    name: str, raw: bytes, capfd: pytest.CaptureFixture[str]
+    name: str,
+    raw: bytes,
+    capfd: pytest.CaptureFixture[str],
+    listed: Callable[[Path, str], None],
 ) -> None:
     """A manifest that is not TOML, a source that is not UTF-8."""
     with tempfile.TemporaryDirectory() as tmp:
         (Path(tmp) / name).write_bytes(raw)
-        done = run_helper(Path(tmp), f"{name}\0", capfd)
-        assert done.returncode == 1
-        assert done.stderr.startswith(f"lint:rust: {name}: ")
+        listed(Path(tmp), f"{name}\0")
+        status = rsup.main([])
+        out, err = capfd.readouterr()
+        assert status == 1
+        assert err.startswith(f"lint:rust: {name}: ")
 
 
 def test_main_in_process(capfd: pytest.CaptureFixture[str]) -> None:

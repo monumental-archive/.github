@@ -217,45 +217,32 @@ class Planted:
         self.surface.write_text(surface, encoding="utf-8")
         self.plan.write_text(plan, encoding="utf-8")
 
-    def call(
+    def enter(
         self,
-        manifest: str | None = None,
+        monkeypatch: pytest.MonkeyPatch,
         roots: tuple[str, ...] | None = ("Cargo.toml",),
-    ) -> tuple[int, list[str], list[str]]:
-        """Run the helper in this process, as the task does.
+    ) -> None:
+        """Stand in the tree as the task runs the helper in this process.
 
-        `manifest` set runs `workspace` alone, at that manifest, with
-        the count line main would print. `roots` is what
-        rust_workspaces.resolved answers, None for a tree it refused: the
-        root manifest alone unless a row says otherwise
-        (mise/test_msrv_roots.py runs the real one).
-
-        Returns:
-            The status, and the stdout and stderr lines.
-
+        `roots` is what rust_workspaces.resolved answers, None for a tree
+        it refused: the root manifest alone unless a row says otherwise
+        (mise/test_msrv_roots.py runs the real one). What planting printed
+        is dropped, so the row reads only what the helper says.
         """
         self.capfd.readouterr()
-        with pytest.MonkeyPatch.context() as patched:
-            patched.chdir(self.tree)
-            for name in list(os.environ):
-                patched.delenv(name)
-            for name, value in self.env.items():
-                patched.setenv(name, value)
-            patched.setattr(gate_surface, "main", stand_in("gate-surface"))
-            patched.setattr(msrv_plan, "main", stand_in("msrv-plan"))
-            patched.setattr(pgrx_postgres, "main", stand_in("pgrx-postgres"))
-            patched.setattr(
-                rust_workspaces,
-                "resolved",
-                lambda *_args, **_kwargs: None if roots is None else list(roots),
-            )
-            if manifest is None:
-                status = msrv_lint.main([])
-            else:
-                status, checked = msrv_lint.workspace(manifest, self.tmp / "pins")
-                msrv_lint.say(f"{checked} checked")
-        out, err = self.capfd.readouterr()
-        return status, out.splitlines(), err.splitlines()
+        monkeypatch.chdir(self.tree)
+        for name in list(os.environ):
+            monkeypatch.delenv(name)
+        for name, value in self.env.items():
+            monkeypatch.setenv(name, value)
+        monkeypatch.setattr(gate_surface, "main", stand_in("gate-surface"))
+        monkeypatch.setattr(msrv_plan, "main", stand_in("msrv-plan"))
+        monkeypatch.setattr(pgrx_postgres, "main", stand_in("pgrx-postgres"))
+        monkeypatch.setattr(
+            rust_workspaces,
+            "resolved",
+            lambda *_args, **_kwargs: None if roots is None else list(roots),
+        )
 
     def logged(self) -> list[str]:
         """Read the stubs' log, the scratch directory masked.
@@ -294,9 +281,14 @@ def planned(pgrx: str = "") -> list[str]:
     return [PINS, FETCH, METADATA, f"belt gate-surface --exclude  {META}", plan]
 
 
-def test_one_group_compiles_at_its_toolchain_and_is_counted(planted: Planted) -> None:
+def test_one_group_compiles_at_its_toolchain_and_is_counted(
+    planted: Planted, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """A plain group: one `-p` per spec, the gate's features, the count."""
-    status, said, err = planted.call()
+    planted.enter(monkeypatch)
+    status = msrv_lint.main([])
+    captured = capfd.readouterr()
+    said, err = captured.out.splitlines(), captured.err.splitlines()
     assert (status, err) == (0, NONE)
     check = f"cargo check --locked {ROOT} --all-features -p plain@0.1.0 -p other@0.1.0"
     assert lines(*planned(), f"{check} {{1.85.0}}") == planted.logged()
@@ -307,10 +299,13 @@ def test_one_group_compiles_at_its_toolchain_and_is_counted(planted: Planted) ->
     assert want == said
 
 
-def test_the_gates_features_are_clippy_features(planted: Planted) -> None:
+def test_the_gates_features_are_clippy_features(
+    planted: Planted, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """CLIPPY_FEATURES and CLIPPY_EXCLUDE reach every step that reads them."""
     planted.env |= {"CLIPPY_FEATURES": "--features a", "CLIPPY_EXCLUDE": "gone"}
-    status, _, _ = planted.call()
+    planted.enter(monkeypatch)
+    status = msrv_lint.main([])
     assert status == 0
     logged = planted.logged()
     assert (
@@ -322,10 +317,15 @@ def test_the_gates_features_are_clippy_features(planted: Planted) -> None:
     assert f"{check} {{1.85.0}}" == logged[5]
 
 
-def test_a_note_is_said_and_nothing_verified_says_so(planted: Planted) -> None:
+def test_a_note_is_said_and_nothing_verified_says_so(
+    planted: Planted, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """Every minimum excluded: the note, then both lines, and green."""
     planted.plant(PLAIN, NOTE)
-    status, said, err = planted.call()
+    planted.enter(monkeypatch)
+    status = msrv_lint.main([])
+    captured = capfd.readouterr()
+    said, err = captured.out.splitlines(), captured.err.splitlines()
     assert (status, err) == (0, NONE)
     assert planned() == planted.logged()
     want = [
@@ -336,10 +336,15 @@ def test_a_note_is_said_and_nothing_verified_says_so(planted: Planted) -> None:
     assert want == said
 
 
-def test_an_extension_is_registered_and_compiled_at_its_major(planted: Planted) -> None:
+def test_an_extension_is_registered_and_compiled_at_its_major(
+    planted: Planted, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """Its own flags in place of the gate's, prepared, at its major."""
     planted.plant(PLAIN + EXTENSION, CHECK + PG_CHECK)
-    status, said, err = planted.call()
+    planted.enter(monkeypatch)
+    status = msrv_lint.main([])
+    captured = capfd.readouterr()
+    said, err = captured.out.splitlines(), captured.err.splitlines()
     assert (status, err) == (0, NONE)
     own = (
         f"cargo check --locked {ROOT} --no-default-features --features pg17"
@@ -366,21 +371,27 @@ def test_an_extension_is_registered_and_compiled_at_its_major(planted: Planted) 
 
 
 def test_an_extension_the_plan_never_compiles_registers_nothing(
-    planted: Planted,
+    planted: Planted, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """An extension on the surface but no pg check in the plan: no prepare."""
     planted.plant(PLAIN + EXTENSION, CHECK)
-    status, _, _ = planted.call()
+    planted.enter(monkeypatch)
+    status = msrv_lint.main([])
     assert status == 0
     assert "prepare 17" not in planted.logged()
     assert len(planted.logged()) == 6
 
 
-def test_a_red_compile_says_the_rule_and_keeps_cargos_status(planted: Planted) -> None:
+def test_a_red_compile_says_the_rule_and_keeps_cargos_status(
+    planted: Planted, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """msrv_plan.py --failed for the group, cargo's 101, and nothing after."""
     planted.plant(PLAIN, CHECK + CHECK)
     planted.env["PLANT_FAIL"] = "cargo-check"
-    status, said, err = planted.call()
+    planted.enter(monkeypatch)
+    status = msrv_lint.main([])
+    captured = capfd.readouterr()
+    said, err = captured.out.splitlines(), captured.err.splitlines()
     assert status == 101
     failed = (
         "belt msrv-plan --failed 1.85.0 plain@0.1.0 other@0.1.0 --root Cargo.toml <>"
@@ -392,10 +403,15 @@ def test_a_red_compile_says_the_rule_and_keeps_cargos_status(planted: Planted) -
     assert lines("lint:msrv: remedy for 1.85.0") == err
 
 
-def test_an_unreadable_record_is_red_by_its_kind(planted: Planted) -> None:
+def test_an_unreadable_record_is_red_by_its_kind(
+    planted: Planted, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """A kind the plan never writes is a finding, and nothing compiles."""
     planted.plant(PLAIN, "verdict\tx\n" + CHECK)
-    status, said, err = planted.call()
+    planted.enter(monkeypatch)
+    status = msrv_lint.main([])
+    captured = capfd.readouterr()
+    said, err = captured.out.splitlines(), captured.err.splitlines()
     assert (status, said) == (1, NONE)
     unreadable = (
         "lint:msrv: Cargo.toml: unreadable plan record from belt msrv-plan: verdict"
@@ -404,37 +420,53 @@ def test_an_unreadable_record_is_red_by_its_kind(planted: Planted) -> None:
     assert planned() == planted.logged()
 
 
-def test_a_blank_plan_line_is_skipped(planted: Planted) -> None:
+def test_a_blank_plan_line_is_skipped(
+    planted: Planted, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """An empty record is no record, as the body's `read` loop had it."""
     planted.plant(PLAIN, "\n" + CHECK)
-    status, said, _ = planted.call()
+    planted.enter(monkeypatch)
+    status = msrv_lint.main([])
+    said = capfd.readouterr().out.splitlines()
     assert status == 0
     assert len(said) == 2
 
 
-def test_no_cargo_is_red(planted: Planted) -> None:
+def test_no_cargo_is_red(
+    planted: Planted, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """Cargo absent with a Cargo.toml tracked is the vacuous-success failure."""
     (planted.bins / "cargo").unlink()
     planted.env["PATH"] = str(planted.bins)
-    status, said, err = planted.call()
+    planted.enter(monkeypatch)
+    status = msrv_lint.main([])
+    captured = capfd.readouterr()
+    said, err = captured.out.splitlines(), captured.err.splitlines()
     assert (status, said) == (1, NONE)
     missing = "lint:msrv: Cargo.toml present but cargo missing — pin rust in mise.toml"
     assert lines(missing) == err
     assert planted.logged() == NONE
 
 
-def test_no_mise_is_red(planted: Planted) -> None:
+def test_no_mise_is_red(
+    planted: Planted, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """Mise absent: a check that sees no pins would call a repo unpinned."""
     (planted.bins / "mise").unlink()
     planted.env["PATH"] = str(planted.bins)
-    status, said, err = planted.call()
+    planted.enter(monkeypatch)
+    status = msrv_lint.main([])
+    captured = capfd.readouterr()
+    said, err = captured.out.splitlines(), captured.err.splitlines()
     assert (status, said) == (1, NONE)
     missing = "lint:msrv: mise missing — the toolchain pins this reads are mise's"
     assert lines(missing) == err
     assert planted.logged() == NONE
 
 
-def test_each_step_that_fails_stops_the_run_with_its_status(planted: Planted) -> None:
+def test_each_step_that_fails_stops_the_run_with_its_status(
+    planted: Planted, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """The first failure's own status, and no step after it."""
     rows = {
         "mise-rust": (3, 1),
@@ -446,7 +478,9 @@ def test_each_step_that_fails_stops_the_run_with_its_status(planted: Planted) ->
     for step, (code, calls) in rows.items():
         planted.log.write_text("", encoding="utf-8")
         planted.env["PLANT_FAIL"] = step
-        status, said, _ = planted.call()
+        planted.enter(monkeypatch)
+        status = msrv_lint.main([])
+        said = capfd.readouterr().out.splitlines()
         assert (code, NONE) == (status, said)
         assert planned()[:calls] == planted.logged()
 
@@ -464,32 +498,47 @@ def test_each_step_that_fails_stops_the_run_with_its_status(planted: Planted) ->
     ],
 )
 def test_a_failed_registration_stops_before_any_compile(
-    planted: Planted, step: str, code: int, last: str
+    planted: Planted,
+    step: str,
+    code: int,
+    last: str,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
 ) -> None:
     """The prepare's status, or the Postgres check's, and nothing compiled."""
     planted.plant(PLAIN + EXTENSION, PG_CHECK)
     planted.log.write_text("", encoding="utf-8")
     planted.env["PLANT_FAIL"] = step
-    status, said, _ = planted.call()
+    planted.enter(monkeypatch)
+    status = msrv_lint.main([])
+    said = capfd.readouterr().out.splitlines()
     assert (code, NONE) == (status, said)
     assert last == planted.logged()[-1]
 
 
-def test_an_extension_naming_no_major_is_red_before_the_plan(planted: Planted) -> None:
+def test_an_extension_naming_no_major_is_red_before_the_plan(
+    planted: Planted, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """pgrx-env.sh's union refuses it by name; msrv_plan.py never runs."""
     planted.plant("crate\text@0.2.0\tpgrx\tnext\text\n", PG_CHECK)
-    status, said, err = planted.call()
+    planted.enter(monkeypatch)
+    status = msrv_lint.main([])
+    captured = capfd.readouterr()
+    said, err = captured.out.splitlines(), captured.err.splitlines()
     assert (status, said) == (1, NONE)
     refused = "lint:msrv: ext@0.2.0 names no Postgres major: 'next'"
     assert lines(refused) == err
     assert planned()[:4] == planted.logged()
 
 
-def test_a_workspace_manifest_reaches_every_cargo_call(planted: Planted) -> None:
+def test_a_workspace_manifest_reaches_every_cargo_call(
+    planted: Planted, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """`workspace` at a manifest: the fetch, the graph and each compile name it."""
     planted.plant(PLAIN, CHECK)
-    status, said, _ = planted.call("fuzz/Cargo.toml")
-    assert status == 0
+    planted.enter(monkeypatch)
+    status, checked = msrv_lint.workspace("fuzz/Cargo.toml", planted.tmp / "pins")
+    assert (status, checked) == (0, 1)
     at = "--manifest-path fuzz/Cargo.toml"
     logged = planted.logged()
     assert f"cargo fetch --locked {at}" == logged[0]
@@ -498,13 +547,16 @@ def test_a_workspace_manifest_reaches_every_cargo_call(planted: Planted) -> None
     )
     check = f"cargo check --locked {at} --all-features -p plain@0.1.0 -p other@0.1.0"
     assert f"{check} {{1.85.0}}" == logged[-1]
-    assert said[-1] == "lint:msrv: 1 checked"
 
 
-def test_every_root_runs_past_a_red_one(planted: Planted) -> None:
+def test_every_root_runs_past_a_red_one(
+    planted: Planted, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """Two roots, every compile refused: both roots run, the first red kept."""
     planted.env["PLANT_FAIL"] = "cargo-check"
-    status, said, _ = planted.call(roots=("Cargo.toml", "fuzz/Cargo.toml"))
+    planted.enter(monkeypatch, roots=("Cargo.toml", "fuzz/Cargo.toml"))
+    status = msrv_lint.main([])
+    said = capfd.readouterr().out.splitlines()
     assert status == 101
     fetched = [line for line in planted.logged() if line.startswith("cargo fetch")]
     want = [FETCH, "cargo fetch --locked --manifest-path fuzz/Cargo.toml"]
@@ -512,18 +564,26 @@ def test_every_root_runs_past_a_red_one(planted: Planted) -> None:
     assert len(said) == 2
 
 
-def test_the_count_covers_every_root(planted: Planted) -> None:
+def test_the_count_covers_every_root(
+    planted: Planted, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """Two roots of one group each: one count line, of both."""
-    status, said, _ = planted.call(roots=("Cargo.toml", "fuzz/Cargo.toml"))
+    planted.enter(monkeypatch, roots=("Cargo.toml", "fuzz/Cargo.toml"))
+    status = msrv_lint.main([])
+    said = capfd.readouterr().out.splitlines()
     assert status == 0
     count = "lint:msrv: 2 declared minimum(s) compiled at the toolchain they name"
     assert count == said[-1]
     assert len(said) == 3
 
 
-def test_a_tree_whose_roots_cannot_be_named_is_red(planted: Planted) -> None:
+def test_a_tree_whose_roots_cannot_be_named_is_red(
+    planted: Planted, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """rust_workspaces.resolved said why: status 1, and nothing run."""
-    status, said, _ = planted.call(roots=None)
+    planted.enter(monkeypatch, roots=None)
+    status = msrv_lint.main([])
+    said = capfd.readouterr().out.splitlines()
     assert (status, said) == (1, NONE)
     assert planted.logged() == NONE
 
@@ -564,10 +624,13 @@ def compile_at(root: str, flags: str | None) -> str:
     return line if flags is None else f"{line} ({flags})"
 
 
-def test_a_marked_root_is_compiled_with_cfg_fuzzing(fuzzing: Fuzzing) -> None:
+def test_a_marked_root_is_compiled_with_cfg_fuzzing(
+    fuzzing: Fuzzing, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The marker: its compile has the cfg, the root's has no RUSTFLAGS."""
     fuzzing.manifests(MARKED)
-    status, _, _ = fuzzing.call(roots=TWO_ROOTS)
+    fuzzing.enter(monkeypatch, roots=TWO_ROOTS)
+    status = msrv_lint.main([])
     assert status == 0
     want = [
         compile_at("Cargo.toml", None),
@@ -577,9 +640,12 @@ def test_a_marked_root_is_compiled_with_cfg_fuzzing(fuzzing: Fuzzing) -> None:
     assert "RUSTFLAGS" not in os.environ
 
 
-def test_a_fuzz_directory_without_the_marker_gets_no_cfg(fuzzing: Fuzzing) -> None:
+def test_a_fuzz_directory_without_the_marker_gets_no_cfg(
+    fuzzing: Fuzzing, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """fuzz/Cargo.toml with no marker: neither compile has RUSTFLAGS."""
-    status, _, _ = fuzzing.call(roots=TWO_ROOTS)
+    fuzzing.enter(monkeypatch, roots=TWO_ROOTS)
+    status = msrv_lint.main([])
     assert status == 0
     want = [
         compile_at("Cargo.toml", None),
@@ -588,11 +654,14 @@ def test_a_fuzz_directory_without_the_marker_gets_no_cfg(fuzzing: Fuzzing) -> No
     assert want == fuzzing.compiles()
 
 
-def test_a_marked_root_keeps_the_rustflags_it_had(fuzzing: Fuzzing) -> None:
+def test_a_marked_root_keeps_the_rustflags_it_had(
+    fuzzing: Fuzzing, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """RUSTFLAGS=-Dwarnings set: the marked root's has the cfg appended."""
     fuzzing.manifests(MARKED)
     fuzzing.env["RUSTFLAGS"] = "-Dwarnings"
-    status, _, _ = fuzzing.call(roots=TWO_ROOTS)
+    fuzzing.enter(monkeypatch, roots=TWO_ROOTS)
+    status = msrv_lint.main([])
     assert status == 0
     want = [
         compile_at("Cargo.toml", "-Dwarnings"),
