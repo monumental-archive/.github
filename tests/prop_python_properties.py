@@ -24,7 +24,7 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
-from typing import Protocol
+from typing import TYPE_CHECKING
 
 import pytest
 from hypothesis import settings
@@ -33,6 +33,9 @@ from hypothesis import strategies as st
 from belt import findings, property_profiles, python_properties
 from belt.typed_hypothesis import given
 from belt.typed_pytest import fixture
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 GATE = "test:python-properties"
 AUDIT = "audit:python-properties"
@@ -116,23 +119,12 @@ class Pytest:
         return status
 
 
-class Ran(Protocol):
-    """The `ran` fixture's caller."""
-
-    def __call__(
-        self, profile: str, files: list[str], stub: Pytest, **environ: str
-    ) -> tuple[int, str, str]:
-        """Run `files` under `profile` against `stub`, with `environ`."""
-        ...
-
-
 @fixture
-def ran(monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]) -> Ran:
-    """Call `run` with a stand-in pytest, restoring what a run sets.
+def labelled(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], None]:
+    """Ready `run` with a stand-in pytest, restoring what a run sets.
 
     Returns:
-        The caller: `ran(profile, files, stub, **environ)`, giving the
-        status and what was written to each stream.
+        A function that names the task `profile` runs under.
 
     """
     monkeypatch.setattr(sys, "dont_write_bytecode", sys.dont_write_bytecode)
@@ -141,24 +133,23 @@ def ran(monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]) -> R
     for name in (python_properties.STORAGE, "PYTHONDONTWRITEBYTECODE"):
         monkeypatch.delenv(name, raising=False)
 
-    def call(
-        profile: str, files: list[str], stub: Pytest, **environ: str
-    ) -> tuple[int, str, str]:
+    def label(profile: str) -> None:
         monkeypatch.setenv("MISE_TASK_NAME", python_properties.LABELS[profile])
-        status = python_properties.run(
-            profile, [Path(f) for f in files], environ, pytest_main=stub
-        )
-        out, err = capfd.readouterr()
-        return status, out, err
 
-    return call
+    return label
 
 
 # The runner over a stand-in pytest: collect, then run.
-def test_a_held_run_collects_then_runs(ran: Ran) -> None:
+def test_a_held_run_collects_then_runs(
+    labelled: Callable[[str], None], capfd: pytest.CaptureFixture[str]
+) -> None:
     """Collected with no refusal, run, held: exit 0 and the count."""
     stub = Pytest((0, []), (0, []))
-    status, out, err = ran("gate", ["a/prop_x.py"], stub, ORG_TEST_WORKERS="1")
+    labelled("gate")
+    status = python_properties.run(
+        "gate", [Path("a/prop_x.py")], {"ORG_TEST_WORKERS": "1"}, pytest_main=stub
+    )
+    out, err = capfd.readouterr()
     assert (status, out, err) == (0, f"{GATE}: 1 file(s) held\n", "")
     collect, run = stub.calls
     assert collect[-3:] == ["a/prop_x.py", "--collect-only", "-q"]
@@ -169,37 +160,60 @@ def test_a_held_run_collects_then_runs(ran: Ran) -> None:
     assert os.environ["PYTHONDONTWRITEBYTECODE"] == "1"
 
 
-def test_each_refusal_is_named_and_nothing_runs(ran: Ran) -> None:
+def test_each_refusal_is_named_and_nothing_runs(
+    labelled: Callable[[str], None], capfd: pytest.CaptureFixture[str]
+) -> None:
     """The plugin refused two: both named, exit 1, no run after."""
     refused = ["prop_x.py: holds no Hypothesis test (no @given)", "prop_y.py::t"]
     stub = Pytest((0, refused))
-    status, out, err = ran("gate", ["prop_x.py", "prop_y.py"], stub)
+    labelled("gate")
+    status = python_properties.run(
+        "gate", [Path("prop_x.py"), Path("prop_y.py")], {}, pytest_main=stub
+    )
+    out, err = capfd.readouterr()
     assert (status, out) == (1, "")
     assert err == "".join(f"{GATE}: {line}\n" for line in refused)
     assert len(stub.calls) == 1
 
 
-def test_a_collection_that_failed_is_red_by_its_status(ran: Ran) -> None:
+def test_a_collection_that_failed_is_red_by_its_status(
+    labelled: Callable[[str], None], capfd: pytest.CaptureFixture[str]
+) -> None:
     """pytest could not collect (an import error): exit 1, its status named."""
     stub = Pytest((2, []))
-    status, out, err = ran("gate", ["prop_x.py"], stub)
+    labelled("gate")
+    status = python_properties.run("gate", [Path("prop_x.py")], {}, pytest_main=stub)
+    out, err = capfd.readouterr()
     assert (status, out) == (1, "")
     assert err == f"{GATE}: pytest could not collect the files (exit 2)\n"
 
 
-def test_a_failed_gate_run_is_red(ran: Ran) -> None:
+def test_a_failed_gate_run_is_red(
+    labelled: Callable[[str], None], capfd: pytest.CaptureFixture[str]
+) -> None:
     """A property failed: exit 1, pytest's status named."""
-    status, out, err = ran("gate", ["prop_x.py"], Pytest((0, []), (1, [])))
+    labelled("gate")
+    status = python_properties.run(
+        "gate", [Path("prop_x.py")], {}, pytest_main=Pytest((0, []), (1, []))
+    )
+    out, err = capfd.readouterr()
     assert (status, out) == (1, "")
     assert err == f"{GATE}: pytest exited 1; failures above\n"
 
 
-def test_the_audit_prints_its_seed_and_honours_a_given_one(ran: Ran) -> None:
+def test_the_audit_prints_its_seed_and_honours_a_given_one(
+    labelled: Callable[[str], None], capfd: pytest.CaptureFixture[str]
+) -> None:
     """ORG_PROPERTY_SEED reproduces a run; the seed comes first."""
     stub = Pytest((0, []), (1, []))
-    status, out, err = ran(
-        "audit", ["prop_x.py"], stub, ORG_PROPERTY_SEED="7", ORG_TEST_WORKERS="1"
+    labelled("audit")
+    status = python_properties.run(
+        "audit",
+        [Path("prop_x.py")],
+        {"ORG_PROPERTY_SEED": "7", "ORG_TEST_WORKERS": "1"},
+        pytest_main=stub,
     )
+    out, err = capfd.readouterr()
     assert status == 1
     assert out == f"{AUDIT}: seed 7 (reproduce: ORG_PROPERTY_SEED=7)\n"
     assert err == (
