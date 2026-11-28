@@ -1,303 +1,382 @@
-"""python_properties.py, called in the process that runs it (#1696).
+"""python_properties.py and its plugin, called in the process that runs them (#1696, #2177).
 
-The runner imports Hypothesis, which the ordinary suite's interpreter
-does not carry, so its in-process rows live here and run under
-`test:python-properties`, on the belt's Hypothesis. Each row plants
-property files in a scratch directory and calls `main` with the same
-arguments the leg passes; `test_python_properties.py` keeps the leg's
-own rows (which start python-properties.sh) and the helper's one
-script row.
-
-A call loads its own profile, so each restores the profile it found:
-the rest of this run keeps the bounds it was started with.
+The plugin imports Hypothesis, which the ordinary suite's interpreter
+does not carry, so these rows live here and run under
+`test:python-properties`, on the belt's Hypothesis. The runner's pytest
+is a stub that records what it was asked and answers as told: a real
+run of planted files is `test_python_properties.py`'s, which starts the
+task's own body.
 
 - Refusal (R): any argument list that names no profile and a file is
   a usage error, exit 2, never a traceback.
-- Invariance (V): with no shard named, the files are run as given; for
-  any n, the shards 0/n to (n-1)/n partition the files: every file in
-  exactly one, sizes within one of each other, whatever order the
-  files were listed in (#1631).
-- Refusal (R): any ORG_PROPERTY_CHILD that is not k/n with k < n, in
-  ASCII digits, is refused with ShardError naming it (#1631).
+- Refusal (R): a collection that refused a file or a test ends the run
+  before anything runs, each refusal named; a collection pytest could
+  not finish is red by its status.
+- Invariance (V): for any n, the shards 1/n to n/n partition the files:
+  every file in exactly one, whatever order the files were listed in
+  (#1631); a named shard runs in one process.
+- Invariance (V): the plugin refuses exactly the files that hold no
+  Hypothesis test, and exactly the tests that restate a bound.
 """
 
+from __future__ import annotations
+
+import os
 import sys
-import tempfile
 from pathlib import Path
+from typing import Protocol
 
 import pytest
-from hypothesis import example, settings
+from hypothesis import settings
 from hypothesis import strategies as st
 
-from belt import python_properties as pp
-from belt.typed_hypothesis import given
-from tests import support
-
-HOLDS = """\
-import unittest
-
-from hypothesis import strategies as st
+from belt import findings, property_profiles, python_properties
 from belt.typed_hypothesis import given
 
+GATE = "test:python-properties"
+AUDIT = "audit:python-properties"
+USAGE = "usage: belt python-properties gate|audit FILE..."
 
-class Holds(unittest.TestCase):
+
+class Shapes:
+    """The three tests a property file can hold, as the plugin is handed them."""
+
     @given(st.integers())
-    def test_double_is_even(self, n: int) -> None:
-        self.assertEqual(2 * n % 2, 0)
-"""
+    def holds(self, n: int) -> None:
+        """A Hypothesis test, as a property file holds one."""
+        assert 2 * n % 2 == 0
 
-FAILS = """\
-import unittest
+    def plain(self) -> None:
+        """A test that is no Hypothesis test."""
 
-from hypothesis import strategies as st
-from belt.typed_hypothesis import given
-
-
-class Fails(unittest.TestCase):
-    @given(st.integers(0, 100))
-    def test_small(self, n: int) -> None:
-        self.assertLess(n, 10)
-"""
-
-NO_PROPERTY = """\
-import unittest
-
-
-class Plain(unittest.TestCase):
-    def test_plain(self) -> None:
-        self.assertTrue(True)
-"""
-
-OWN_BOUNDS = """\
-import unittest
-
-from hypothesis import settings, strategies as st
-from belt.typed_hypothesis import given
-
-
-class Bounded(unittest.TestCase):
     @settings(max_examples=3)
     @given(st.integers())
-    def test_few(self, n: int) -> None:
-        self.assertIsInstance(n, int)
-"""
+    def bounded(self, n: int) -> None:
+        """A Hypothesis test restating one of the profile's bounds."""
+        assert isinstance(n, int)
 
 
-def call(
-    argv: list[str],
-    files: dict[str, str],
-    env: dict[str, str],
-    *,
-    capfd: pytest.CaptureFixture[str],
-) -> tuple[int, str, str]:
-    """Plant `files` in a scratch directory and call main from it.
-
-    `env` adds to the environment a child would have had (`support.env`);
-    the profile in force before the call is loaded again after it, and
-    the planted modules leave `sys.modules`.
+def said(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Record what the runner's finding writer is handed, writing nothing.
 
     Returns:
-        The status main returned and what it wrote to each stream.
+        The messages, in order, as the run gives them.
 
     """
-    before = settings.get_current_profile_name()
-    with tempfile.TemporaryDirectory() as scratch:
-        for name, text in files.items():
-            Path(scratch, name).write_text(text, encoding="utf-8")
-        try:
-            # The profile's label is the task that runs it (#1934).
-            task = {"MISE_TASK_NAME": pp.LABELS.get(argv[0], "")} if argv else {}
-            with pytest.MonkeyPatch.context() as patched:
-                for name, value in (support.env(**(task | env))).items():
-                    patched.setenv(name, value)
-                patched.chdir(scratch)
-                status = pp.main(argv)
-            out, err = capfd.readouterr()
-            return status, out, err
-        finally:
-            settings.load_profile(before)
-            for index, name in enumerate(argv[1:]):
-                sys.modules.pop(f"prop_{index}_{Path(name).stem}", None)
+    lines: list[str] = []
+
+    def record(subject: str, message: str, *detail: str) -> None:
+        del subject, detail
+        lines.append(message)
+
+    monkeypatch.setattr(findings, "finding", record)
+    return lines
 
 
-class TestGate:
-    """The gate profile over planted files."""
+def nothing_run(profile: str, files: list[Path], environ: dict[str, str]) -> int:
+    """Stand in for the run itself, running nothing.
 
-    def test_a_passing_file_holds(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """One property that holds: exit 0, the test and the count."""
-        status, out, err = call(
-            ["gate", "prop_ok.py"], {"prop_ok.py": HOLDS}, {}, capfd=capfd
+    Returns:
+        0, as a run that held.
+
+    """
+    del profile, files, environ
+    return 0
+
+
+def sharded(spec: str) -> bool:
+    """Tell whether a value names a shard, or tries to.
+
+    Returns:
+        False for empty and 1/1, which leave the run unsharded.
+
+    """
+    return spec not in {"", "1/1"}
+
+
+class Pytest:
+    """A stand-in for `pytest.main`: each call recorded, each answer told."""
+
+    def __init__(self, *answers: tuple[int, list[str]]) -> None:
+        """Answer the calls in turn: a status, and what the plugin refused."""
+        self.answers = list(answers)
+        self.calls: list[list[str]] = []
+
+    def __call__(self, argv: list[str]) -> int:
+        """Record one call and give its answer.
+
+        Returns:
+            The status told for this call.
+
+        """
+        self.calls.append(argv)
+        status, refused = self.answers.pop(0)
+        property_profiles.REFUSED[:] = refused
+        return status
+
+
+class Ran(Protocol):
+    """The `ran` fixture's caller."""
+
+    def __call__(
+        self, profile: str, files: list[str], stub: Pytest, **environ: str
+    ) -> tuple[int, str, str]:
+        """Run `files` under `profile` against `stub`, with `environ`."""
+        ...
+
+
+@pytest.fixture
+def ran(monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]) -> Ran:
+    """Call `run` with a stand-in pytest, restoring what a run sets.
+
+    Returns:
+        The caller: `ran(profile, files, stub, **environ)`, giving the
+        status and what was written to each stream.
+
+    """
+    monkeypatch.setattr(sys, "dont_write_bytecode", sys.dont_write_bytecode)
+    monkeypatch.setitem(sys.modules, python_properties.PLUGIN, property_profiles)
+    monkeypatch.setattr(property_profiles, "REFUSED", [])
+    for name in (python_properties.STORAGE, "PYTHONDONTWRITEBYTECODE"):
+        monkeypatch.delenv(name, raising=False)
+
+    def call(
+        profile: str, files: list[str], stub: Pytest, **environ: str
+    ) -> tuple[int, str, str]:
+        monkeypatch.setenv("MISE_TASK_NAME", python_properties.LABELS[profile])
+        status = python_properties.run(
+            profile, [Path(f) for f in files], environ, pytest_main=stub
         )
-        assert (status, out, err) == (
-            0,
-            "prop_ok.py: prop_0_prop_ok.Holds.test_double_is_even ... ok\n"
-            "test:python-properties: 1 test(s) in 1 file(s) held\n",
-            "",
-        )
+        out, err = capfd.readouterr()
+        return status, out, err
 
-    def test_a_failing_property_is_red_with_its_example(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """A property that fails: red, the shrunk example printed."""
-        status, out, err = call(
-            ["gate", "prop_bad.py"], {"prop_bad.py": FAILS}, {}, capfd=capfd
-        )
-        assert status == 1
-        assert "prop_0_prop_bad.Fails.test_small ... FAIL\n" in out
-        assert "AssertionError: 10 not less than 10" in err
-        assert "    n=10,\n" in err
-
-    def test_a_file_with_no_property_is_refused(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """A prop_*.py holding no @given test: red, named."""
-        status, _out, err = call(
-            ["gate", "prop_none.py"], {"prop_none.py": NO_PROPERTY}, {}, capfd=capfd
-        )
-        assert status == 1
-        assert err == (
-            "test:python-properties: prop_none.py: holds no Hypothesis test"
-            " (no @given)\n"
-        )
-
-    def test_a_test_restating_a_bound_is_refused(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """@settings(max_examples=…) on a test: red, the bound named."""
-        status, _out, err = call(
-            ["gate", "prop_own.py"], {"prop_own.py": OWN_BOUNDS}, {}, capfd=capfd
-        )
-        assert status == 1
-        assert err == (
-            "test:python-properties: prop_own.py: prop_0_prop_own.Bounded.test_few"
-            " sets its own bounds (max_examples=3); the belt's profile owns them\n"
-        )
-
-    def test_a_file_that_cannot_be_imported_is_refused(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """An import error is the file's own report, by name."""
-        status, _out, err = call(
-            ["gate", "prop_broken.py"],
-            {"prop_broken.py": "import nowhere\n"},
-            {},
-            capfd=capfd,
-        )
-        assert status == 1
-        assert err.startswith(
-            "test:python-properties: prop_broken.py: could not be imported\n"
-        ), err
+    return call
 
 
-class TestAudit:
-    """The audit profile: its seed printed first, a given one honoured."""
+class TestRun:
+    """The runner over a stand-in pytest: collect, then run."""
 
-    def test_the_audit_prints_its_seed_and_honours_a_given_one(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_a_held_run_collects_then_runs(self, ran: Ran) -> None:
+        """Collected with no refusal, run, held: exit 0 and the count."""
+        stub = Pytest((0, []), (0, []))
+        status, out, err = ran("gate", ["a/prop_x.py"], stub, ORG_TEST_WORKERS="1")
+        assert (status, out, err) == (0, f"{GATE}: 1 file(s) held\n", "")
+        collect, run = stub.calls
+        assert collect[-3:] == ["a/prop_x.py", "--collect-only", "-q"]
+        assert run[-1] == "a/prop_x.py"
+        assert "--collect-only" not in run
+        assert os.environ[python_properties.STORAGE]
+        assert sys.dont_write_bytecode
+        assert os.environ["PYTHONDONTWRITEBYTECODE"] == "1"
+
+    def test_each_refusal_is_named_and_nothing_runs(self, ran: Ran) -> None:
+        """The plugin refused two: both named, exit 1, no run after."""
+        refused = ["prop_x.py: holds no Hypothesis test (no @given)", "prop_y.py::t"]
+        stub = Pytest((0, refused))
+        status, out, err = ran("gate", ["prop_x.py", "prop_y.py"], stub)
+        assert (status, out) == (1, "")
+        assert err == "".join(f"{GATE}: {line}\n" for line in refused)
+        assert len(stub.calls) == 1
+
+    def test_a_collection_that_failed_is_red_by_its_status(self, ran: Ran) -> None:
+        """pytest could not collect (an import error): exit 1, its status named."""
+        stub = Pytest((2, []))
+        status, out, err = ran("gate", ["prop_x.py"], stub)
+        assert (status, out) == (1, "")
+        assert err == f"{GATE}: pytest could not collect the files (exit 2)\n"
+
+    def test_a_failed_gate_run_is_red(self, ran: Ran) -> None:
+        """A property failed: exit 1, pytest's status named."""
+        status, out, err = ran("gate", ["prop_x.py"], Pytest((0, []), (1, [])))
+        assert (status, out) == (1, "")
+        assert err == f"{GATE}: pytest exited 1; failures above\n"
+
+    def test_the_audit_prints_its_seed_and_honours_a_given_one(self, ran: Ran) -> None:
         """ORG_PROPERTY_SEED reproduces a run; the seed comes first."""
-        status, out, err = call(
-            ["audit", "prop_bad.py"],
-            {"prop_bad.py": FAILS},
-            {"ORG_PROPERTY_SEED": "7"},
-            capfd=capfd,
+        stub = Pytest((0, []), (1, []))
+        status, out, err = ran(
+            "audit", ["prop_x.py"], stub, ORG_PROPERTY_SEED="7", ORG_TEST_WORKERS="1"
         )
         assert status == 1
-        assert out.startswith(
-            "audit:python-properties: seed 7 (reproduce: ORG_PROPERTY_SEED=7)\n"
-        ), out
-        assert (
-            "audit:python-properties: seed 7 — commit each falsifying example above"
-            " as an @example row with its fix\n"
-        ) in err
+        assert out == f"{AUDIT}: seed 7 (reproduce: ORG_PROPERTY_SEED=7)\n"
+        assert err == (
+            f"{AUDIT}: seed 7 — commit each falsifying example above as an"
+            " @example row with its fix\n"
+        )
+        assert "--hypothesis-seed=7" not in stub.calls[0]
+        assert ["--hypothesis-seed=7", "--durations=10"] == [
+            word for word in stub.calls[1] if word.startswith("--d") or "seed" in word
+        ]
 
 
-# A usage error under the gate's task, as python-properties.sh runs it.
-GATE = "test:python-properties"
-USAGE = f"{GATE}: usage: python_properties.py gate|audit FILE...\n"
+class TestArguments:
+    """The command line every run takes."""
+
+    @given(st.integers(1, 16), st.integers(1, 6))
+    def test_every_run_takes_the_belt_config_and_its_plugin(
+        self, count: int, files: int
+    ) -> None:
+        """`-c` the delivered config, the plugin, the profile; workers capped."""
+        names = [Path(f"prop_{i}.py") for i in range(files)]
+        argv = python_properties.arguments("gate", names, None, count)
+        assert argv[:4] == [
+            "-c",
+            str(python_properties.CONFIG),
+            "--rootdir",
+            str(Path.cwd()),
+        ]
+        assert argv[4:6] == ["-p", python_properties.PLUGIN]
+        assert "--hypothesis-profile=gate" in argv
+        assert argv[-files:] == [str(n) for n in names]
+        if count > 1:
+            assert argv[argv.index("-n") + 1] == str(min(count, files))
+        else:
+            assert "-n" not in argv
+
+    @given(st.text(max_size=4))
+    def test_workers_are_a_positive_number_or_the_cores(self, named: str) -> None:
+        """ORG_TEST_WORKERS when positive digits, else the cores, at most eight."""
+        got = python_properties.workers({python_properties.WORKERS: named})
+        if named.isdigit() and int(named) > 0:
+            assert got == int(named)
+        else:
+            assert got == min(os.cpu_count() or 1, python_properties.MAX_WORKERS)
 
 
 def unlabelled(word: str) -> bool:
-    """Tell whether a word is not a profile's label.
+    """Tell whether a word is not a profile's name.
 
     Returns:
         True when it is none.
 
     """
-    return word not in pp.LABELS
+    return word not in python_properties.LABELS
 
 
-class TestUsage:
-    """Arguments that name no profile and a file."""
+class TestMain:
+    """Arguments and shards, the run itself a stand-in."""
 
     @given(
         st.one_of(
             st.lists(st.text(max_size=6), max_size=1),
-            st.lists(
-                st.text(max_size=6).filter(unlabelled),
-                min_size=2,
-                max_size=4,
-            ),
+            st.lists(st.text(max_size=6).filter(unlabelled), min_size=2, max_size=4),
         )
     )
-    def test_a_usage_error_is_two(
-        self, argv: list[str], capfd: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_a_usage_error_is_two(self, argv: list[str]) -> None:
         """R: exit 2 with the usage line, and nothing run."""
         with pytest.MonkeyPatch.context() as patched:
-            patched.setenv("MISE_TASK_NAME", GATE)
+            lines = said(patched)
+            patched.setattr(python_properties, "run", nothing_run)
+            status = python_properties.main(argv)
+        assert (status, lines) == (2, [USAGE])
+
+    @given(
+        st.lists(
+            st.from_regex(r"[a-z]{1,4}/prop_[a-z]{1,6}\.py", fullmatch=True),
+            unique=True,
+            min_size=1,
+            max_size=12,
+        ),
+        st.integers(1, 6),
+    )
+    def test_the_shards_partition_the_files(self, files: list[str], n: int) -> None:
+        """V: 1/n to n/n run every file once, listed in any order, one process each."""
+        chosen: list[str] = []
+        for k in range(1, n + 1):
+            seen: list[tuple[list[Path], dict[str, str]]] = []
+
+            def record(profile: str, files: list[Path], environ: dict[str, str]) -> int:
+                del profile
+                seen.append((files, environ))
+                return 0
+
+            with pytest.MonkeyPatch.context() as patched:
+                patched.setattr(python_properties, "run", record)
+                patched.setenv("ORG_SHARD", f"{k}/{n}")
+                patched.setenv("ORG_SHARD_REPORTS", "")
+                patched.setenv("ORG_FINDINGS", "")
+                status = python_properties.main(["gate", *reversed(files)])
+            assert status == 0
+            if seen:
+                mine, environ = seen[0]
+                chosen += [str(f) for f in mine]
+                if n > 1:
+                    assert environ[python_properties.WORKERS] == "1"
+        assert sorted(chosen) == sorted(files)
+
+    @given(
+        st.text(
+            st.characters(exclude_characters="\x00", exclude_categories=["Cs"]),
+            max_size=6,
+        ).filter(sharded)
+    )
+    def test_a_malformed_shard_is_refused_by_name(self, spec: str) -> None:
+        """R: a value that is not k/n is exit 2, the value named; k/n is read."""
+        with pytest.MonkeyPatch.context() as patched:
+            patched.setattr(python_properties, "run", nothing_run)
+            patched.setenv("ORG_SHARD", spec)
+            patched.setenv("ORG_SHARD_REPORTS", "")
             patched.setenv("ORG_FINDINGS", "")
-            status = pp.main(argv)
-            out, err = capfd.readouterr()
-        assert (status, out, err) == (2, "", USAGE)
+            lines = said(patched)
+            status = python_properties.main(["gate", "prop_x.py"])
+        if status == 2:
+            assert lines == [f"ORG_SHARD={spec!r} is not a shard (k/n, 1 <= k <= n)"]
+        else:
+            assert (status, lines) == (0, [])
 
 
-NAME = st.from_regex(
-    r"[a-z]{1,4}(/[a-z]{1,4}){0,2}/prop_[a-z]{1,6}\.py", fullmatch=True
-)
-FILES = st.lists(NAME, unique=True, max_size=20).map(
-    lambda names: [Path(n) for n in names]
-)
-NO_FILES: list[Path] = []
+SHAPES = {"holds": Shapes.holds, "plain": Shapes.plain, "bounded": Shapes.bounded}
 
 
-class TestShardPartition:
-    """Every file in exactly one shard."""
+class TestRefusals:
+    """The plugin's judgment of what was collected."""
 
-    @given(FILES)
-    def test_unset_is_every_file_as_given(self, files: list[Path]) -> None:
-        """No shard named: the list, unchanged."""
-        assert pp.shard_of(files, "") == files
-
-    @given(FILES, st.integers(1, 9), st.permutations(range(20)))
-    def test_the_shards_partition_the_files(
-        self, files: list[Path], n: int, order: list[int]
+    @given(
+        st.lists(
+            st.tuples(
+                st.sampled_from(["a.py", "b.py", "c.py"]),
+                st.sampled_from(sorted(SHAPES)),
+            ),
+            max_size=8,
+        )
+    )
+    def test_exactly_the_files_and_tests_that_break_the_rules(
+        self, collected: list[tuple[str, str]]
     ) -> None:
-        """Disjoint, complete, balanced, and independent of listing order."""
-        shuffled = [files[i] for i in order if i < len(files)]
-        shards = [pp.shard_of(files, f"{k}/{n}") for k in range(n)]
-        reshuffled = [pp.shard_of(shuffled, f"{k}/{n}") for k in range(n)]
-        assert shards == reshuffled
-        flat = [f for shard in shards for f in shard]
-        every, given_files = sorted(flat, key=str), sorted(files, key=str)
-        assert every == given_files
-        sizes = [len(shard) for shard in shards]
-        assert max(sizes) - min(sizes) <= 1
+        """V: each file with no property, then each test restating a bound."""
+        items = [
+            (path, f"{path}::{shape}{i}", SHAPES[shape])
+            for i, (path, shape) in enumerate(collected)
+        ]
+        # The profile the shapes were decorated under, as a property
+        # file's tests are under the profile its run loaded first.
+        got = property_profiles.refusals(items, settings())
+        bare = []
+        for path, _, _ in items:
+            if path not in bare and not any(
+                p == path and s != "plain" for p, s in collected
+            ):
+                bare.append(path)
+        want = [f"{path}: holds no Hypothesis test (no @given)" for path in bare] + [
+            f"{nodeid} sets its own bounds (max_examples=3); the belt's profile"
+            " owns them"
+            for nodeid, (_, shape) in zip((i[1] for i in items), collected, strict=True)
+            if shape == "bounded"
+        ]
+        assert got == want
 
-
-class TestShardRefusal:
-    """Anything but k/n with k < n is refused by name."""
-
-    @given(FILES, st.text(max_size=8))
-    @example(NO_FILES, "8/8")
-    @example(NO_FILES, "0/0")
-    @example(NO_FILES, "²/8")
-    @example(NO_FILES, "1/8 ")
-    def test_any_value_is_read_or_refused(self, files: list[Path], spec: str) -> None:
-        """A shard, or ShardError naming the value."""
-        try:
-            got = pp.shard_of(files, spec)
-        except pp.ShardError as bad:
-            assert f"ORG_PROPERTY_CHILD='{spec}'" in str(bad)
-            return
-        assert len(got) <= len(files)
+    def test_the_profiles_hold_the_four_bounds(self) -> None:
+        """Gate derandomised and bounded, audit larger; no database or deadline."""
+        gate, audit = settings.get_profile("gate"), settings.get_profile("audit")
+        assert property_profiles.bounds(gate) == {
+            "max_examples": property_profiles.GATE_EXAMPLES,
+            "derandomize": True,
+            "database": None,
+            "deadline": None,
+        }
+        assert property_profiles.bounds(audit) == {
+            "max_examples": property_profiles.AUDIT_EXAMPLES,
+            "derandomize": False,
+            "database": None,
+            "deadline": None,
+        }

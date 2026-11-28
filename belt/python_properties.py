@@ -26,12 +26,19 @@ process's path (pytest's `pythonpath`), so `from belt.typed_hypothesis
 import given` (the typed `given` the belt delivers, #1604) resolves in
 any repository.
 
-At collection the plugin refuses, by name, a file that holds no
-Hypothesis test (a property file with no property is a check that looks
-like success), and a test that restates any of the profile's four bounds
-(`max_examples`, `derandomize`, `database`, `deadline`) with its own
-`@settings`: the belt owns them. The audit also prints pytest's ten
-slowest tests, so its bound is measured from its own log (#1631).
+Before anything runs, the files are collected once, in this process
+and with no workers, and the plugin refuses, by name, a file that holds
+no Hypothesis test (a property file with no property is a check that
+looks like success), and a test that restates any of the profile's four
+bounds (`max_examples`, `derandomize`, `database`, `deadline`) with its
+own `@settings`: the belt owns them. The refusals are read here, not
+raised in the hook: under pytest-xdist the workers collect, and a
+worker's error would reach the log as a crash rather than the names.
+The audit also prints pytest's ten slowest tests, so its bound is
+measured from its own log (#1631).
+
+Every run takes the belt's delivered pytest configuration with `-c`
+(`mise/pytest.toml`, #2177), its root the working directory.
 
 ORG_SHARD=k/n (1 <= k <= n, the one variable every belt adapter reads,
 belt/shard.py, #2160) takes one shard of the files (#1631): the files
@@ -41,9 +48,10 @@ holds no file says so and exits 0. A shard reports the files it chose
 from and the ones it kept, and the gate holds the union of every
 shard's to the whole list. The audit runs n legs with one seed.
 
-The files are spread over pytest-xdist's workers: ORG_TEST_WORKERS
-sets their count, at most eight by default, and 1 runs every file in
-this one process.
+Unsharded, the files are spread over pytest-xdist's workers (#1741):
+ORG_TEST_WORKERS sets their count, at most eight by default, and 1 runs
+every file in this one process. A named shard runs in this one
+process: the shards already spread the files over runners.
 
 Usage:
   belt python-properties gate|audit FILE...
@@ -56,21 +64,19 @@ from __future__ import annotations
 
 import os
 import random
+import sys
+import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from hypothesis import HealthCheck, settings
 
 from belt import findings, shard
-from belt.tree import ROOT
+from belt.tree import MISE, ROOT
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-GATE_EXAMPLES = 200
-AUDIT_EXAMPLES = 10_000
-BOUNDS = ("max_examples", "derandomize", "database", "deadline")
 EXIT_USAGE = 2
 # A profile name and at least one file.
 MIN_ARGS = 2
@@ -79,117 +85,29 @@ MAX_WORKERS = 8
 WORKERS = "ORG_TEST_WORKERS"
 LABELS = {"gate": "test:python-properties", "audit": "audit:python-properties"}
 SEED = "ORG_PROPERTY_SEED"
-# Typed here: register_profile takes its settings as `**kwargs: Any`.
-SUPPRESSED: list[HealthCheck] = [HealthCheck.too_slow]
-
-settings.register_profile(
-    "gate",
-    derandomize=True,
-    max_examples=GATE_EXAMPLES,
-    database=None,
-    deadline=None,
-    suppress_health_check=SUPPRESSED,
-)
-settings.register_profile(
-    "audit",
-    derandomize=False,
-    max_examples=AUDIT_EXAMPLES,
-    database=None,
-    deadline=None,
-    suppress_health_check=SUPPRESSED,
-)
+# Where Hypothesis keeps what it writes, read by each process it runs in.
+STORAGE = "HYPOTHESIS_STORAGE_DIRECTORY"
+# The pytest plugin every run loads: the profiles and the refusals.
+PLUGIN = "belt.property_profiles"
+# The belt's one pytest configuration, delivered (#2177).
+CONFIG = MISE / "pytest.toml"
 
 
-def is_property(func: object) -> bool:
-    """Say whether a test function is a Hypothesis test.
+def refused() -> list[str]:
+    """Read what the last collection's plugin refused.
+
+    The plugin is read from the modules pytest imported, never imported
+    here: one imported before pytest starts is a module pytest's
+    assertion rewriting missed, which `filterwarnings = error` reds.
 
     Returns:
-        True for a function `@given` wrapped.
+        The plugin's refusals, one line each; none when no collection
+        loaded it.
 
     """
-    flag: object = getattr(func, "is_hypothesis_test", False)
-    return bool(flag)
-
-
-def bounds(chosen: settings) -> dict[str, object]:
-    """Read the bounds the belt's profile owns from one settings object.
-
-    Returns:
-        Each bound in BOUNDS, by name.
-
-    """
-    return {
-        "max_examples": chosen.max_examples,
-        "derandomize": chosen.derandomize,
-        "database": chosen.database,
-        "deadline": chosen.deadline,
-    }
-
-
-def own_bounds(func: object, profile: settings) -> list[str]:
-    """Name the profile bounds a test restates with its own `@settings`.
-
-    Returns:
-        `field=value` for each bound that differs from the profile.
-
-    """
-    mine: object = getattr(func, "_hypothesis_internal_use_settings", None)
-    if not isinstance(mine, settings):
-        return []
-    have, want = bounds(mine), bounds(profile)
-    return [
-        f"{field}={have[field]!r}" for field in BOUNDS if have[field] != want[field]
-    ]
-
-
-def refusals(items: list[tuple[str, str, object]], profile: settings) -> list[str]:
-    """Judge what was collected: one line per refused file or test.
-
-    `items` are (file, test id, the test's function) in collection order.
-
-    Returns:
-        A line per file with no Hypothesis test, then one per test that
-        sets its own bounds.
-
-    """
-    out: list[str] = []
-    seen: dict[str, bool] = {}
-    for path, _, func in items:
-        seen[path] = seen.get(path, False) or is_property(func)
-    out += [
-        f"{path}: holds no Hypothesis test (no @given)"
-        for path, has in seen.items()
-        if not has
-    ]
-    for _, nodeid, func in items:
-        own = own_bounds(func, profile)
-        if own:
-            out.append(
-                f"{nodeid} sets its own bounds ({', '.join(own)});"
-                " the belt's profile owns them"
-            )
-    return out
-
-
-def pytest_collection_modifyitems(
-    session: pytest.Session, config: pytest.Config, items: list[pytest.Item]
-) -> None:
-    """Refuse a property file with no property, and a test's own bounds.
-
-    Raises:
-        pytest.UsageError: a refusal, every one named.
-
-    """
-    del session
-    name: object = config.getoption("hypothesis_profile", None)
-    profile = settings.get_profile(name if isinstance(name, str) else "default")
-    found: list[tuple[str, str, object]] = []
-    for item in items:
-        func: object = getattr(item, "obj", None)
-        found.append((str(item.path), item.nodeid, func))
-    refused = refusals(found, profile)
-    if refused:
-        raise pytest.UsageError("\n".join(refused))
+    plugin = sys.modules.get(PLUGIN)
+    lines: object = getattr(plugin, "REFUSED", [])
+    return [str(line) for line in lines] if isinstance(lines, list) else []
 
 
 def workers(environ: dict[str, str]) -> int:
@@ -217,13 +135,10 @@ def arguments(
 
     """
     args = [
-        "-p",
-        "belt.python_properties",
-        "-p",
-        "no:cacheprovider",
+        *("-c", str(CONFIG), "--rootdir", str(Path.cwd())),
+        *("-p", PLUGIN),
         f"--hypothesis-profile={profile}",
-        "-o",
-        f"pythonpath={ROOT}",
+        *("-o", f"pythonpath={ROOT}"),
         "-q",
     ]
     if seed is not None:
@@ -251,6 +166,28 @@ def run(
         given = environ.get(SEED, "")
         seed = int(given) if given.isdigit() else random.SystemRandom().getrandbits(64)
         print(f"{label}: seed {seed} (reproduce: {SEED}={seed})", flush=True)
+    # Hypothesis's pytest plugin writes a patch of every failing example
+    # under its storage directory, `.hypothesis` in the working tree by
+    # default: outside it, so the run leaves the tree as it found it.
+    os.environ[STORAGE] = tempfile.mkdtemp(prefix="org-hypothesis-")
+    # And no bytecode beside the files: pytest's rewritten modules are
+    # cached in `__pycache__` unless Python writes none, here and in
+    # each worker it starts.
+    sys.dont_write_bytecode = True
+    os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
+    collected = pytest_main([
+        *arguments(profile, files, None, 1),
+        "--collect-only",
+        "-q",
+    ])
+    said = refused()
+    for line in said:
+        findings.finding("", line)
+    if said:
+        return 1
+    if collected != 0:
+        findings.finding("", f"pytest could not collect the files (exit {collected})")
+        return 1
     status = pytest_main(arguments(profile, files, seed, workers(environ)))
     if status == 0:
         print(f"{label}: {len(files)} file(s) held")
@@ -298,4 +235,9 @@ def main(argv: list[str]) -> int:
             print(f"{label}: shard {k}/{n} {held}")
             return 0
         print(f"{label}: shard {k}/{n}, {len(chosen)} of {len(files)} file(s)")
-    return run(argv[0], chosen, dict(os.environ))
+    # A named shard is one runner's share: it runs in this one process.
+    # Unsharded (or 1/1), the run fans out over the machine's workers.
+    environ = dict(os.environ)
+    if named is not None and named != (1, 1):
+        environ[WORKERS] = "1"
+    return run(argv[0], chosen, environ)

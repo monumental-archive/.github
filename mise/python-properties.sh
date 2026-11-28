@@ -66,7 +66,7 @@ if [[ ${profile} == gate ]]; then
   ordinary=()
   for f in ${python[@]+"${python[@]}"}; do
     case ${f} in
-      */prop_*.py | prop_*.py | belt/python_properties.py | belt/typed_hypothesis.py) ;;
+      */prop_*.py | prop_*.py | belt/property_profiles.py | belt/typed_hypothesis.py) ;;
       *) ordinary+=("${f}") ;;
     esac
   done

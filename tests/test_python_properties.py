@@ -132,6 +132,22 @@ def plant(root: Path, files: dict[str, str]) -> None:
         subprocess.run([GIT, "-C", str(root), "add", "-A"], check=True, env=_GIT_ENV)
 
 
+def porcelain(root: Path) -> str:
+    """Read a planted tree's status, ignored files included.
+
+    Returns:
+        `git status --porcelain --ignored`'s output.
+
+    """
+    return subprocess.run(
+        [GIT, "-C", str(root), "status", "--porcelain", "--ignored"],
+        env=_GIT_ENV,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+
+
 def run(
     body: str,
     files: dict[str, str],
@@ -159,7 +175,8 @@ def run(
             **env or {},
         )
         as_mise = support.task_run(NAMES[body], body)
-        return subprocess.run(
+        planted = porcelain(root)
+        done = subprocess.run(
             as_mise.argv,
             cwd=root,
             env=environ | as_mise.env,
@@ -167,6 +184,12 @@ def run(
             text=True,
             check=False,
         )
+        # The tree as planted, whatever the run decided: nothing written
+        # into it, ignored or not (Hypothesis's `.hypothesis`, pytest's
+        # cache).
+        left = porcelain(root)
+        assert left == planted, f"the task wrote into the tree:\n{left}"
+        return done
 
 
 def real_tool_dir() -> str:
@@ -226,7 +249,7 @@ class TestRefusals:
         assert (
             "test:python-properties: these take given from hypothesis,"
             " not the belt's typed one:\n  pkg/prop_y.py\n"
-            "  write: from typed_hypothesis import given\n"
+            "  write: from belt.typed_hypothesis import given\n"
         ) in done.stderr
 
     def test_hypothesis_source_in_a_string_is_not_an_import(self) -> None:
@@ -266,19 +289,19 @@ class TestProperties:
         """One property that holds: exit 0, the test and the count."""
         done = run(GATE, {"pkg/prop_ok.py": HOLDS}, tool_dir=real_tool_dir())
         assert done.returncode == 0, done.stderr
-        assert done.stdout == (
-            "pkg/prop_ok.py: prop_0_prop_ok.Holds.test_double_is_even ... ok\n"
-            "test:python-properties: 1 test(s) in 1 file(s) held\n"
-        )
+        assert "1 passed" in done.stdout
+        assert done.stdout.endswith("test:python-properties: 1 file(s) held\n")
 
     def test_a_failing_property_is_red_with_its_example(self) -> None:
         """A property that fails: red, the shrunk example printed."""
         done = run(GATE, {"prop_bad.py": FAILS}, tool_dir=real_tool_dir())
         assert done.returncode == 1
-        assert "prop_0_prop_bad.Fails.test_small ... FAIL\n" in done.stdout
-        assert "AssertionError: 10 not less than 10" in done.stderr
-        assert "Failing test case: test_small(" in done.stderr
-        assert "    n=10,\n" in done.stderr
+        assert "FAILED prop_bad.py::test_small - assert 10 < 10\n" in done.stdout
+        assert "Failing test case: test_small(" in done.stdout
+        assert "    n=10,\n" in done.stdout
+        assert (
+            "test:python-properties: pytest exited 1; failures above\n"
+        ) == done.stderr
 
     def test_a_file_with_no_property_is_refused(self) -> None:
         """A prop_*.py holding no @given test: red, named."""
@@ -293,7 +316,7 @@ class TestProperties:
         done = run(GATE, {"prop_own.py": OWN_BOUNDS}, tool_dir=real_tool_dir())
         assert done.returncode == 1
         assert (
-            "prop_own.py: prop_0_prop_own.Bounded.test_few sets its own bounds"
+            "test:python-properties: prop_own.py::test_few sets its own bounds"
             " (max_examples=3); the belt's profile owns them"
         ) in done.stderr
 
@@ -309,37 +332,11 @@ class TestProperties:
         assert done.stdout.startswith(
             "audit:python-properties: seed 7 (reproduce: ORG_PROPERTY_SEED=7)\n"
         ), done.stdout
-        assert "    n=10,\n" in done.stderr
+        assert "    n=10,\n" in done.stdout
         assert (
             "audit:python-properties: seed 7 — commit each falsifying example above"
             " as an @example row with its fix"
         ) in done.stderr
-
-
-class TestScript:
-    """The one row that starts the runner as a process: the script contract.
-
-    Its in-process rows are prop_python_properties.py's: the runner
-    imports Hypothesis, which only the belt's Hypothesis venv carries.
-    """
-
-    def test_the_runner_runs_as_a_script(self) -> None:
-        """No file named: the usage line on stderr, exit 2."""
-        venv = Path(os.path.realpath(support.tool("pytest"))).parent
-        done = subprocess.run(
-            [str(venv / "python"), str(BELT / "python_properties.py"), "gate"],
-            env=support.env(),
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        assert (done.returncode, done.stdout, done.stderr) == (
-            2,
-            "",
-            (
-                "python_properties.py: usage: belt python-properties gate|audit FILE...\n"
-            ),
-        )
 
 
 SHARD_FILES = {"a/prop_one.py": HOLDS, "b/prop_two.py": HOLDS, "prop_three.py": HOLDS}
@@ -357,14 +354,15 @@ class TestShards:
             env={"ORG_SHARD": "2/2"},
         )
         assert done.returncode == 0, done.stderr
-        assert done.stdout == (
+        assert done.stdout.startswith(
             "test:python-properties: shard 2/2, 1 of 3 file(s)\n"
-            "b/prop_two.py: prop_0_prop_two.Holds.test_double_is_even ... ok\n"
-            "test:python-properties: 1 test(s) in 1 file(s) held\n"
         )
+        assert "b/prop_two.py: 1\n" in done.stdout
+        assert "1 passed" in done.stdout
+        assert done.stdout.endswith("test:python-properties: 1 file(s) held\n")
 
     @pytest.mark.parametrize("spec", ["3/2", "0/8", "x/8", "1/0", "\u00b2/8"])
-    def test_a_malformed_shard_is_refused_by_name(self, spec: object) -> None:
+    def test_a_malformed_shard_is_refused_by_name(self, spec: str) -> None:
         """A k above n, a zero, or not digits: exit 2, the value named."""
         done = run(
             GATE,
@@ -418,8 +416,8 @@ class TestShards:
             == "test:python-properties: shard 8/8 holds none of the 3 file(s), skipped\n"
         )
 
-    def test_the_audit_times_each_file_as_it_finishes(self) -> None:
-        """Each file's line, then its count and elapsed seconds."""
+    def test_the_audit_times_its_slowest_tests(self) -> None:
+        """The audit prints pytest's ten slowest, so its bound is measured (#1631)."""
         done = run(
             AUDIT,
             {"prop_ok.py": HOLDS},
@@ -427,81 +425,74 @@ class TestShards:
             env={"ORG_PROPERTY_SEED": "7"},
         )
         assert done.returncode == 0, done.stderr
-        assert re.search(
-            r"prop_ok.py: prop_0_prop_ok.Holds.test_double_is_even ... ok\n"
-            r"prop_ok.py: 1 test\(s\) in [0-9]+\.[0-9]s\n"
-            r"audit:python-properties: 1 test\(s\) in 1 file\(s\) held\n$",
-            done.stdout,
-        )
+        assert "slowest 10 durations" in done.stdout
+        assert done.stdout.endswith("audit:python-properties: 1 file(s) held\n")
 
 
-# A property file that meets its siblings before it finishes importing,
-# and says which process imported it, so a row can tell one process
-# from four. Each writes its pid into the directory PLANT_MEET names,
-# then waits until PLANT_PARTIES pid files are there. Run in turn, the
+# A property file whose test meets its siblings' before its first
+# example, once per process, and leaves its process's pid in the
+# directory PLANT_MEET names, so a row can tell one process from four.
+# It waits until PLANT_PARTIES pid files are there. Run in turn, the
 # first can never meet the rest: past PLANT_CEILING seconds it fails,
 # and marks the rendezvous broken so the files after it fail at once.
+# The outcome is kept, so every example of a test meets the same one.
 # Four files finishing at all proves they ran at once; no clock decides
 # the verdict.
 CEILING = 60
 MEETS = f"""\
 import os
-import sys
 import time
-import unittest
 from pathlib import Path
 from hypothesis import strategies as st
 from belt.typed_hypothesis import given
 
-print("pid", os.getpid(), file=sys.stderr)
-meet = Path(os.environ["PLANT_MEET"])
-parties = int(os.environ["PLANT_PARTIES"])
-ceiling = float(os.environ.get("PLANT_CEILING", "{CEILING}"))
-(meet / str(os.getpid())).touch()
-began = time.monotonic()
-while True:
-    if (meet / "broken").exists():
-        raise RuntimeError("rendezvous broken")
-    met = sum(1 for p in meet.iterdir() if p.name.isdigit())
-    if met >= parties:
-        break
-    if time.monotonic() - began > ceiling:
-        (meet / "broken").touch()
-        raise RuntimeError(
-            f"rendezvous timed out: {{met}} of {{parties}} after {{ceiling:g}} s"
-        )
-    time.sleep(0.01)
+OUTCOME = []
 
 
-class Meets(unittest.TestCase):
-    @given(st.integers())
-    def test_double_is_even(self, n):
-        self.assertEqual((2 * n) % 2, 0)
+def meet():
+    if OUTCOME:
+        if OUTCOME[0]:
+            raise RuntimeError(OUTCOME[0])
+        return
+    meet = Path(os.environ["PLANT_MEET"])
+    parties = int(os.environ["PLANT_PARTIES"])
+    ceiling = float(os.environ.get("PLANT_CEILING", "{CEILING}"))
+    (meet / str(os.getpid())).touch()
+    began = time.monotonic()
+    while True:
+        if (meet / "broken").exists():
+            OUTCOME.append("rendezvous broken")
+            raise RuntimeError(OUTCOME[0])
+        met = sum(1 for p in meet.iterdir() if p.name.isdigit())
+        if met >= parties:
+            OUTCOME.append("")
+            return
+        if time.monotonic() - began > ceiling:
+            (meet / "broken").touch()
+            OUTCOME.append(
+                f"rendezvous timed out: {{met}} of {{parties}} after {{ceiling:g}} s"
+            )
+            raise RuntimeError(OUTCOME[0])
+        time.sleep(0.01)
+
+
+@given(st.integers())
+def test_double_is_even(n):
+    meet()
+    assert (2 * n) % 2 == 0
 """
 FOUR = {f"{d}/prop_{d}.py": MEETS for d in "abcd"}
 
 
-def ran(name: str, index: int) -> str:
-    """One file's result line, as the runner prints it.
+def pids(meet: dict[str, str]) -> set[str]:
+    """Read the processes the MEETS tests ran in.
 
     Returns:
-        The line for prop_NAME.py loaded at `index`, with its newline.
+        Each distinct pid left in the rendezvous directory.
 
     """
-    return (
-        f"{name}/prop_{name}.py:"
-        f" prop_{index}_prop_{name}.Meets.test_double_is_even ... ok\n"
-    )
-
-
-def pids(stderr: str) -> set[str]:
-    """Read the processes the MEETS files were imported in.
-
-    Returns:
-        Each distinct pid printed.
-
-    """
-    return {line for line in stderr.splitlines() if line.startswith("pid ")}
+    where = Path(meet["PLANT_MEET"])
+    return {p.name for p in where.iterdir() if p.name.isdigit()}
 
 
 @pytest.mark.usefixtures("_tmp")
@@ -523,79 +514,50 @@ class TestFanOut:
         scratch = tempfile.mkdtemp(dir=self.tmp)
         return {"PLANT_MEET": scratch, "PLANT_PARTIES": str(parties)} | env
 
-    def test_four_files_run_side_by_side_in_shard_order(self) -> None:
-        """Four files that wait for each other all finish, in shard order."""
-        done = run(
-            GATE, FOUR, tool_dir=real_tool_dir(), env=self.meet(4, ORG_TEST_WORKERS="8")
-        )
-        assert done.returncode == 0, done.stderr
-        assert len(pids(done.stderr)) == 4, done.stderr
-        assert done.stdout == (
-            "".join(
-                f"test:python-properties: shard {k}/4, 1 of 4 file(s)\n"
-                + ran(name, 0)
-                + "test:python-properties: 1 test(s) in 1 file(s) held\n"
-                for k, name in enumerate("abcd")
-            )
-            + "test:python-properties: 4 test(s) in 4 file(s) held\n"
-        )
+    def test_four_files_run_side_by_side(self) -> None:
+        """Four files that wait for each other all finish, in four workers."""
+        meet = self.meet(4, ORG_TEST_WORKERS="8")
+        done = run(GATE, FOUR, tool_dir=real_tool_dir(), env=meet)
+        assert done.returncode == 0, done.stdout + done.stderr
+        assert len(pids(meet)) == 4, done.stdout
+        assert "4 passed" in done.stdout
+        assert done.stdout.endswith("test:python-properties: 4 file(s) held\n")
 
     def test_files_run_in_turn_never_meet(self) -> None:
         """ORG_TEST_WORKERS=1 over files that wait for four: the ceiling fails it."""
-        done = run(
-            GATE,
-            FOUR,
-            tool_dir=real_tool_dir(),
-            env=self.meet(4, ORG_TEST_WORKERS="1", PLANT_CEILING="2"),
-        )
-        assert done.returncode == 1, done.stderr
-        assert (
-            "test:python-properties: a/prop_a.py: could not be imported\n"
-            in done.stderr
-        )
-        assert (
-            done.stderr.count("RuntimeError: rendezvous timed out: 1 of 4 after 2 s\n")
-            == 1
-        ), done.stderr
+        meet = self.meet(4, ORG_TEST_WORKERS="1", PLANT_CEILING="2")
+        done = run(GATE, FOUR, tool_dir=real_tool_dir(), env=meet)
+        assert done.returncode == 1, done.stdout + done.stderr
+        assert "RuntimeError: rendezvous timed out: 1 of 4 after 2 s" in done.stdout
+        assert "4 failed" in done.stdout
+        assert len(pids(meet)) == 1, done.stdout
 
     def test_one_worker_runs_every_file_in_one_process(self) -> None:
-        """ORG_TEST_WORKERS=1: no shard, one pid, files loaded in turn."""
-        done = run(
-            GATE, FOUR, tool_dir=real_tool_dir(), env=self.meet(1, ORG_TEST_WORKERS="1")
-        )
-        assert done.returncode == 0, done.stderr
-        assert len(pids(done.stderr)) == 1, done.stderr
-        assert done.stdout == (
-            "".join(ran(name, i) for i, name in enumerate("abcd"))
-            + "test:python-properties: 4 test(s) in 4 file(s) held\n"
-        )
+        """ORG_TEST_WORKERS=1: one pid, every file held."""
+        meet = self.meet(1, ORG_TEST_WORKERS="1")
+        done = run(GATE, FOUR, tool_dir=real_tool_dir(), env=meet)
+        assert done.returncode == 0, done.stdout + done.stderr
+        assert len(pids(meet)) == 1, done.stdout
+        assert done.stdout.endswith("test:python-properties: 4 file(s) held\n")
 
-    def test_a_named_shard_starts_no_child(self) -> None:
-        """ORG_SHARD=1/2 with workers to spare: one process."""
-        done = run(
-            GATE,
-            FOUR,
-            tool_dir=real_tool_dir(),
-            env=self.meet(1, ORG_TEST_WORKERS="8", ORG_SHARD="1/2"),
-        )
-        assert done.returncode == 0, done.stderr
-        assert len(pids(done.stderr)) == 1, done.stderr
-        assert done.stdout == (
+    def test_a_named_shard_starts_no_worker(self) -> None:
+        """ORG_SHARD=1/2 with workers to spare: one process, its two files."""
+        meet = self.meet(1, ORG_TEST_WORKERS="8", ORG_SHARD="1/2")
+        done = run(GATE, FOUR, tool_dir=real_tool_dir(), env=meet)
+        assert done.returncode == 0, done.stdout + done.stderr
+        assert len(pids(meet)) == 1, done.stdout
+        assert done.stdout.startswith(
             "test:python-properties: shard 1/2, 2 of 4 file(s)\n"
-            + "".join(ran(name, i) for i, name in enumerate("ac"))
-            + "test:python-properties: 2 test(s) in 2 file(s) held\n"
         )
+        assert "2 passed" in done.stdout
+        assert done.stdout.endswith("test:python-properties: 2 file(s) held\n")
 
     def test_one_of_one_is_the_whole_run(self) -> None:
         """ORG_SHARD=1/1, a split row's unsharded task: it fans out as unset."""
-        done = run(
-            GATE,
-            FOUR,
-            tool_dir=real_tool_dir(),
-            env=self.meet(4, ORG_TEST_WORKERS="8", ORG_SHARD="1/1"),
-        )
-        assert done.returncode == 0, done.stderr
-        assert len(pids(done.stderr)) == 4, done.stderr
+        meet = self.meet(4, ORG_TEST_WORKERS="8", ORG_SHARD="1/1")
+        done = run(GATE, FOUR, tool_dir=real_tool_dir(), env=meet)
+        assert done.returncode == 0, done.stdout + done.stderr
+        assert len(pids(meet)) == 4, done.stdout
 
 
 class TestWorkflowShape:
