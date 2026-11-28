@@ -144,7 +144,10 @@ mkdir -p "${run}"
 # identical one. Branches from the start (#1336 property 2). Test files
 # are omitted: a suite executes itself completely by construction, and
 # counting it would raise the number without one more line of the code
-# under test being run. relative_files, so the report's paths are the
+# under test being run. So are property files: the properties leg runs
+# them and this run never does, and a test directory that is a package
+# (tests/__init__.py, #2177) has coverage report each file it never ran
+# as 0%. relative_files, so the report's paths are the
 # repository's own and Codecov maps them without a fix-up. `patch =
 # subprocess` measures the suite's own Python workers (pytest-xdist's),
 # which run the venv's interpreter; coverage-measure.sh reads the run
@@ -172,7 +175,9 @@ patch = subprocess
 source = ${root}
 data_file = ${run}/python/.coverage
 relative_files = true
-omit = */test_*.py
+omit =
+    */test_*.py
+    */prop_*.py
 disable_warnings = no-data-collected, module-not-measured
 
 [report]

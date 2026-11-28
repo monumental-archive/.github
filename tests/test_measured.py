@@ -263,6 +263,7 @@ def test_the_rc_file_names_the_run_and_the_root(env: support.Env) -> None:
         assert f"source = {tree}\n" in rc
         assert f"data_file = {Path(tmp) / 'run' / 'python'}/.coverage\n" in rc
         assert "branch = true\n" in rc
+        assert "omit =\n    */test_*.py\n    */prop_*.py\n" in rc
 
 
 def test_the_rc_file_is_written_once_per_run(env: support.Env) -> None:
