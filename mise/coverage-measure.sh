@@ -58,12 +58,15 @@
 #
 # `plpgsql` (#1547) measures PL/pgSQL through plpgsql_check, in a
 # database only the repository's suite has. It makes no search of the
-# tree (#1666): `measured` sets ORG_PLPGSQL_COVERAGE, naming a report
-# in the run's directory that the suite's teardown writes, and a report
-# written means the leg reported: `plpgsql <percent>` and
-# `plpgsql-branches <percent>`. Which legs a floor holds is the floor's
-# own record (`legs:`), and coverage:check reds a recorded leg that
-# reported nothing. The reading and the refusals are
+# tree (#1666): `measured` sets ORG_PLPGSQL_COVERAGE, naming a
+# directory in the run's where each of the suite's teardowns writes its
+# database's report, and a report written means the leg reported:
+# `plpgsql <percent>` and `plpgsql-branches <percent>`, merged across
+# every database (#2163); over more than one database the branch leg
+# prints `plpgsql-branches not-held`, which coverage_floor.py holds
+# nothing against and leaves the floor as it stands (#2169). Which
+# legs a floor holds is the floor's own record (`legs:`), and
+# coverage:check reds a recorded leg that reported nothing. The reading and the refusals are
 # plpgsql_coverage.py's.
 #
 # `pgrx` (#1656) is not part of `all` either. A pgrx extension's code
@@ -703,11 +706,12 @@ REMEDY
     echo "typescript-branches ${ts_br}"
   fi
 fi
-if [[ -n ${run} && ${legs} =~ ^(all|plpgsql)$ && -f ${run}/plpgsql-coverage.json ]]; then
-  # The report the test run's teardown wrote; the reading and every
-  # refusal are plpgsql_coverage.py's. No report is no plpgsql figure,
-  # and the floor's record decides whether that is red.
+if [[ -n ${run} && ${legs} =~ ^(all|plpgsql)$ && -d ${run}/plpgsql-coverage ]]; then
+  # The reports the test run's teardowns wrote, one per database; the
+  # merge, the reading and every refusal are plpgsql_coverage.py's. No
+  # report is no plpgsql figure, and the floor's record decides whether
+  # that is red.
   "${ORG_PYTHON}" "$(dirname "${BASH_SOURCE[0]}")/plpgsql_coverage.py" \
-    totals "${label}" "${run}/plpgsql-coverage.json" || exit 1
+    totals "${label}" "${run}/plpgsql-coverage" || exit 1
 fi
 org_done=1

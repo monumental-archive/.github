@@ -611,6 +611,28 @@ class TestLegs(unittest.TestCase):
                 self.assertEqual(len(problems), 1)
                 self.assertIn("is not `<leg> <percent>`", problems[0])
 
+    def test_a_leg_not_held_is_no_figure_and_no_problem(self) -> None:
+        """`<leg> not-held` (#2163) is read apart from the figures."""
+        text = "plpgsql 85.0\nplpgsql-branches not-held\n"
+        measured, problems = cf.legs(text)
+        self.assertEqual(problems, NO_PROBLEMS)
+        one: list[tuple[str, Decimal]] = [("plpgsql", Decimal("85.0"))]
+        self.assertEqual(measured, one)
+        branches: list[str] = ["plpgsql-branches"]
+        none: list[str] = []
+        self.assertEqual(branches, cf.unheld(text))
+        self.assertEqual(none, cf.unheld("plpgsql 85.0\nnot-held\nx not-held y\n"))
+
+    def test_only_a_ruled_leg_may_report_not_held(self) -> None:
+        """Any other leg's `not-held` is a malformed line (#2163)."""
+        measured, problems = cf.legs("python 90.0\npython-branches not-held\n")
+        python: list[tuple[str, Decimal]] = [("python", Decimal("90.0"))]
+        self.assertEqual(measured, python)
+        refused: list[str] = [OPT_OUT]
+        self.assertEqual(refused, problems)
+        none: list[str] = []
+        self.assertEqual(none, cf.unheld("python-branches not-held\n"))
+
 
 # The order a file states its legs in: the gate's, then those read off it.
 ORDER: list[str] = ["rust", "rust-branches", "go-branches"]
@@ -1248,6 +1270,111 @@ class TestLegsRecord(unittest.TestCase):
         with Tree("90\n") as tree:
             status, out, _ = run(cf.recorded_legs, tree.path)
         self.assertEqual((1, ""), (status, out))
+
+    def test_a_recorded_leg_not_held_is_named_and_not_red(self) -> None:
+        """Reported but unmeasurable (#2163): not missing, nothing held."""
+        with Tree(PG_HELD) as tree:
+            status, out, err = run(
+                cf.hold,
+                tree.path,
+                "coverage:check",
+                "plpgsql 86.0\nplpgsql-branches not-held\n",
+                GATE,
+            )
+            after = tree.text()
+        self.assertEqual((0, ""), (status, err))
+        self.assertEqual(
+            "coverage:check: plpgsql leg holds its floor 83.4 (86.0%)\n"
+            "coverage:check: plpgsql-branches leg not held: this run cannot"
+            " measure it exactly (the measurement says why); its floor 70.0"
+            " stands\n",
+            out,
+        )
+        self.assertEqual(PG_HELD, after)
+
+    def test_a_leg_not_held_with_no_floor_yet_is_named(self) -> None:
+        """Nothing to stand and nothing derived from it: named, not red."""
+        text = record(planted("plpgsql", "83.4", "85.4"))
+        with Tree(text) as tree:
+            status, out, err = run(
+                cf.hold,
+                tree.path,
+                "coverage:check",
+                "plpgsql 86.0\nplpgsql-branches not-held\n",
+                GATE,
+            )
+        self.assertEqual((0, ""), (status, err))
+        self.assertIn(
+            "coverage:check: plpgsql-branches leg not held: this run cannot"
+            " measure it exactly (the measurement says why); it has no floor"
+            " of its own yet\n",
+            out,
+        )
+
+    def test_a_derivation_carries_a_leg_not_held_as_it_stands(self) -> None:
+        """Its line is cut from nothing, and the record keeps demanding it."""
+        with Tree(PG_HELD) as tree:
+            status, out, err = run(
+                cf.derive,
+                tree.path,
+                "plpgsql 88.0\nplpgsql-branches not-held\n",
+                "v1.2.0",
+                adopt=False,
+            )
+            parsed = clean(tree.written())
+        self.assertEqual((0, ""), (status, err))
+        self.assertEqual(("plpgsql", "plpgsql-branches"), parsed.legs)
+        self.assertEqual(Decimal("86.0"), parsed.floors["plpgsql"].floor)
+        self.assertEqual(Decimal("70.0"), parsed.floors["plpgsql-branches"].floor)
+        self.assertIn(
+            "coverage-floor: plpgsql-branches 70.0 carried (not held this run)\n",
+            out,
+        )
+
+    def test_a_leg_not_ruled_not_held_is_refused_by_hold(self) -> None:
+        """coverage:check refuses the line by name and holds nothing."""
+        with Tree(PY_HELD) as tree:
+            status, out, err = run(
+                cf.hold,
+                tree.path,
+                "coverage:check",
+                "python 86.0\npython-branches not-held\n",
+                GATE,
+            )
+            path = tree.path
+        self.assertEqual((1, ""), (status, out))
+        self.assertEqual(f"{TASK}: {path} {OPT_OUT}\n", err)
+
+    def test_a_leg_not_ruled_not_held_is_refused_by_derive(self) -> None:
+        """The derivation refuses the line by name and writes nothing."""
+        with Tree(PY_HELD) as tree:
+            status, _, err = run(
+                cf.derive,
+                tree.path,
+                "python 86.0\npython-branches not-held\n",
+                "v1.2.0",
+                adopt=False,
+            )
+            after, path = tree.text(), tree.path
+        self.assertEqual(1, status)
+        self.assertEqual(PY_HELD, after)
+        self.assertEqual(f"{TASK}: {path} {OPT_OUT}\n", err)
+
+
+# The PL/pgSQL legs on lines of their own (#2143, #2163), and the
+# Python ones, whose branch leg no ruling lets report `not-held`.
+PG_HELD = record(
+    planted("plpgsql", "83.4", "85.4"), planted("plpgsql-branches", "70.0", "72.0")
+)
+PY_HELD = record(
+    planted("python", "83.4", "85.4"), planted("python-branches", "80.0", "82.0")
+)
+
+# A `not-held` from a leg no ruling allows (#2163), as legs() names it.
+OPT_OUT = (
+    "measurement 'python-branches not-held' is not `<leg> <percent>`: only"
+    " plpgsql-branches may report `not-held` (#2163)"
+)
 
 
 def owned_record(legs: str) -> str:
