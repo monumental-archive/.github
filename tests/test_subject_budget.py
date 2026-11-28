@@ -82,11 +82,8 @@ class Stops:
     it printed, without the final newline.
     """
 
-    def __init__(
-        self,
-    ) -> None:
-        """Hold the row that expects the stop."""
-        self.case = case
+    def __init__(self) -> None:
+        """Start with nothing said."""
         self.said = ""
         self._err = io.StringIO()
         self._redirect = redirect_stderr(self._err)
@@ -116,7 +113,7 @@ class Stops:
         self._redirect.__exit__(kind, exc, tb)
         self.said = self._err.getvalue().rstrip("\n")
         if not isinstance(exc, SystemExit):
-            self.case.fail(f"the task did not stop: {exc!r}")
+            pytest.fail(f"the task did not stop: {exc!r}")
         assert 1 == exc.code, self.said
         return True
 
@@ -400,13 +397,13 @@ class TestEffective(TestResolutionCase):
         """
         incomplete = preset()
         del incomplete["commitMessageExtra"]
-        with Stops(self) as caught:
+        with Stops() as caught:
             sb.effective(owned(incomplete), dep("ruff"))
         assert "commitMessageExtra" in caught.said
 
     def test_every_missing_field_is_named_at_once(self) -> None:
         """The error lists all absent fields, not just the first."""
-        with Stops(self) as caught:
+        with Stops() as caught:
             sb.effective(owned({"packageRules": []}), dep("ruff"))
         for field in sb.MESSAGE_CONFIG:
             assert field in caught.said
@@ -500,7 +497,7 @@ class TestRepoRules(TestResolutionCase):
         thin = preset()
         del thin["commitMessageAction"]
         repo = [{"matchPackageNames": ["*"], "commitMessageAction": "bump"}]
-        with Stops(self) as caught:
+        with Stops() as caught:
             sb.effective(owned(thin, repo), dep("ruff"))
         assert "commitMessageAction" in caught.said
 
@@ -606,7 +603,7 @@ class TestRepoTopLevel(TestResolutionCase):
         """
         thin = preset()
         del thin["semanticCommitType"]
-        with Stops(self) as caught:
+        with Stops() as caught:
             sb.effective(
                 owned(thin, repo_top={"semanticCommitType": "chore"}),
                 dep("ruff"),
@@ -792,7 +789,7 @@ class TestUnmodellableMatchers:
             ],
         )
         del thin["semanticCommitScope"]
-        with Stops(self) as caught:
+        with Stops() as caught:
             sb.effective(owned(thin), dep("ruff"))
         assert "semanticCommitScope" in caught.said
 
@@ -977,16 +974,18 @@ class TestLockfileBranch:
         assert finding.subject == f"chore(deps): update serde to {version} (#999999)"
         assert finding.width == len(finding.subject)
 
-    def test_each_lock_format_reads_the_locked_version(self) -> None:
+    @pytest.mark.parametrize(("lock", "entry"), LOCKS.items())
+    def test_each_lock_format_reads_the_locked_version(
+        self, lock: str, entry: tuple[str, str, str], tmp_path: Path
+    ) -> None:
         """pnpm, npm, yarn classic and berry, bun and Cargo, one reader."""
-        for lock, (name, body, version) in LOCKS.items():
-            with self.subTest(lock=lock), TemporaryDirectory() as tmp:
-                path = Path(tmp, lock)
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_text(body, encoding="utf-8")
-                locks = sb.Locks([path])
-                assert locks.widest(locked_dep(lock, name, tmp)) == version
-                assert locks.missing == NO_LINES
+        name, body, version = entry
+        path = tmp_path / lock
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+        locks = sb.Locks([path])
+        assert locks.widest(locked_dep(lock, name, str(tmp_path))) == version
+        assert locks.missing == NO_LINES
 
     def test_a_workspace_member_reads_the_root_lock_file(self) -> None:
         """The nearest tracked lock file from the manifest up answers."""
@@ -1144,7 +1143,7 @@ class TestAdvisorySubject:
         upstream default from memory, eleven columns wide, which is the
         failure #576 exists to kill.
         """
-        with Stops(self) as caught:
+        with Stops() as caught:
             sb.advisory_suffix(sb.decode_config({}), sb.decode_config({}))
         assert "commitMessageSuffix" in caught.said
 
@@ -1309,22 +1308,21 @@ class TestConfigRefusals:
         ),
     )
 
-    def test_each_wrong_shape_is_refused_by_where_it_sits(self) -> None:
+    @pytest.mark.parametrize(("doc", "message"), ROWS)
+    def test_each_wrong_shape_is_refused_by_where_it_sits(
+        self, doc: dict[str, object], message: str
+    ) -> None:
         """One row per value decoded, each refused by its own message."""
-        for doc, message in self.ROWS:
-            with (
-                self.subTest(message=message),
-                pytest.raises(decoded.UndecodableError) as caught,
-            ):
-                sb.decode_config(doc)
-            assert str(caught.value) == message
+        with pytest.raises(decoded.UndecodableError) as caught:
+            sb.decode_config(doc)
+        assert str(caught.value) == message
 
     def test_a_wrong_shaped_file_stops_the_task_by_name(self) -> None:
         """The refusal carries the task's label and the file's path."""
         with TemporaryDirectory() as tmp:
             path = Path(tmp) / "renovate.json"
             path.write_text('{"packageRules": {}}', encoding="utf-8")
-            with Stops(self) as caught:
+            with Stops() as caught:
                 sb.read_config(path, [])
         assert caught.said == f"lint:subject-budget: {path}: packageRules is not a list"
 
@@ -1375,26 +1373,24 @@ class TestCeiling:
                 hermetic.patch_env(patched, env)
                 sb.ceiling()
 
-    def test_a_ceiling_of_the_wrong_shape_is_refused_by_name(self) -> None:
-        """Unparsable, absent or not an integer: the task stops, named."""
-        rows = (
+    @pytest.mark.parametrize(
+        ("text", "message"),
+        [
             ("subject_length = \n", "Invalid value (at line 1, column 18)"),
             ("x = 1\n", "subject_length is not an integer"),
             ('subject_length = "72"\n', "subject_length is not an integer"),
-        )
-        for text, message in rows:
-            with TemporaryDirectory() as tmp:
-                config = Path(tmp) / "committed.toml"
-                config.write_text(text, encoding="utf-8")
-                env: dict[str, str] = {"ORG_BELT_DIR": tmp}
-                with (
-                    pytest.MonkeyPatch.context() as patched,
-                    self.subTest(text=text),
-                    Stops(self) as caught,
-                ):
-                    hermetic.patch_env(patched, env)
-                    sb.ceiling()
-            assert caught.said == f"lint:subject-budget: {config}: {message}"
+        ],
+    )
+    def test_a_ceiling_of_the_wrong_shape_is_refused_by_name(
+        self, text: str, message: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Unparsable, absent or not an integer: the task stops, named."""
+        config = tmp_path / "committed.toml"
+        config.write_text(text, encoding="utf-8")
+        monkeypatch.setenv("ORG_BELT_DIR", str(tmp_path))
+        with Stops() as caught:
+            sb.ceiling()
+        assert caught.said == f"lint:subject-budget: {config}: {message}"
 
     def test_the_canon_ceiling_is_what_the_org_ships(self) -> None:
         """The delivered file parses and carries a subject_length."""
@@ -1587,36 +1583,13 @@ class TestMainGuards:
                 os.chdir(root)
                 try:
                     with redirect_stdout(out), redirect_stderr(err):
-                        status = sb.main()
+                        status = sb.main([])
                 except SystemExit as stop:
                     # A refusal the task stops on: said as a finding, exit 1.
                     status = stop.code if isinstance(stop.code, int) else 1
                 finally:
                     os.chdir(cwd)
             return status, out.getvalue(), err.getvalue()
-
-    def test_every_row_leaves_the_directory_where_it_started(self) -> None:
-        """Each row's helper puts the process back where it found it (#1491).
-
-        The row that fails before #1491: `run_tree` read `Path.cwd()` after
-        patching it, so its restore went back into the temporary root,
-        which was then deleted under the process.
-        """
-        start = Path.cwd()
-        names = [
-            name
-            for name in unittest.TestLoader().getTestCaseNames(TestMainGuards)
-            if name != self._testMethodName
-        ]
-        assert names
-        for name in names:
-            TestMainGuards(name).run(unittest.TestResult())
-            try:
-                here = str(Path.cwd())
-            except FileNotFoundError:
-                here = "a deleted directory"
-            os.chdir(start)
-            assert here == str(start)
 
     def test_no_renovate_json_skips_clean(self) -> None:
         """Nothing mints subjects here, so there is nothing to bound."""
@@ -1948,7 +1921,10 @@ class TestWrongShapedManifests:
         ("mise.toml", b'tools = { "" = false }\n', "declares no readable version"),
     )
 
-    def test_each_is_recorded(self) -> None:
+    @pytest.mark.parametrize(("name", "data", "said"), ROWS)
+    def test_each_is_recorded(
+        self, name: str, data: bytes, said: str, tmp_path: Path
+    ) -> None:
         """No dependency, and one report line naming the file."""
         readers = {
             "package.json": sb.from_npm,
@@ -1956,12 +1932,10 @@ class TestWrongShapedManifests:
             "go.mod": sb.from_gomod,
             "mise.toml": sb.from_mise,
         }
-        for name, data, said in self.ROWS:
-            with self.subTest(name=name, data=data), TemporaryDirectory() as scratch:
-                path = Path(scratch) / name
-                path.write_bytes(data)
-                report: list[str] = []
-                assert readers[name]([path], report) == NO_DEPS
-                assert len(report) == 1, report
-                assert said in report[0]
-                assert report[0].startswith(str(path))
+        path = tmp_path / name
+        path.write_bytes(data)
+        report: list[str] = []
+        assert readers[name]([path], report) == NO_DEPS
+        assert len(report) == 1, report
+        assert said in report[0]
+        assert report[0].startswith(str(path))

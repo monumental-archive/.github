@@ -59,7 +59,7 @@ def run(files: dict[str, str], argv: list[str] | None = None) -> tuple[int, str,
             contextlib.redirect_stdout(out),
             contextlib.redirect_stderr(err),
         ):
-            status = pl.main(argv or ["project_licence.py", "fix:test"])
+            status = pl.main(["fix:test"] if argv is None else argv)
         return status, out.getvalue(), err.getvalue()
 
 
@@ -118,6 +118,6 @@ class TestReader:
 
     def test_usage(self) -> None:
         """No caller is a usage error, not a pass."""
-        status, out, err = run({}, ["project_licence.py"])
-        usage = f"{TASK}: usage: project_licence.py <caller>\n"
+        status, out, err = run({}, [])
+        usage = f"{TASK}: usage: belt project-licence <caller>\n"
         assert (2, "", usage) == (status, out, err)

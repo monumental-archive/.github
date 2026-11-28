@@ -77,11 +77,8 @@ class Stops:
     it printed, without the final newline.
     """
 
-    def __init__(
-        self,
-    ) -> None:
-        """Hold the row that expects the stop."""
-        self.case = case
+    def __init__(self) -> None:
+        """Start with nothing said."""
         self.said = ""
         self._err = io.StringIO()
         self._redirect = redirect_stderr(self._err)
@@ -111,7 +108,7 @@ class Stops:
         self._redirect.__exit__(kind, exc, tb)
         self.said = self._err.getvalue().rstrip("\n")
         if not isinstance(exc, SystemExit):
-            self.case.fail(f"the task did not stop: {exc!r}")
+            pytest.fail(f"the task did not stop: {exc!r}")
         assert 1 == exc.code, self.said
         return True
 
@@ -302,8 +299,32 @@ class TestWorkspacePackage:
 
     def test_an_unreadable_manifest_stops_the_task(self) -> None:
         """A manifest missing where cargo named the root is broken."""
-        with TemporaryDirectory() as tmp, Stops(self):
+        with TemporaryDirectory() as tmp, Stops():
             wi.workspace_package(Path(tmp))
+
+
+# Each wrong-shaped account, and where its refusal says it is wrong.
+WRONG_SHAPES: tuple[tuple[object, str], ...] = (
+    ([], "the document is not an object"),
+    ({"workspace_root": 1}, "workspace_root is not a string"),
+    (
+        {"workspace_root": "/ws", "workspace_members": [1]},
+        "workspace_members is not a list of strings",
+    ),
+    ({"workspace_root": "/ws", "packages": {}}, "packages is not a list"),
+    (
+        {"workspace_root": "/ws", "packages": [1]},
+        "packages[0] is not an object",
+    ),
+    (
+        {
+            "workspace_root": "/ws",
+            "workspace_members": ["a"],
+            "packages": [{"id": "a", "name": 1}],
+        },
+        "packages[0].name is not a string",
+    ),
+)
 
 
 class TestMain:
@@ -372,42 +393,23 @@ class TestMain:
         assert status == 1
         assert "names no workspace member" in err
 
-    def test_metadata_of_the_wrong_shape_stops_the_task_by_where(self) -> None:
+    @pytest.mark.parametrize(("document", "where"), WRONG_SHAPES)
+    def test_metadata_of_the_wrong_shape_stops_the_task_by_where(
+        self, document: object, where: str
+    ) -> None:
         """A wrong-shaped account is refused naming where, never a crash."""
         said = f"{TASK}: Cargo.toml: cargo metadata is unreadable"
-        shapes: tuple[tuple[object, str], ...] = (
-            ([], "the document is not an object"),
-            ({"workspace_root": 1}, "workspace_root is not a string"),
-            (
-                {"workspace_root": "/ws", "workspace_members": [1]},
-                "workspace_members is not a list of strings",
-            ),
-            ({"workspace_root": "/ws", "packages": {}}, "packages is not a list"),
-            (
-                {"workspace_root": "/ws", "packages": [1]},
-                "packages[0] is not an object",
-            ),
-            (
-                {
-                    "workspace_root": "/ws",
-                    "workspace_members": ["a"],
-                    "packages": [{"id": "a", "name": 1}],
-                },
-                "packages[0].name is not a string",
-            ),
-        )
-        for document, where in shapes:
-            err = io.StringIO()
-            with self.subTest(where=where), redirect_stderr(err):
-                assert wi.check(json.dumps(document), "Cargo.toml") == 1
-            assert f"{said} ({where})\n" == err.getvalue()
+        err = io.StringIO()
+        with redirect_stderr(err):
+            assert wi.check(json.dumps(document), "Cargo.toml") == 1
+        assert f"{said} ({where})\n" == err.getvalue()
 
     def test_a_manifest_of_the_wrong_shape_stops_the_task(self) -> None:
         """`[workspace]` that is not a table is named, never a crash."""
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "Cargo.toml").write_text("workspace = 1\n", encoding="utf-8")
-            with Stops(self) as stopped:
+            with Stops() as stopped:
                 wi.workspace_package(root)
         assert (
             f"{TASK}: {root}/Cargo.toml is unreadable (workspace is not an object)"
@@ -496,11 +498,11 @@ def account_of(root: Path, crate: str, **fields: object) -> dict[str, object]:
 class TwoRoots:
     """A planted tree with two workspaces, cargo stubbed."""
 
-    def __init__(self, fetch_fails: str = "", locate_fails: str = "") -> None:
-        """Plant the tree, the stub and each root's account."""
-        scratch = TemporaryDirectory()
-        case.addCleanup(scratch.cleanup)
-        base = Path(scratch.name).resolve()
+    def __init__(
+        self, scratch: Path, fetch_fails: str = "", locate_fails: str = ""
+    ) -> None:
+        """Plant the tree, the stub and each root's account in `scratch`."""
+        base = scratch.resolve()
         self.tree = base / "repo"
         accounts = base / "accounts"
         accounts.mkdir()
@@ -573,18 +575,18 @@ class TwoRoots:
 class TestEveryRoot:
     """Each workspace in the tree is judged, past a red one (#2004)."""
 
-    def test_a_key_no_member_of_the_second_root_takes_is_red(self) -> None:
+    def test_a_key_no_member_of_the_second_root_takes_is_red(self, tmp_path: Path) -> None:
         """fuzz/Cargo.toml's `edition`: nonzero, naming the key and the root."""
-        planted = TwoRoots(self)
+        planted = TwoRoots(tmp_path)
         done = planted.main()
         assert (done.returncode, done.stdout) == (1, TOP_GREEN)
         assert done.stderr.startswith(INERT_IN_FUZZ), done.stderr
         declared = f"  Declared in {planted.tree}/fuzz/Cargo.toml under"
         assert declared in done.stderr
 
-    def test_a_failing_cargo_is_red_with_its_text_and_the_rest_judged(self) -> None:
+    def test_a_failing_cargo_is_red_with_its_text_and_the_rest_judged(self, tmp_path: Path) -> None:
         """Fetch refused for the top root: cargo's words; fuzz still judged."""
-        done = TwoRoots(self, fetch_fails="Cargo.toml").main()
+        done = TwoRoots(tmp_path, fetch_fails="Cargo.toml").main()
         assert (done.returncode, done.stdout) == (1, "")
         assert (
             f"{TASK}: Cargo.toml: cargo fetch failed\n"
@@ -602,16 +604,16 @@ class TestEveryRoot:
             "usage: belt workspace-inherit <root Cargo.toml>...\n",
         )
 
-    def test_the_task_reads_the_roots_and_judges_both(self) -> None:
+    def test_the_task_reads_the_roots_and_judges_both(self, tmp_path: Path) -> None:
         """The body, end to end: the derivation's roots, the fuzz one red."""
-        done = TwoRoots(self).task()
+        done = TwoRoots(tmp_path).task()
         assert done.returncode == 1, done.stdout + done.stderr
         assert done.stdout == TOP_GREEN
         assert INERT_IN_FUZZ in done.stderr
 
-    def test_the_task_stops_when_the_derivation_fails(self) -> None:
+    def test_the_task_stops_when_the_derivation_fails(self, tmp_path: Path) -> None:
         """locate-project refused: its finding, exit 1, the helper never run."""
-        done = TwoRoots(self, locate_fails="fuzz/Cargo.toml").task()
+        done = TwoRoots(tmp_path, locate_fails="fuzz/Cargo.toml").task()
         assert (done.returncode, done.stdout) == (1, "")
         assert (
             f"{TASK}: cargo locate-project failed for fuzz/Cargo.toml\n"

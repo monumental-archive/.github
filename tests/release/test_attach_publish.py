@@ -161,7 +161,7 @@ class TestAttachAndPublish:
         else:
 
             def call() -> int:
-                return attach_publish.main()
+                return attach_publish.main([])
 
             done = hermetic.call(call, env=env, cwd=self.work)
         lines = log.read_text(encoding="utf-8").splitlines() if log.is_file() else []

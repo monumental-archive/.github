@@ -153,7 +153,7 @@ def run_helper(
         else:
 
             def call() -> int:
-                return source_archive.main()
+                return source_archive.main([])
 
             result = hermetic.call(call, env=env, cwd=work)
         dist = work / "dist"

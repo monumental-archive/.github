@@ -115,7 +115,7 @@ def run_helper(mains: str, broken: str = "", *, script: bool = False) -> Run:
         else:
 
             def call() -> int:
-                return build_go_commands.main()
+                return build_go_commands.main([])
 
             result = hermetic.call(call, env=env, cwd=work)
         staged = work / "staged"

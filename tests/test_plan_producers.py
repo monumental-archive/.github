@@ -381,52 +381,53 @@ class TestMainTest:
         missing = REPO / "slsa" / "no-such-policy.json"
         err = io.StringIO()
         with pytest.MonkeyPatch.context() as patched, redirect_stderr(err):
-            patched.setattr("sys.argv", ["plan_producers.py", "--policy", str(missing)])
-            assert pp.main() == 1
+            assert pp.main(["--policy", str(missing)]) == 1
         assert "does not read as JSON" in err.getvalue()
+
+
+# Every field the check reads, wrongly shaped, and its refusal.
+WRONG_SHAPES: list[tuple[object, str]] = [
+        ([], "the policy is not an object"),
+        ({"evidence": []}, "evidence is not an object"),
+        ({"evidence": {"classes": 1}}, "evidence.classes is not an object"),
+        (
+            {"evidence": {"classes": {"x": []}}},
+            "evidence.classes.x is not an object",
+        ),
+        (
+            {"evidence": {"classes": {"x": {"assetPrefixes": {}}}}},
+            "evidence.classes.x.assetPrefixes is not a list",
+        ),
+        (
+            {"evidence": {"classes": {"x": {"assetPrefixes": ["p"]}}}},
+            "evidence.classes.x.assetPrefixes[0] is not an object",
+        ),
+        (
+            {"evidence": {"classes": {"x": {"assetPrefixes": [{"prefix": 1}]}}}},
+            "evidence.classes.x.assetPrefixes[0].prefix is not a string",
+        ),
+        (
+            {
+                "evidence": {
+                    "classes": {
+                        "x": {"assetPrefixes": [{"prefix": "p", "planned": 1}]}
+                    }
+                }
+            },
+            "evidence.classes.x.assetPrefixes[0].planned is not a boolean",
+        ),
+]
 
 
 class TestPolicyShapeTest:
     """A policy field of the wrong shape is refused by its path."""
 
-    def test_each_wrong_shape_names_its_field(self) -> None:
+    @pytest.mark.parametrize(("doc", "message"), WRONG_SHAPES)
+    def test_each_wrong_shape_names_its_field(self, doc: object, message: str) -> None:
         """Every field the check reads, wrongly shaped in turn."""
-        rows = [
-            ([], "the policy is not an object"),
-            ({"evidence": []}, "evidence is not an object"),
-            ({"evidence": {"classes": 1}}, "evidence.classes is not an object"),
-            (
-                {"evidence": {"classes": {"x": []}}},
-                "evidence.classes.x is not an object",
-            ),
-            (
-                {"evidence": {"classes": {"x": {"assetPrefixes": {}}}}},
-                "evidence.classes.x.assetPrefixes is not a list",
-            ),
-            (
-                {"evidence": {"classes": {"x": {"assetPrefixes": ["p"]}}}},
-                "evidence.classes.x.assetPrefixes[0] is not an object",
-            ),
-            (
-                {"evidence": {"classes": {"x": {"assetPrefixes": [{"prefix": 1}]}}}},
-                "evidence.classes.x.assetPrefixes[0].prefix is not a string",
-            ),
-            (
-                {
-                    "evidence": {
-                        "classes": {
-                            "x": {"assetPrefixes": [{"prefix": "p", "planned": 1}]}
-                        }
-                    }
-                },
-                "evidence.classes.x.assetPrefixes[0].planned is not a boolean",
-            ),
-        ]
-        for doc, message in rows:
-            refused = decoded.UndecodableError
-            with self.subTest(doc=doc), pytest.raises(refused) as cm:
-                pp.read_policy(doc)
-            assert str(cm.value) == message
+        with pytest.raises(decoded.UndecodableError) as cm:
+            pp.read_policy(doc)
+        assert str(cm.value) == message
 
     def test_the_fixture_decodes(self) -> None:
         """Classes are every declared class; obligations only the planned."""
@@ -448,8 +449,7 @@ class TestPolicyShapeTest:
             bad.write_text('{"evidence": {"classes": []}}', encoding="utf-8")
             err = io.StringIO()
             with pytest.MonkeyPatch.context() as patched, redirect_stderr(err):
-                patched.setattr("sys.argv", ["plan_producers.py", "--policy", str(bad)])
-                assert pp.main() == 1
+                assert pp.main(["--policy", str(bad)]) == 1
         assert err.getvalue() == f"{TASK}: {bad}: evidence.classes is not an object\n"
 
     def test_main_refuses_a_duplicate_key_as_json(self) -> None:
@@ -459,8 +459,7 @@ class TestPolicyShapeTest:
             bad.write_text('{"evidence": {}, "evidence": {}}', encoding="utf-8")
             err = io.StringIO()
             with pytest.MonkeyPatch.context() as patched, redirect_stderr(err):
-                patched.setattr("sys.argv", ["plan_producers.py", "--policy", str(bad)])
-                assert pp.main() == 1
+                assert pp.main(["--policy", str(bad)]) == 1
         assert (
             err.getvalue()
             == f'{TASK}: {bad} does not read as JSON\n  duplicate key "evidence"\n'

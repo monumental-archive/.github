@@ -257,5 +257,5 @@ class TestLicenceTexts:
         """An argument is a usage error, not a pass."""
         err = io.StringIO()
         with contextlib.redirect_stderr(err):
-            assert lt.main(["licence_texts.py", "extra"]) == 2
+            assert lt.main(["extra"]) == 2
         assert f"{TASK}: usage: org_tracked | licence_texts.py\n" == err.getvalue()

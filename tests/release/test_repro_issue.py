@@ -111,7 +111,7 @@ class TestFileAnIssue:
         else:
 
             def call() -> int:
-                return repro_issue.main()
+                return repro_issue.main([])
 
             proc = hermetic.call(call, env=env)
         assert proc.returncode == 0, proc.stdout + proc.stderr

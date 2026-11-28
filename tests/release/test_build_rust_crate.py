@@ -299,7 +299,7 @@ def steps(job: Job, *, script: bool) -> Run:
             if argv == [HELPER] and not script:
 
                 def call() -> int:
-                    return package_crates.main()
+                    return package_crates.main([])
 
                 result = hermetic.call(call, env=env, cwd=work)
             else:

@@ -570,7 +570,7 @@ class TestMain:
         with pytest.MonkeyPatch.context() as patched:
             patched.setattr(publish_crates, "run", failure)
             patched.setattr(sys, "stderr", out)
-            code = publish_crates.main()
+            code = publish_crates.main([])
         return code, out.getvalue()
 
     def test_a_refusal_is_printed_and_exits_1(self) -> None:
@@ -593,4 +593,4 @@ class TestMain:
         with pytest.MonkeyPatch.context() as patched:
             patched.setattr(publish_crates, "run", hermetic.returning(0))
             patched.setattr(sys, "stdout", io.StringIO())
-            assert publish_crates.main() == 0
+            assert publish_crates.main([]) == 0

@@ -141,7 +141,7 @@ class TestReadTheLatestRelease:
         else:
 
             def call() -> int:
-                return repro_resolve.main()
+                return repro_resolve.main([])
 
             done = hermetic.call(call, env=env, cwd=self.work)
         return done, output.read_text(encoding="utf-8")

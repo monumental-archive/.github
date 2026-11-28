@@ -1,4 +1,4 @@
-"""Run `mise/squash_message.py` against a stub `mise` (#1386).
+"""Call `belt squash-message` against a stub `mise` (#1386).
 
 The gate's squash-message step is now one call to the helper. These rows
 run it as the step does, with a stub `mise` first on PATH that keeps a
@@ -24,10 +24,10 @@ import pytest
 from belt import squash_message
 from tests import hermetic
 
-HELPER = hermetic.MISE / "squash_message.py"
-# A workflow step runs the helper outside mise, so its findings carry the
-# script's own name (findings.task_name, #1934).
-STEP = "squash_message.py"
+# A workflow step runs the command outside mise, so its findings carry
+# the command's own name, which the launcher sets (findings.task_name,
+# #1934).
+STEP = "squash-message"
 STUB_MISE = """#!/usr/bin/env bash
 printf '%s\\n' "$*" > "${STUB_DIR}/mise-args"
 cp "${ORG_COMMIT_MSG_FILE}" "${STUB_DIR}/checked-message"
@@ -178,12 +178,11 @@ class TestStepHarness:
             The status and both streams.
 
         """
-        with pytest.MonkeyPatch.context() as patched:
-            patched.setattr(sys, "argv", [STEP])
-            return hermetic.call(
-                lambda: squash_message.main([]),
-                env=self.step_env(title, body, verdict),
-            )
+        return hermetic.call(
+            lambda: squash_message.main([]),
+            env=self.step_env(title, body, verdict),
+            command=STEP,
+        )
 
     def checked(self) -> str:
         """Read the message `commits:check` was handed.
@@ -199,18 +198,6 @@ class TestStepHarness:
 
 class TestSquashMessage(TestStepHarness):
     """Each row: a title and body, and the commit the merge would mint."""
-
-    def test_the_script_contract(self) -> None:
-        """Started as a process, it reads the step's variables and exits 0."""
-        done = subprocess.run(
-            [sys.executable, str(HELPER)],
-            env=self.step_env("fix: a thing (#700)", "", 0),
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=60,
-        )
-        assert (done.returncode, done.stdout) == (0, PASSES), done.stderr
 
     def test_title_ending_in_its_own_reference(self) -> None:
         """#800: the merge would append the PR's number a second time."""

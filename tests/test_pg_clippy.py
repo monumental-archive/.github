@@ -15,12 +15,11 @@ pytest, run by `mise run test`.py;"""
 import os
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 import pytest
 
-from belt import pg_clippy, rust_workspaces
+from belt import pg_clippy, pgrx_postgres, rust_workspaces
 from tests import hermetic
 from tests import test_rust_lint as planted
 
@@ -93,8 +92,12 @@ class TestPlanted:
     """A planted tree, a planted belt and the stubs."""
 
     @pytest.fixture
-    def _set_up_test_planted(self, tmp_path: Path) -> None:
+    def _set_up_test_planted(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Plant the tree, the belt and the stubs."""
+        # `belt pgrx-postgres`, which the registration calls in process.
+        monkeypatch.setattr(pgrx_postgres, "main", planted.stub_pin)
         tmp = tmp_path
         self.tree = tmp / "repo"
         self.bins = tmp / "bin"
@@ -112,7 +115,6 @@ class TestPlanted:
             stubs={
                 "clippy-ladder.sh": planted.STUB_LADDER,
                 "pgrx-env.sh": PGRX_ENV,
-                "pgrx_postgres.py": planted.STUB_PIN,
             },
         )
         self.log = tmp / "log"
@@ -158,27 +160,6 @@ class TestPlanted:
                 cwd=self.tree,
             )
 
-    def call_child(self, **stub: str) -> tuple[hermetic.Called, str]:
-        """Call main, reading what a child wrote to descriptor 2.
-
-        A finding a belt shell function or helper writes is a child's,
-        on this process's descriptor 2, which call_main does not hold.
-
-        Returns:
-            The call's status and streams, and the child's stderr.
-
-        """
-        with tempfile.TemporaryFile() as caught:
-            saved = os.dup(2)
-            os.dup2(caught.fileno(), 2)
-            try:
-                done = self.call(**stub)
-            finally:
-                os.dup2(saved, 2)
-                os.close(saved)
-            caught.seek(0)
-            return done, caught.read().decode()
-
     def logged(self) -> list[str]:
         """Read what the stubs were asked.
 
@@ -209,7 +190,7 @@ class TestBranches(TestPlanted):
     def test_an_argument_is_a_usage_error(self) -> None:
         """The task passes none; anything else is a caller's mistake."""
         done = self.call("lint")
-        self.assert_finding(done, 2, "usage: pg_clippy.py")
+        self.assert_finding(done, 2, "usage: belt pg-clippy")
         self.assert_logged()
 
     def test_cargo_missing_is_red(self) -> None:
@@ -238,19 +219,19 @@ class TestBranches(TestPlanted):
     def test_a_red_surface_is_never_a_workspace_with_no_extension(self) -> None:
         """gate_surface.py refuses the metadata: its status, not the skip."""
         self.metadata.write_text("not json", encoding="utf-8")
-        done, child = self.call_child()
+        done = self.call()
         assert done.returncode == 1
-        assert child.startswith("lint:pg-clippy: cargo metadata did not give JSON\n"), (
-            child
-        )
+        assert done.stderr.startswith(
+            "lint:pg-clippy: cargo metadata did not give JSON\n"
+        ), done.stderr
         self.assert_logged(FETCH, METADATA)
         assert done.stdout == ""
 
     def test_a_major_that_is_not_a_number_is_red(self) -> None:
         """pgrx-env.sh's union refuses it by name (#1795)."""
-        done, child = self.call_child(STUB_BAD_MAJOR="1")
+        done = self.call(STUB_BAD_MAJOR="1")
         assert done.returncode == 1
-        assert child == "lint:pg-clippy: ext@0.1.0 names no Postgres major: 'pg17'\n"
+        assert done.stderr == "lint:pg-clippy: ext@0.1.0 names no Postgres major: 'pg17'\n"
         self.assert_logged(FETCH, METADATA)
         assert done.stdout == ""
 

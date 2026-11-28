@@ -4,7 +4,7 @@ Hypothesis types `given(...)` as returning `Callable[..., None]`. Under
 the belt's mypy (`disallow_any_expr`, `disallow_any_decorated`, mise/
 mypy.ini) that `Any` reds the decorator and the decorated test on every
 property, whatever the property says. The org's properties take one
-form: positional strategies on a `unittest.TestCase` method. For that
+form: positional strategies on a test class's method. For that
 form an exact type exists, written here as one overload per arity:
 each strategy's value type must match its parameter after `self`, and
 the decorated test takes `self` alone. A strategy that does not match
@@ -13,10 +13,11 @@ own typing would let through. The arities are the ones the canon's 54
 property files use (1 to 6); a seventh strategy is "no overload
 variant", red until an overload is added here.
 
-`mise/python_properties.py` puts this directory on the path for the
-run and `mise/python-types.sh` hands mypy the same, so a repository's
-property file needs one line, `from typed_hypothesis import given`;
-`test:python-properties` refuses `given` taken from `hypothesis`.
+`belt python-properties` puts the canon's tree on pytest's path for
+the run and `mise/python-types.sh` hands mypy the same, so a
+repository's property file needs one line,
+`from belt.typed_hypothesis import given`; `test:python-properties`
+refuses `given` taken from `hypothesis`.
 """
 
 from typing import TYPE_CHECKING, cast, overload

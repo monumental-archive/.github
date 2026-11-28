@@ -236,7 +236,7 @@ class TestPlanted:
                 hermetic.returning(None if roots is None else list(roots)),
             )
             if manifest is None:
-                status = msrv_lint.main()
+                status = msrv_lint.main([])
             else:
                 status, checked = msrv_lint.workspace(manifest, self.tmp / "pins")
                 msrv_lint.say(f"{checked} checked")

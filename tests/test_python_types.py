@@ -125,7 +125,7 @@ def real_mypy() -> str | None:
 
 # Each looked up once, at import, as the skip decorators they replace did.
 MYPY = real_mypy()
-HYPOTHESIS = hermetic.optional_tool("hypothesis")
+HYPOTHESIS = hermetic.optional_tool("pytest")
 
 
 @dataclass(frozen=True)
@@ -150,7 +150,7 @@ def run(
     `files` are written and tracked. The belt is the whole one, less
     the files `missing` names. With `stub`, a stub mypy leads PATH and
     `stub` is its environment; without, PATH is the suite's. With
-    `stale_venv` (and `stub`), a `hypothesis` entry point with no
+    `stale_venv` (and `stub`), a `pytest` entry point with no
     interpreter beside it leads PATH too: a venv left on a removed
     Python.
 
@@ -178,8 +178,8 @@ def run(
             (bindir / "mypy").write_text(STUB, encoding="utf-8")
             (bindir / "mypy").chmod(0o755)
             if stale_venv:
-                (bindir / "hypothesis").write_text("#!/bin/sh\n", encoding="utf-8")
-                (bindir / "hypothesis").chmod(0o755)
+                (bindir / "pytest").write_text("#!/bin/sh\n", encoding="utf-8")
+                (bindir / "pytest").chmod(0o755)
             env["PATH"] = f"{bindir}{os.pathsep}{env['PATH']}"
             env |= {"STUB_LOG": str(log), "STUB_VERSION": pinned(), **stub}
         as_mise = hermetic.task_run("lint:python-types", body())
@@ -213,14 +213,14 @@ class TestTheWiring:
         assert f"{LABEL}: no Python tracked, skipped\n" == done.stdout
         assert list[str]() == done.args
 
-    def test_a_hypothesis_venv_with_no_interpreter_is_red(self) -> None:
-        """The Hypothesis venv mypy would read has no python: refused (#1788)."""
+    def test_a_pytest_venv_with_no_interpreter_is_red(self) -> None:
+        """The tool venv mypy would read has no python: refused (#1788)."""
         done = run(CLEAN, stub={}, stale_venv=True)
         assert done.returncode == 1
         assert re.search(
-            rf"\A{LABEL}: hypothesis runs on 'no interpreter' but the suite's"
+            rf"\A{LABEL}: pytest runs on 'no interpreter' but the suite's"
             r" python3 is '3\.[^']+' — the tool venv must be built on the"
-            r" belt's python pin \(reinstall: mise install -f pipx:hypothesis\)\n\Z",
+            r" belt's python pin \(reinstall: mise install -f pipx:pytest\)\n\Z",
             done.stderr,
         )
         assert list[str]() == done.args
@@ -395,37 +395,9 @@ class TestTheHelpers:
     def test_too_few_arguments_is_a_usage_error(self) -> None:
         """No belt or no file: exit 2 with the usage."""
         done = hermetic.call(lambda: python_roots.main([str(BELT)]))
-        assert (2, f"{TASK}: usage: python_roots.py <belt-dir> <file>...\n") == (
+        assert (2, f"{TASK}: usage: belt python-roots <belt-root> <file>...\n") == (
             done.returncode,
             done.stderr,
-        )
-
-    def test_the_seams_script_contract(self) -> None:
-        """python_types_seams started as a process: arguments in, exit 1."""
-        with tempfile.TemporaryDirectory() as tmp:
-            (Path(tmp) / "a.py").write_text("# type: ignore\n", encoding="utf-8")
-            done = subprocess.run(
-                [sys.executable, str(BELT / "python_types_seams.py"), "a.py"],
-                cwd=tmp,
-                env=hermetic.env(),
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-        assert (1, f"a.py:1: {IGNORED}\n") == (done.returncode, done.stdout)
-
-    def test_the_roots_script_contract(self) -> None:
-        """python_roots started as a process: no file is exit 2 and the usage."""
-        done = subprocess.run(
-            [sys.executable, str(BELT / "python_roots.py"), str(BELT)],
-            env=hermetic.env(),
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        assert (done.returncode, done.stderr) == (
-            2,
-            "python_roots.py: usage: belt python-roots <belt-dir> <file>...\n",
         )
 
 
@@ -524,19 +496,17 @@ class TestTheConfig:
 PROPERTY = """\
 \"\"\"A property.\"\"\"
 
-import unittest
-
 from hypothesis import strategies as st
 from belt.typed_hypothesis import given
 
 
-class Holds(unittest.TestCase):
+class Holds:
     \"\"\"Doubling.\"\"\"
 
     @given(st.integers(), st.data())
     def test_double(self, n: int, data: st.DataObject) -> None:
         \"\"\"Even.\"\"\"
-        self.assertEqual((2 * n + 2 * data.draw(st.integers())) % 2, 0)
+        assert (2 * n + 2 * data.draw(st.integers())) % 2 == 0
 """
 
 
@@ -550,7 +520,7 @@ class TestTheTypedGiven:
         if not MYPY:
             pytest.skip("the belt's pinned mypy is not installed here")
         if not HYPOTHESIS:
-            pytest.skip("the belt's Hypothesis is not installed here")
+            pytest.skip("the belt's pytest venv is not installed here")
 
     def test_a_property_is_clean(self) -> None:
         """No finding on the decorator or the decorated test."""
@@ -560,7 +530,8 @@ class TestTheTypedGiven:
 
     def test_the_body_is_still_checked(self) -> None:
         """An `int` parameter used as a `str` is red."""
-        text = PROPERTY.replace("% 2, 0)", "% 2, 0)\n        n.upper()")
+        text = PROPERTY.replace("% 2 == 0\n", "% 2 == 0\n        n.upper()\n")
+        assert text != PROPERTY
         done = run({"prop_a.py": text})
         assert done.returncode == 1
         assert 'error: "int" has no attribute "upper"  [attr-defined]' in done.stdout

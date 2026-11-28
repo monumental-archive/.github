@@ -31,7 +31,7 @@ from pathlib import Path
 
 import pytest
 
-from belt import decoded, rust_lint, rust_workspaces
+from belt import decoded, pgrx_postgres, rust_lint, rust_workspaces
 from tests import hermetic
 
 BELT = hermetic.MISE
@@ -194,15 +194,9 @@ class TestEveryMemberIsLinted:
             asked = log.read_text(encoding="utf-8").split() if log.exists() else []
         return done, asked
 
-    def assert_every_member_linted(
-        done: subprocess.CompletedProcess[str], asked: list[str]
-    ) -> None:
-        """Clippy reached every member and named the red one."""
-        assert_every_member_linted(done, asked)
-
     def test_a_red_first_member_leaves_the_rest_linted(self) -> None:
         """All six members are asked; the red one is named; cargo's 101 is kept."""
-        self.assert_every_member_linted(*self.lint())
+        assert_every_member_linted(*self.lint())
 
     def test_clippy_ahead_of_a_long_listing_is_found(self) -> None:
         """`clippy…` first, then 200 kB: the component is there (#1637).
@@ -216,7 +210,7 @@ class TestEveryMemberIsLinted:
             STUB_LAST="rustfmt-x86_64-unknown-linux-gnu",
         )
         assert "component missing" not in done.stderr
-        self.assert_every_member_linted(done, asked)
+        assert_every_member_linted(done, asked)
 
     def test_rustfmt_ahead_of_a_long_listing_is_found(self) -> None:
         """`rustfmt…` first, then 200 kB, then clippy: both are there (#1637).
@@ -230,7 +224,7 @@ class TestEveryMemberIsLinted:
             STUB_LAST="clippy-x86_64-unknown-linux-gnu",
         )
         assert "component missing" not in done.stderr
-        self.assert_every_member_linted(done, asked)
+        assert_every_member_linted(done, asked)
 
 
 LIB = "src/lib.rs"
@@ -482,13 +476,20 @@ org_pgrx_darwin_prepare() {
 }
 org_pgrx_major_env() { export STUB_MAJOR="pg$1"; }
 """
-STUB_PIN = """
-import os
-import sys
 
-sys.stdin.read()
-sys.exit(int(os.environ.get("STUB_PIN_STATUS", "0")))
-"""
+
+def stub_pin(argv: list[str]) -> int:
+    """Stand in for `belt pgrx-postgres`: read the listing, answer STUB_PIN_STATUS.
+
+    Returns:
+        The planted status, 0 unless the row names one.
+
+    """
+    del argv
+    sys.stdin.read()
+    return int(os.environ.get("STUB_PIN_STATUS", "0"))
+
+
 FIX_CARGO = (
     LOCATE
     + """\
@@ -585,8 +586,12 @@ class TestPlanted:
     cargo = STUB_CARGO
 
     @pytest.fixture
-    def _set_up_test_planted(self, tmp_path: Path) -> None:
+    def _set_up_test_planted(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Plant the tree, the belt and the stubs."""
+        # `belt pgrx-postgres`, which the registration calls in process.
+        monkeypatch.setattr(pgrx_postgres, "main", stub_pin)
         tmp = tmp_path
         self.tree = tmp / "repo"
         self.bins = tmp / "bin"
@@ -606,7 +611,6 @@ class TestPlanted:
             stubs={
                 "clippy-ladder.sh": STUB_LADDER,
                 "pgrx-env.sh": STUB_PGRX_ENV,
-                "pgrx_postgres.py": STUB_PIN,
             },
         )
         self.log = tmp / "log"

@@ -273,7 +273,7 @@ class TestMain:
             sys.stdin = io.StringIO(f"{path}\0")
             try:
                 with contextlib.redirect_stderr(err):
-                    status = bsup.main()
+                    status = bsup.main([])
             finally:
                 sys.stdin = stdin
         assert status == 1

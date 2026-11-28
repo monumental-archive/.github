@@ -71,7 +71,7 @@ def variants(text: str) -> list[tuple[str, dict[str, object]]]:
         path.write_text(text, encoding="utf-8")
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
-            status = ds.main(["deny_skips.py", str(path)])
+            status = ds.main([str(path)])
         if status != 0:
             msg = f"deny_skips.py exited {status}"
             raise AssertionError(msg)
@@ -135,7 +135,7 @@ class TestRefusals:
             path.write_text(text, encoding="utf-8")
             out, err = io.StringIO(), io.StringIO()
             with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-                status = ds.main(["deny_skips.py", str(path)])
+                status = ds.main([str(path)])
             return status, out.getvalue(), err.getvalue().replace(str(path), "PATH")
 
     @pytest.mark.parametrize(
