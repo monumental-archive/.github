@@ -59,6 +59,14 @@
 # ran out of memory (93 GB, 2026-11-17); the runner's memory is measured
 # by the first audit runs before this is raised.
 #
+# ON WHAT A CHANGE TOUCHES (`ci:mutants`, MUTANTS_DIFF set; #1432),
+# BY FILE: gomu selects only by file (its `--base-sha` names changed
+# files, never lines), so a changed line judges every mutant of its
+# file. The leg selects the files itself, from mutants_diff.py's pinned
+# diff, as it already runs gomu one file at a time; gomu's incremental
+# mode stays off. No base, or a change to a .gomuignore or to gomu in a
+# tracked lockfile, judges the whole population.
+#
 # Run as one shard of repo-mutants.yml's `mutants-go` matrix
 # (MUTANTS_SHARD=k/n), the leg takes the k-th of every n packages in
 # `go list` order and, given MUTANTS_SUMMARY_DIR, writes its counts to
@@ -192,6 +200,25 @@ while IFS=$'\t' read -r -a fields; do
   done
 done < "${scratch}/all.tsv"
 
+# What the change touched, where the gate asks (#1432): by file.
+if [[ -n ${MUTANTS_DIFF:-} ]]; then
+  "${ORG_PYTHON}" "${belt}/mutants_diff.py" scope go "${scratch}/scope"
+  if [[ $(< "${scratch}/scope/scope") == diff ]]; then
+    cut -f1 "${scratch}/scope/lines.tsv" | sort -u | sed "s|^|${root}/|" > "${scratch}/changed"
+    # files.tsv stays the whole population, which the records are held
+    # to; run.tsv is what gomu is run on, and mutants_go.py reads it.
+    awk -F '\t' 'NR == FNR { keep[$0] = 1; next } $2 in keep' \
+      "${scratch}/changed" "${scratch}/files.tsv" > "${scratch}/run.tsv"
+    # A package with no changed file is not measured or mutated.
+    cut -f1 "${scratch}/run.tsv" | sort -u > "${scratch}/kept-pkgs"
+    awk -F '\t' 'NR == FNR { keep[$0] = 1; next } $1 in keep' \
+      "${scratch}/kept-pkgs" "${scratch}/shard.tsv" > "${scratch}/shard.kept"
+    mv "${scratch}/shard.kept" "${scratch}/shard.tsv"
+  fi
+fi
+
+run_files="${scratch}/files.tsv"
+[[ ! -e ${scratch}/run.tsv ]] || run_files="${scratch}/run.tsv"
 pkgs=()
 while IFS=$'\t' read -r path _; do
   pkgs+=("${path}")
@@ -242,7 +269,7 @@ while IFS=$'\t' read -r path dir _; do
     else
       printf '%s: gomu wrote no report\n' "${file#"${root}"/}" >> "${scratch}/runs.log"
     fi
-  done < "${scratch}/files.tsv"
+  done < "${run_files}"
 done < "${scratch}/shard.tsv"
 
 git grep -n -e '//mutants:equivalent' -- ':!vendor/**' '*.go' > "${scratch}/records.txt" || true

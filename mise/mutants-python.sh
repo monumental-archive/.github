@@ -45,6 +45,16 @@
 # MUTANTS_PLAN set judges from the plan there. Unset, the plan is made
 # in scratch first. One mutant at a time per checkout, always.
 #
+# ON WHAT A CHANGE TOUCHES (`ci:mutants`, MUTANTS_DIFF set; #1432):
+# mutants_diff.py says what the change touched, and the plan keeps only
+# the mutants whose span holds a changed line, BY LINE. cosmic-ray's own
+# git filter applies that rule but runs a bare `git diff`, which selected
+# no mutant and exited 0 under `diff.noprefix` (measured), so the leg's
+# own code applies it to the belt's pinned diff. Every row plans for
+# itself, in scratch, and a row whose share is empty measures nothing.
+# No base, or a change to cosmic-ray.toml or to cosmic-ray in a tracked
+# lockfile, judges the whole population.
+#
 # AN EXIT TRAP restores any file under `module-path` that differs from
 # git, whatever ended the run, once the clean-tree check has passed.
 #
@@ -122,6 +132,17 @@ command -v cosmic-ray > /dev/null || {
 }
 
 plan="${MUTANTS_PLAN:-${scratch}/plan}"
+scoped=()
+if [[ -n ${MUTANTS_DIFF:-} ]]; then
+  if [[ ${shard} == plan ]]; then
+    org_finding "python" "MUTANTS_SHARD=plan with MUTANTS_DIFF — every ci:mutants row plans for itself"
+    exit 1
+  fi
+  plan="${scratch}/plan"
+  unset MUTANTS_PLAN
+  "${ORG_PYTHON}" "${belt}/mutants_diff.py" scope python "${scratch}/scope"
+  scoped=(--scope "${scratch}/scope" --shard "${shard}")
+fi
 if [[ ${shard} == plan ]]; then
   : "${MUTANTS_PLAN:?unset — MUTANTS_SHARD=plan writes the plan there}"
   "${helper[@]}" plan "${config}" "${plan}"
@@ -129,7 +150,7 @@ if [[ ${shard} == plan ]]; then
   exit 0
 fi
 if [[ -z ${MUTANTS_PLAN:-} ]]; then
-  "${helper[@]}" plan "${config}" "${plan}"
+  "${helper[@]}" plan "${config}" "${plan}" ${scoped[@]+"${scoped[@]}"}
 else
   # The plan job checked its own checkout; a shard checks its own.
   changed=$(git status --porcelain --untracked-files=no -- "${paths[@]}")

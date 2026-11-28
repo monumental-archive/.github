@@ -53,19 +53,25 @@ shared lives here and nowhere else. Five layers:
    the link (#1739).
    The filename is load-bearing: both mise and Renovate's mise manager
    recognise `mise/config.toml` natively — do not rename.
-3. **The task contract**: the global `ci` task is the sum of three
-   legs (#1740): `ci:lint` wildcard-collects `lint:*`, `ci:test` runs
-   `test`/`build` optionally with the coverage ratchet and `test:pgrx`,
-   and `ci:properties` runs the property tests. The gate runs the legs
+3. **The task contract**: the global `ci` task is the sum of four
+   legs (#1740, #1432): `ci:lint` wildcard-collects `lint:*`, `ci:test`
+   runs `test`/`build` optionally with the coverage ratchet and
+   `test:pgrx`, `ci:properties` runs the property tests, and
+   `ci:mutants` runs the mutation legs on what the change touches —
+   you touch it, you kill it: a surviving mutant on a touched line
+   reds the gate, whoever made it. The gate runs the legs
    side by side, each on as many runners as the repository splits and
    shards it: a runner per task of its `test`, and the counts in its
    own tracked `shards.toml`, with the belt's adapters handing each
    shard (`ORG_SHARD=k/n`) to the runner (#2160); anything unnamed
-   gets the canon's default, `mise/gate-shards.toml`. Repos never
-   define `ci` or a leg;
+   gets the canon's default, `mise/gate-shards.toml`; the mutation
+   leg is a runner per shard of each adopted language, at the
+   repository's `[mutants]` count. Repos never define `ci` or a leg;
    adding a `lint:<tool>` task here enforces that tool in every repo
    with no repo change. `fix:*` are write-mode siblings, never in the gate. `audit:*`
-   are network-bound or noisy checks, structurally outside the gate.
+   are network-bound or noisy checks, structurally outside the gate;
+   `audit:mutants` is the weekly whole mutation run, for what a diff
+   cannot see.
    A belt-defined TEST task is named in a leg explicitly rather than
    collected — there are three, `test:pgrx` (#813),
    `test:python-properties` (#1332) and `test:typescript-properties`
@@ -162,11 +168,12 @@ are referenced as
 
 `mise run ci` locally runs exactly what CI runs — same tasks, same
 tools, same versions, from the same lockfile. The one difference is
-where: CI runs the gate as three legs, `ci:lint`, `ci:test` and
-`ci:properties` (#1740), each split and sharded across runners as
-the repository's tasks and `shards.toml` say (#2160), and a pgrx
-extension's suite on one machine per Postgres major (#1148); locally
-`ci` runs the three legs together, ignoring the file, and the same
+where: CI runs the gate as four legs, `ci:lint`, `ci:test`,
+`ci:properties` and `ci:mutants` (#1740, #1432), each split and
+sharded across runners as the repository's tasks and `shards.toml`
+say (#2160), and a pgrx extension's suite on one machine per Postgres
+major (#1148); locally `ci` runs the four legs together, ignoring the
+file, and the same
 script runs those majors side by side. Shared-workflow changes are
 exercised by this repo's own `gate.yml` on every PR, and the release
 half by the canon releasing itself. That is the proof for most

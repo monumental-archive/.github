@@ -21,6 +21,15 @@ imports, nothing a child process must be handed (#1771).
   alone through `test-command`, under coverage's start-up hook, and
   records its time and the lines it executes, child processes
   included. A test file that fails alone is red, every one named.
+- `plan CONFIG PLAN --scope DIR --shard SHARD`: the same, for
+  `ci:mutants` (#1432), where DIR is what mutants_diff.py's `scope`
+  wrote. A `diff` scope keeps only the mutants whose span (cosmic-ray's
+  `start_pos` to `end_pos` line) holds a line the change touched: the
+  rule cosmic-ray's own git filter applies, read from the belt's pinned
+  diff rather than the filter's bare `git diff`, which selected nothing
+  and exited 0 under a user's `diff.noprefix` (measured, #1432). When
+  this shard's share of what is kept is empty, no test file is
+  measured: a change that touches no Python costs its rows no suite run.
 - `judge PLAN PRAGMAS SHARD OUT`: judges this shard's mutants, one at
   a time, and states the verdict. After each mutant, every tracked file
   under `module-path` that differs from git is restored and red by
@@ -50,12 +59,17 @@ import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import decoded
 import findings
+import mutants_diff
 import startup_hook
 import tool_python
 from tracked import tracked as git_tracked
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 LABEL = "audit:mutants: python"
 EXIT_RED = 1
@@ -258,11 +272,16 @@ class Mutant:
     statement: int = 0
 
 
-def read_dump(text: str) -> list[Mutant]:
+def read_dump(
+    text: str, keep: Callable[[str, int, int], bool] | None = None
+) -> list[Mutant]:
     """Read `cosmic-ray dump`: one JSON line per work item.
 
+    Given `keep`, a mutant stays only when `keep(path, first, last)` says
+    its span from `start_pos` to `end_pos` is one to judge.
+
     Returns:
-        Each mutant, sorted by (path, operator, occurrence).
+        Each mutant kept, sorted by (path, operator, occurrence).
 
     Raises:
         UndecodableError: a line is not a work item of one mutation.
@@ -282,12 +301,18 @@ def read_dump(text: str) -> list[Mutant]:
         spec = decoded.as_object(mutations[0], where)
         start = decoded.as_array(spec.get("start_pos"), f"{where} start_pos")
         name = spec.get("definition_name")
+        path = decoded.as_str(spec.get("module_path"), where)
+        first = decoded.as_int(start[0] if start else None, where)
+        if keep is not None:
+            end = decoded.as_array(spec.get("end_pos"), f"{where} end_pos")
+            if not keep(path, first, decoded.as_int(end[0] if end else None, where)):
+                continue
         mutants.append(
             Mutant(
-                path=decoded.as_str(spec.get("module_path"), where),
+                path=path,
                 operator=decoded.as_str(spec.get("operator_name"), where),
                 occurrence=decoded.as_int(spec.get("occurrence"), where),
-                line=decoded.as_int(start[0] if start else None, where),
+                line=first,
                 function=name if isinstance(name, str) else "",
             )
         )
@@ -551,11 +576,30 @@ def leaked(mutants: list[Mutant], tests: list[str]) -> list[str]:
     return sorted({m.path for m in mutants if m.path in named})
 
 
-def plan_mutants(config: Path, plan: Path, found: Adoption) -> list[Mutant] | None:
+def keeper(scope: Path | None) -> Callable[[str, int, int], bool] | None:
+    """Read what a `scope` says to judge.
+
+    Returns:
+        None for the whole population (no scope, or a `whole` one), else
+        a test of a mutant's span against the changed lines.
+
+    """
+    if scope is None:
+        return None
+    if (scope / "scope").read_text(encoding="utf-8").strip() == "whole":
+        return None
+    lines = mutants_diff.read_lines(scope)
+    return lambda path, first, last: mutants_diff.touches(lines, path, first, last)
+
+
+def plan_mutants(
+    config: Path, plan: Path, found: Adoption, scope: Path | None = None
+) -> list[Mutant] | None:
     """List every mutant of the tracked files under `module-path`.
 
     Returns:
-        The sorted mutants, or None with the refusal printed.
+        The sorted mutants (those `scope` keeps), or None with the
+        refusal printed.
 
     """
     session = plan / "session.sqlite"
@@ -576,7 +620,7 @@ def plan_mutants(config: Path, plan: Path, found: Adoption) -> list[Mutant] | No
         print((init.stderr + dump.stderr).rstrip(), file=sys.stderr)
         return None
     try:
-        listed = read_dump(dump.stdout)
+        listed = read_dump(dump.stdout, keeper(scope))
     except decoded.UndecodableError as error:
         red(f"cosmic-ray dump: {error}")
         return None
@@ -645,7 +689,9 @@ def measure_all(
     return None if failed else runs
 
 
-def plan(config: Path, plan_dir: Path) -> int:
+def plan(
+    config: Path, plan_dir: Path, scope: Path | None = None, shard: str = "0/1"
+) -> int:
     """Write the plan: the mutants, each test file's time and lines.
 
     Returns:
@@ -656,12 +702,20 @@ def plan(config: Path, plan_dir: Path) -> int:
     if found is None or refused_dirty(found.paths):
         return EXIT_RED
     plan_dir.mkdir(parents=True, exist_ok=True)
-    mutants = plan_mutants(config, plan_dir, found)
+    mutants = plan_mutants(config, plan_dir, found, scope)
     if mutants is None:
         return EXIT_RED
     tests = git_files(*found.tests)
     if refused_leaked(mutants, tests):
         return EXIT_RED
+    parsed = parse_shard(shard)
+    if scope is not None and parsed is not None and not shard_of(mutants, *parsed):
+        write_plan(plan_dir, found, mutants, [])
+        print(
+            f"{LABEL}: plan: {len(mutants)} mutants, none in shard {shard}:"
+            " no suite run"
+        )
+        return 0
     runs = measure_all(tests, found.command, plan_dir)
     if runs is None:
         return EXIT_RED
@@ -679,7 +733,8 @@ def write_plan(
 ) -> None:
     """Write plan.json: the commit, the mutants, the tests and the line map."""
     mutated = {m.path for m in mutants}
-    lines = {p: v for p, v in executed(plan_dir).items() if p in mutated}
+    measured = executed(plan_dir) if runs else {}
+    lines = {p: v for p, v in measured.items() if p in mutated}
     document = {
         "head": git("rev-parse", "HEAD").stdout.strip(),
         "command": found.command,
@@ -1134,6 +1189,7 @@ class Args(argparse.Namespace):
 
     command: str
     config: Path
+    scope: Path | None
     pragmas: Path
     plan: Path
     shard: str
@@ -1154,6 +1210,8 @@ def parse_args(argv: list[str]) -> Args:
     planned = sub.add_parser("plan")
     planned.add_argument("config", type=Path)
     planned.add_argument("plan", type=Path)
+    planned.add_argument("--scope", type=Path, default=None)
+    planned.add_argument("--shard", default="0/1")
     judged = sub.add_parser("judge")
     judged.add_argument("plan", type=Path)
     judged.add_argument("pragmas", type=Path)
@@ -1175,7 +1233,7 @@ def main(argv: list[str]) -> int:
     if args.command == "pragmas":
         return pragmas(args.pragmas)
     if args.command == "plan":
-        return plan(args.config, args.plan)
+        return plan(args.config, args.plan, args.scope, args.shard)
     return judge(args.plan, args.pragmas, args.shard, args.scratch)
 
 

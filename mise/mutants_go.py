@@ -13,6 +13,9 @@ holding what this reads:
 - `gomu.log`: gomu's console output, and `runs.log`: a line per file
   whose run failed outright;
 - `records.txt`: `git grep -n` of every `//mutants:equivalent` comment.
+- `run.tsv`, under `ci:mutants` only (#1432): the files of `files.tsv`
+  the change touched, which gomu was run on; a record is held to its
+  site only where its file was run.
 
 Each gomu result is classed by its `status`:
 
@@ -332,11 +335,13 @@ def read_shard(args: Args) -> Shard:
     packages = {r[0]: relative(r[1], root) for r in rows(scratch / "all.tsv")}
     mutated = {s[0] for s in rows(scratch / "shard.tsv")}
     files = rows(scratch / "files.tsv")
+    # On what a change touches (#1432), gomu ran on run.tsv's files only.
+    ran = rows(scratch / "run.tsv") if (scratch / "run.tsv").exists() else files
     return Shard(
         root=root,
         packages=packages,
         population={relative(r[1], root) for r in files},
-        mine={relative(r[1], root) for r in files if r[0] in mutated},
+        mine={relative(r[1], root) for r in ran if r[0] in mutated},
         covered=read_coverage(scratch, packages),
         records=read_records(scratch),
     )

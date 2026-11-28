@@ -63,6 +63,13 @@
 # name: a range cannot be shared out by file. A shard whose share is
 # empty runs nothing and counts zero.
 #
+# ON WHAT A CHANGE TOUCHES (`ci:mutants`, MUTANTS_DIFF set; #1432), BY
+# LINE, through StrykerJS's own mutation ranges: the share keeps the
+# files mutants_diff.py's pinned diff touched and spells each run of
+# changed lines as `file:first-last` in `--mutate`. No base, or a change
+# to stryker.config.json or to `@stryker-mutator/*` in a tracked
+# lockfile, judges the whole population.
+#
 # PROGRESS IN THE JOB LOG. StrykerJS's output, with its
 # `progress-append-only` reporter, is copied to the log as it runs, so a
 # shard stopped by its timeout shows how far it got; the scratch copy is
@@ -147,8 +154,15 @@ rc=0
 scratch=$(mktemp -d)
 trap 'rc=$?; rm -rf "${scratch}"; [ -n "${org_done:-}" ] || [ "${rc}" -ne 0 ] || rc=1; exit "${rc}"' EXIT
 
+# What the change touched, where the gate asks (#1432).
+scoped=()
+if [[ -n ${MUTANTS_DIFF:-} ]]; then
+  python3 "${belt}/mutants_diff.py" scope typescript "${scratch}/scope"
+  scoped=(--scope "${scratch}/scope")
+fi
 python3 "${belt}/mutants_typescript.py" --label "${label}" share "${adoption}" \
-  --shard "${shard}" --out "${scratch}/mutate" --summary-dir "${MUTANTS_SUMMARY_DIR:-}"
+  --shard "${shard}" --out "${scratch}/mutate" --summary-dir "${MUTANTS_SUMMARY_DIR:-}" \
+  ${scoped[@]+"${scoped[@]}"}
 mutate=$(< "${scratch}/mutate")
 if [[ -z ${mutate} ]]; then
   echo "${label}: shard ${shard}: no file to mutate, nothing run"

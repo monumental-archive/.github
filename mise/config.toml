@@ -697,10 +697,11 @@ python = "3.15.2"
 #
 # The task contract, in full:
 #   - `mise run ci` must pass in every repo. Repos do NOT define `ci`; the
-#     global task below assembles it as the sum of three legs, `ci:lint`,
-#     `ci:test` and `ci:properties`, which the gate runs side by side
-#     (#1740), each across as many runners as the repository's tasks
-#     and its shards.toml split it into (#2160, mise/gate_shard.py).
+#     global task below assembles it as the sum of four legs, `ci:lint`,
+#     `ci:test`, `ci:properties` and `ci:mutants`, which the gate runs
+#     side by side (#1740, #1432), each across as many runners as the
+#     repository's tasks and its shards.toml split it into (#2160,
+#     mise/gate_shard.py).
 #     Repos do not define those either.
 #   - `lint:*` is claimed by the belt and wildcard-collected into
 #     `ci:lint`, so a linter added here is enforced in every repo with no
@@ -725,13 +726,13 @@ python = "3.15.2"
 [tasks.ci]
 description = "The gate: everything the org enforces, plus this repo's tasks"
 dir = "{{cwd}}"
-# The sum of the three legs and nothing else (#1740). The gate job in
-# ci.yml runs one leg per runner, side by side; a laptop runs `ci` and
-# gets all three, exactly what one gate run checks. Every line the gate
-# runs belongs to one leg, and mise/test_task_contract.py holds the
-# legs' depends together to the gate's list: nothing dropped, nothing
-# twice.
-depends = ["ci:lint", "ci:test", "ci:properties"]
+# The sum of the four legs and nothing else (#1740, #1432). The gate
+# job in ci.yml runs one leg per runner, side by side; a laptop runs
+# `ci` and gets all four, exactly what one gate run checks. Every line
+# the gate runs belongs to one leg, and mise/test_task_contract.py holds
+# the legs' depends together to the gate's list: nothing dropped,
+# nothing twice.
+depends = ["ci:lint", "ci:test", "ci:properties", "ci:mutants"]
 run = "echo 'ci: all gates green'"
 
 [tasks."ci:lint"]
@@ -781,6 +782,27 @@ depends = [
   "test:typescript-properties",
 ]
 run = "echo 'ci:properties: every property green'"
+
+[tasks."ci:mutants"]
+description = "The gate's mutation leg: no unexplained surviving mutant on a line the change touches"
+dir = "{{cwd}}"
+# You touch it, you kill it (#1432, decided with the owner): a surviving
+# mutant on a line the change touched reds the gate, whether the change
+# made it or it was already there. The same legs as audit:mutants, the
+# same measure (no unexplained survivor, never a score) and the same
+# explanations at the site; MUTANTS_DIFF narrows each leg to what the
+# change touches, read by mise/mutants_diff.py from the event's own base
+# (ORG_MUTANTS_BASE, which ci.yml sets) or, on a laptop, the merge base
+# with the default branch. No base, a touched adoption file or a moved
+# mutation tool judges that language's whole population. Each leg's
+# header says how it selects: by line where its tool can, by file where
+# it cannot (gomu). audit:mutants stays the weekly whole run, for what a
+# diff cannot see: a change that only weakens tests, or a tool upgrade
+# that adds mutators. Its rows are per language at the repository's
+# `[mutants]` count (mise/gate_shard.py); MUTANTS_LEG and MUTANTS_SHARD
+# select a row's share, as in the weekly run.
+env = { MUTANTS_DIFF = "1" }
+run = '"${ORG_BELT_DIR}/mutants.sh"'
 
 [tasks.fix]
 description = "Run every write-mode fixer (the fix:* siblings ci deliberately excludes)"
@@ -7391,7 +7413,7 @@ run = '''
 '''
 
 [tasks."audit:mutants"]
-description = "Mutation testing: no unexplained surviving mutant (weekly cron, never the gate)"
+description = "Mutation testing, the whole population: no unexplained surviving mutant (weekly cron; ci:mutants is the gate's, on what a change touches)"
 dir = "{{cwd}}"
 # Would the suite fail if the code were wrong? (#1336, property 1.)
 # Coverage counts a line as covered when a test runs it, whether or not
@@ -7400,10 +7422,13 @@ dir = "{{cwd}}"
 # (mise/mutants-<language>.sh), so a language is ONE added `leg` line in
 # mise/mutants.sh, the delivered body (#1544's ceiling).
 #
-# NEVER IN `ci` AND NEVER ON A PULL REQUEST: a mutation run repeats the
-# suite once per mutant. repo-mutants.yml runs it weekly: per language a
-# shard matrix (`mutants-<language>`, MUTANTS_SHARD=k/n) and a totals job
-# stating the one answer across shards (mise/mutation-totals.sh). mise/test_task_contract.py holds `ci` to
+# THE WHOLE POPULATION, WEEKLY, NEVER IN `ci`: the gate runs the same
+# legs on what each change touches, as `ci:mutants` (#1432); this run is
+# for what a diff cannot see — a change that only weakens tests, a tool
+# upgrade that adds mutators. repo-mutants.yml runs it weekly: per
+# language a shard matrix (`mutants-<language>`, MUTANTS_SHARD=k/n) and
+# a totals job stating the one answer across shards
+# (mise/mutation-totals.sh). mise/test_task_contract.py holds `ci` to
 # reaching no audit task at all.
 #
 # The measure is "no unexplained survivor", never a score; adoption is

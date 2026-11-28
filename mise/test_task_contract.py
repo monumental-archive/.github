@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """The task contract, read from the belt's own config (#1355).
 
-`mise run ci` is the gate, and the gate is deterministic and fast by
-rule: nothing network-bound, nothing that repeats the suite once per
-mutant. The contract in mise/config.toml's header says so in prose;
-this holds the file to it. The closure of `ci` is computed the way mise
-collects it — each `depends` entry, a `*` matching within one colon
-group — over the tasks the belt defines, and no task it reaches may be
-an `audit:*` task or run a mutation leg.
+`mise run ci` is the gate, and the gate is deterministic by rule:
+nothing network-bound. The contract in mise/config.toml's header says
+so in prose; this holds the file to it. The closure of `ci` is computed
+the way mise collects it — each `depends` entry, a `*` matching within
+one colon group — over the tasks the belt defines, and no task it
+reaches may be an `audit:*` task. It reaches `ci:mutants` (#1432),
+which runs the mutation legs on what the change touches
+(MUTANTS_DIFF), and no other task it reaches runs a mutation leg: the
+whole population is audit:mutants', weekly.
 
 The `audit:mutants` half: every delivered leg, `mise/mutants-*.sh`, is
 named by exactly one `leg <language>` line of the task's delivered
@@ -137,7 +139,7 @@ def closure(root: str, defined: dict[str, dict[str, object]]) -> set[str]:
 
 
 class Gate(unittest.TestCase):
-    """`ci` reaches no audit task and no mutation leg."""
+    """`ci` reaches no audit task, and the mutation legs only on a diff."""
 
     def test_ci_reaches_no_audit_task(self) -> None:
         """Network-bound and slow checks are the cron's, never the gate's."""
@@ -148,17 +150,26 @@ class Gate(unittest.TestCase):
         none: list[str] = []
         self.assertEqual(audits, none)
 
-    def test_ci_runs_no_mutation_leg(self) -> None:
-        """No task the gate reaches names a leg or cargo-mutants."""
+    def test_ci_reaches_the_mutation_leg(self) -> None:
+        """`ci` reaches `ci:mutants`, which runs the legs on a diff (#1432)."""
         defined = tasks()
-        leg = re.compile(r"mutants-[a-z]+\.sh|cargo[ -]mutants")
+        self.assertIn("ci:mutants", closure("ci", defined))
+        leg = defined["ci:mutants"]
+        self.assertEqual('"${ORG_BELT_DIR}/mutants.sh"', leg.get("run"))
+        env: dict[str, object] = {"MUTANTS_DIFF": "1"}
+        self.assertEqual(env, leg.get("env"))
+
+    def test_ci_runs_no_other_mutation_leg(self) -> None:
+        """No other task the gate reaches names a leg or cargo-mutants."""
+        defined = tasks()
+        leg = re.compile(r"mutants(-[a-z]+)?\.sh|cargo[ -]mutants")
         hits = sorted(
             name
             for name in closure("ci", defined)
             if leg.search(str(defined[name].get("run", "")))
         )
-        none: list[str] = []
-        self.assertEqual(hits, none)
+        only: list[str] = ["ci:mutants"]
+        self.assertEqual(only, hits)
 
     def test_ci_names_each_property_leg(self) -> None:
         """A belt test leg is named in the gate, never collected (#1332, #1549).
@@ -179,9 +190,9 @@ class Gate(unittest.TestCase):
         self.assertIn("audit:mutants", closure("ci", defined))
 
 
-# The gate's three legs (#1740): ci.yml's `gate` job runs one per runner,
-# and `ci` is their sum.
-LEGS = ("ci:lint", "ci:test", "ci:properties")
+# The gate's four legs (#1740, #1432): ci.yml's `gate` job runs them on
+# their rows, and `ci` is their sum.
+LEGS = ("ci:lint", "ci:test", "ci:properties", "ci:mutants")
 
 # Everything `ci` named before it was split into legs, each entry spelt
 # as `depends` spells it. The legs together must name exactly these.
@@ -214,7 +225,7 @@ def leg_findings(defined: dict[str, dict[str, object]]) -> list[str]:
     """Hold `ci` to the sum of its legs, and the legs to the gate's list.
 
     Returns:
-        One line per breach: `ci` naming anything but the three legs, an
+        One line per breach: `ci` naming anything but the four legs, an
         entry of the gate's list no leg names, an entry two legs name or
         one leg names twice, and an entry no gate ever ran.
 
@@ -222,7 +233,7 @@ def leg_findings(defined: dict[str, dict[str, object]]) -> list[str]:
     out: list[str] = []
     direct = [named(entry) for entry in depends_of(defined["ci"])]
     if direct != list(LEGS):
-        out.append(f"ci depends on {direct}, not the three legs {list(LEGS)}")
+        out.append(f"ci depends on {direct}, not the four legs {list(LEGS)}")
     where: dict[str, list[str]] = {}
     for leg in LEGS:
         for entry in depends_of(defined.get(leg, {})):
@@ -243,10 +254,10 @@ def leg_findings(defined: dict[str, dict[str, object]]) -> list[str]:
 
 
 class Legs(unittest.TestCase):
-    """`ci` is the sum of three legs, and they run what it ran (#1740)."""
+    """`ci` is the sum of four legs, and they run what it ran (#1740)."""
 
     def test_the_belt_conforms(self) -> None:
-        """The real config: three legs, the gate's list split among them."""
+        """The real config: four legs, the gate's list split among them."""
         none: list[str] = []
         self.assertEqual(none, leg_findings(tasks()))
 
@@ -267,6 +278,9 @@ class Legs(unittest.TestCase):
         self.assertEqual(lint, legs["ci:lint"])
         self.assertEqual(test, legs["ci:test"])
         self.assertEqual(properties, legs["ci:properties"])
+        # The mutation leg is a run of its own, depending on nothing.
+        none: list[str] = []
+        self.assertEqual(none, legs["ci:mutants"])
 
     @staticmethod
     def plant(leg: str, depends: list[object]) -> list[str]:
@@ -285,8 +299,9 @@ class Legs(unittest.TestCase):
         want: list[str] = [
             (
                 "ci depends on"
-                " ['ci:lint', 'ci:test', 'ci:properties', 'test:pgrx'],"
-                " not the three legs ['ci:lint', 'ci:test', 'ci:properties']"
+                " ['ci:lint', 'ci:test', 'ci:properties', 'ci:mutants', 'test:pgrx'],"
+                " not the four legs"
+                " ['ci:lint', 'ci:test', 'ci:properties', 'ci:mutants']"
             ),
         ]
         self.assertEqual(want, self.plant("ci", [*LEGS, "test:pgrx"]))

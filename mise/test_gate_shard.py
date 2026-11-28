@@ -172,6 +172,8 @@ def legs(rows: list[dict[str, object]]) -> list[tuple[object, ...]]:
 
 LINT_ROWS: list[tuple[object, ...]] = [("lint", "ci:lint", i, 4) for i in range(1, 5)]
 PROPERTIES_ROW: tuple[object, ...] = ("properties", "ci:properties", 1, 1)
+# A tree that adopts no mutation leg: one `ci:mutants` row (#1432).
+MUTANTS_ROW: tuple[object, ...] = ("mutants", "ci:mutants", 1, 1)
 
 
 class Planted(unittest.TestCase):
@@ -218,12 +220,12 @@ class Plan(Planted):
         files = planted(
             self.tree, "mise.toml", "python3 mise/unittest_guarded.py discover"
         )
-        want = [*LINT_ROWS, ("test", "ci:test", 1, 1), PROPERTIES_ROW]
+        want = [*LINT_ROWS, ("test", "ci:test", 1, 1), PROPERTIES_ROW, MUTANTS_ROW]
         self.assertEqual(want, legs(gate_shard.plan(COSTS, files, self.tree)))
 
     def test_no_test_task_is_todays_matrix(self) -> None:
         """No `test` at all: ci:test, whose `test` is optional, as today."""
-        want = [*LINT_ROWS, ("test", "ci:test", 1, 1), PROPERTIES_ROW]
+        want = [*LINT_ROWS, ("test", "ci:test", 1, 1), PROPERTIES_ROW, MUTANTS_ROW]
         self.assertEqual(want, legs(gate_shard.plan(COSTS, [], self.tree)))
 
     def test_three_tasks_plan_three_rows(self) -> None:
@@ -235,6 +237,7 @@ class Plan(Planted):
             ("test", "test:rs", 1, 1),
             ("test", "test:ts", 1, 1),
             PROPERTIES_ROW,
+            MUTANTS_ROW,
         ]
         self.assertEqual(want, legs(gate_shard.plan(COSTS, files, self.tree)))
 
@@ -295,7 +298,7 @@ class Plan(Planted):
         self.assertEqual(want, self.properties(files))
         whole = legs(gate_shard.plan(COSTS, files, self.tree))
         rest: list[tuple[object, ...]] = [r for r in whole if r[0] != "test"]
-        want_rest: list[tuple[object, ...]] = [*LINT_ROWS, PROPERTIES_ROW]
+        want_rest: list[tuple[object, ...]] = [*LINT_ROWS, PROPERTIES_ROW, MUTANTS_ROW]
         self.assertEqual(want_rest, rest)
 
     def test_both_languages_properties_plan_two_rows(self) -> None:
@@ -337,7 +340,7 @@ class Plan(Planted):
     def test_an_untracked_config_is_not_read(self) -> None:
         """Only a tracked config plans: the gate reads tracked files only."""
         self.plant(THREE, '[test]\n"test:py" = 4\n')
-        want = [*LINT_ROWS, ("test", "ci:test", 1, 1), PROPERTIES_ROW]
+        want = [*LINT_ROWS, ("test", "ci:test", 1, 1), PROPERTIES_ROW, MUTANTS_ROW]
         self.assertEqual(want, legs(gate_shard.plan(COSTS, [], self.tree)))
 
     def test_the_canon_shards_its_tests(self) -> None:
@@ -460,12 +463,12 @@ class Refused(Planted):
         self.assertEqual(want, got)
 
     def test_the_matrix_stays_under_githubs_limit(self) -> None:
-        """Three tasks at 128 shards is 389 rows with lint and properties: red."""
+        """Three tasks at 128 shards is 390 rows with the other legs: red."""
         config = THREE.replace("cargo test --workspace", "cargo nextest run")
         counts = '[test]\n"test:py" = 128\n"test:ts" = 128\n"test:rs" = 128\n'
         got = self.red(config, counts)
         want: list[str] = [
-            "the plan is 389 rows, and GitHub runs at most 256 in one matrix"
+            "the plan is 390 rows, and GitHub runs at most 256 in one matrix"
         ]
         self.assertEqual(want, got)
 

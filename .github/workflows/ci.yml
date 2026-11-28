@@ -181,11 +181,14 @@ jobs:
   # that name now belongs to the final job, because `ci / ci` is the one
   # check the org ruleset requires and it has to mean "all of it passed".
   #
-  # THREE LEGS, SIDE BY SIDE (#1740). One four-core runner ran every
-  # task at once, so the job took the sum of the work divided by four:
-  # 262 s on the canon (run 44731221146), `test` alone 226 s of it. Each
-  # leg is a belt task, `ci:<leg>`, and `ci` is their sum, so a laptop's
-  # `mise run ci` runs exactly what the three legs run together. One job
+  # FOUR LEGS, SIDE BY SIDE (#1740, #1432). One four-core runner ran
+  # every task at once, so the job took the sum of the work divided by
+  # four: 262 s on the canon (run 44731221146), `test` alone 226 s of it.
+  # Each leg is a belt task, `ci:<leg>`, and `ci` is their sum, so a
+  # laptop's `mise run ci` runs exactly what the four legs run together.
+  # The fourth, `ci:mutants`, is mutation testing on what the change
+  # touches (#1432): one row per adopted language's shard, at the
+  # repository's `[mutants]` count. One job
   # with a matrix, its setup written once: a step that belongs to one
   # leg says so in its `if:`. fail-fast is off: which legs pass is the
   # information, and a leg cancelled by its neighbour reports nothing.
@@ -229,7 +232,8 @@ jobs:
       # has several, since each row builds what its own work compiles. A
       # leg of one keeps its old name.
       ORG_SLOT: >-
-        ${{ matrix.task != format('ci:{0}', matrix.leg)
+        ${{ matrix.language && format('{0}-{1}-{2}', matrix.leg, matrix.language, matrix.shard)
+        || matrix.task != format('ci:{0}', matrix.leg)
         && format('{0}-{1}-{2}', matrix.leg, matrix.task, matrix.shard)
         || matrix.of > 1 && format('{0}-{1}', matrix.leg, matrix.shard) || matrix.leg }}
     steps:
@@ -577,10 +581,22 @@ jobs:
         run: '"${ORG_PYTHON}" .org-canon/mise/squash_message.py'
       # (no blank line above: lint:shell-embedded captures trailing
       # blanks into the run: block and shfmt refuses them)
-      # This leg's belt task, `ci:lint`, `ci:test` or `ci:properties`
-      # (#1740); `ci` is the three of them. A lint shard runs its share
-      # of `ci:lint`'s tasks instead (#2049), and a split leg's row its
-      # task, or its task's shard (#2160).
+      # A MUTATION ROW'S TOOL, BY NAME (#1432). The belt pins
+      # cargo-mutants, gomu and cosmic-ray lazy, so the bare install
+      # above skips them; a `ci:mutants` row installs its own language's,
+      # from the lock, as repo-mutants.yml's jobs do. StrykerJS is the
+      # repository's, from its own tracked lockfile (#1358):
+      # mise/mutation-install.sh.
+      - name: Install this mutation row's tool, by name
+        if: ${{ matrix.leg == 'mutants' && matrix.language }}
+        env:
+          LANGUAGE: ${{ matrix.language }}
+        run: bash .org-canon/mise/mutation-install.sh "${LANGUAGE}"
+      # This leg's belt task, `ci:lint`, `ci:test`, `ci:properties` or
+      # `ci:mutants` (#1740, #1432); `ci` is the four of them. A lint
+      # shard runs its share of `ci:lint`'s tasks instead (#2049), a
+      # split leg's row its task, or its task's shard (#2160), and a
+      # mutation row its language's share of what the change touched.
       - name: Run the gate
         env:
           LEG: ${{ matrix.leg }}
@@ -602,6 +618,16 @@ jobs:
             && format('{0}/coverage-run', runner.temp) || '' }}
           # Where each shard writes what it ran (#2160, mise/shard.py).
           ORG_SHARD_REPORTS: ${{ runner.temp }}/shard-reports
+          # A mutation row's language (#1432, mise/gate_shard.py).
+          MUTANTS_LEG: ${{ matrix.language }}
+          # The change's base, the event's own (#1432,
+          # mise/mutants_diff.py): the pull request's base commit, the
+          # queue's base, or the commit before a push. Any other event
+          # has none, and the mutation leg judges the whole population.
+          ORG_MUTANTS_BASE: >-
+            ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha
+            || github.event_name == 'merge_group' && github.event.merge_group.base_sha
+            || github.event_name == 'push' && github.event.before || '' }}
         run: '"${ORG_PYTHON}" .org-canon/mise/gate_shard.py run "${LEG}" "${TASK}" "${SHARD}" "${OF}"'
 
       # A SPLIT TEST ROW'S MEASUREMENT, KEPT FOR THE COVERAGE JOB (#2049,

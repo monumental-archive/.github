@@ -40,6 +40,13 @@ which `full_match` cannot spell; a file whose name StrykerJS's
 matches no tracked file. A shard whose share is empty writes its zero
 row when a summary directory is given, and `--out` is left empty.
 
+`share ... --scope DIR`, under `ci:mutants` (#1432), where DIR is what
+mutants_diff.py's `scope` wrote: a `diff` scope keeps only the files
+the change touched, shares those out the same way, and spells each as
+StrykerJS's own mutation ranges, `file:first-last` for every run of
+changed lines, so StrykerJS selects BY LINE. A `whole` scope is the
+plain share.
+
 `verdict <mutation.json>`, after it: StrykerJS 10's JSON report
 (`reports/mutation/mutation.json`, mutation-testing-report-schema 1.0)
 gives one `status` per mutant:
@@ -76,6 +83,7 @@ from pathlib import Path, PurePosixPath
 
 import decoded
 import findings as writer
+import mutants_diff
 import tracked
 
 KILLED = frozenset({"Killed", "Timeout"})
@@ -445,8 +453,43 @@ def argument(files: list[str]) -> str:
     return ",".join(SYNTAX.sub(r"\\\g<0>", path) for path in files)
 
 
-def shares(path: str, shard: str) -> tuple[list[str], int]:
+def runs_of(lines: set[int]) -> list[tuple[int, int]]:
+    """Group changed lines into runs of consecutive lines.
+
+    Returns:
+        (first, last) of each run, in order.
+
+    """
+    out: list[tuple[int, int]] = []
+    for line in sorted(lines):
+        if out and out[-1][1] == line - 1:
+            out[-1] = (out[-1][0], line)
+        else:
+            out.append((line, line))
+    return out
+
+
+def ranged(files: list[str], lines: dict[str, set[int]]) -> str:
+    """Spell files as one `--mutate` argument of StrykerJS mutation ranges.
+
+    Returns:
+        `file:first-last` for every run of each file's changed lines,
+        each file escaped as `argument` escapes it, joined by commas.
+
+    """
+    return ",".join(
+        f"{argument([path])}:{first}-{last}"
+        for path in files
+        for first, last in runs_of(lines[path])
+    )
+
+
+def shares(
+    path: str, shard: str, lines: dict[str, set[int]] | None = None
+) -> tuple[list[str], int]:
     """Read the config and cut this shard's share of its files.
+
+    Given the changed lines, only the files holding one are shared out.
 
     Returns:
         The shard's files and how many the whole list holds.
@@ -464,19 +507,32 @@ def shares(path: str, shard: str) -> tuple[list[str], int]:
         raise ShareError(msg)
     root = Path.cwd()
     every = expand(mutate, tracked.tracked(root=root), root.as_posix())
+    if lines is not None:
+        every = [f for f in every if lines.get(f)]
     return every[k::n], len(every)
 
 
-def share(path: str, label: str, shard: str, out: str, summary_dir: str) -> int:
+def share(args: Args) -> int:
     """Write this shard's share of the files to mutate.
 
     Returns:
         0 when shared, 1 on any red.
 
     """
+    path, label, shard, out, summary_dir = (
+        args.path,
+        args.label,
+        args.shard,
+        args.out,
+        args.summary_dir,
+    )
+    scope = Path(args.scope) if args.scope else None
+    lines = None
+    if scope and (scope / "scope").read_text(encoding="utf-8").strip() == "diff":
+        lines = mutants_diff.read_lines(scope)
     try:
-        mine, every = shares(path, shard)
-        text = argument(mine)
+        mine, every = shares(path, shard, lines)
+        text = argument(mine) if lines is None else ranged(mine, lines)
     except (OSError, decoded.UndecodableError, ShareError) as err:
         writer.finding(LANGUAGE, str(err))
         return 1
@@ -688,6 +744,7 @@ class Args(argparse.Namespace):
     summary_dir: str
     shard: str
     out: str
+    scope: str
 
 
 def main(argv: list[str]) -> int:
@@ -711,11 +768,12 @@ def main(argv: list[str]) -> int:
     shares.add_argument("--shard", default="0/1")
     shares.add_argument("--out", required=True)
     shares.add_argument("--summary-dir", default="")
+    shares.add_argument("--scope", default="")
     args = parser.parse_args(argv, namespace=Args())
     if args.command == "config":
         return check_config(args.path)
     if args.command == "share":
-        return share(args.path, args.label, args.shard, args.out, args.summary_dir)
+        return share(args)
     return judge(args.path, args.label, args.summary_dir, args.shard)
 
 

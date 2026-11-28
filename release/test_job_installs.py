@@ -2376,13 +2376,14 @@ class GateCoverageReports(unittest.TestCase):
         self.assertNotIn("path", inputs(fetch[0]))
 
 
-# THE GATE'S THREE LEGS (#1740). One job, a matrix over the legs, its
+# THE GATE'S FOUR LEGS (#1740, #1432). One job, a matrix over the legs, its
 # setup written once; each leg runs its own belt task, and a step that
 # belongs to one leg says so in its `if:`. The cache steps' legs are held
 # in test_gate_caches.py beside the caches. The lint leg is several
 # shards (#2049), each run by gate_shard.py; a once-per-gate lint step
-# runs on the first. A split leg is a row per task and shard (#2160).
-GATE_LEGS = ("lint", "test", "properties")
+# runs on the first. A split leg is a row per task and shard (#2160),
+# and the mutation leg a row per adopted language's shard (#1432).
+GATE_LEGS = ("lint", "test", "properties", "mutants")
 RUN_LEG = (
     '"${ORG_PYTHON}" .org-canon/mise/gate_shard.py run'
     ' "${LEG}" "${TASK}" "${SHARD}" "${OF}"'
@@ -2399,6 +2400,7 @@ LEG_BOUND = {
     ),
     "Keep the coverage reports for the badge (default branch only)": TEST_ONLY,
     "Keep the coverage figures for the release": TEST_ONLY,
+    "Install this mutation row's tool, by name": "matrix.leg == 'mutants'",
 }
 
 
@@ -2429,10 +2431,10 @@ def matrix_findings(strategy: dict[str, object]) -> list[str]:
 
 
 def leg_findings(text: str) -> list[str]:
-    """Hold ci.yml's gate to its three legs, and its readers to the matrix.
+    """Hold ci.yml's gate to its four legs, and its readers to the matrix.
 
     Returns:
-        One line per breach: the gate not a matrix of the three legs, its
+        One line per breach: the gate not a matrix of the four legs, its
         legs cancelling one another, its run step not this leg's task, a
         one-leg step run on every leg, a job output a matrix cannot keep,
         `ci` not needing the gate, and the badge job reading its output.
@@ -2496,14 +2498,14 @@ def planted(old: str, new: str) -> str:
 
 
 class GateLegs(unittest.TestCase):
-    """The gate is three legs side by side (#1740)."""
+    """The gate is four legs side by side (#1740, #1432)."""
 
     def test_the_real_gate_conforms(self) -> None:
-        """A matrix of the three, each one-leg step carrying its leg."""
+        """A matrix of the four, each one-leg step carrying its leg."""
         self.assertEqual(strings(), leg_findings(ci_text()))
 
     def test_one_job_and_no_copies(self) -> None:
-        """One matrix job, not three copied ones."""
+        """One matrix job, not four copied ones."""
         found = workflow_yaml.jobs(parsed(ci_text()))
         copies: list[str] = [j for j in found if j.startswith("gate-")]
         self.assertEqual(strings(), copies)

@@ -23,6 +23,16 @@ runs (APPLIES): the rule repo-mutants.yml's adoption keeps, decided
 from tracked files before any tool is installed. A leg of one row, or
 of none, is today's `ci:<leg>`.
 
+THE MUTATION LEG (#1432) is `ci:mutants`: the belt's mutation legs on
+what the change touches. Its rows are per language, one for each the
+tree adopts (MUTATED, the file each leg's guard reads), at the
+repository's `[mutants]` count, the one repo-mutants.yml's weekly run
+uses, else the canon's. A row runs `ci:mutants` with MUTANTS_LEG (its
+language, which ci.yml sets from the row) and MUTANTS_SHARD=k/n counted
+from 0, as the weekly run counts them. A tree adopting none gets one
+`ci:mutants` row, which skips clean. Nothing is unioned: a mutation
+shard's verdict is its own.
+
 A row runs `mise run <task>`, its own depends included: a dependency
 that is also a row of its own runs twice, and that is accepted (ruled
 on #2160). `test`'s own run-line row runs the run line alone
@@ -94,7 +104,7 @@ BELT = HERE / "config.toml"
 # The repository's own counts, at its root (#2160).
 FILE = "shards.toml"
 LINTS = "lint:*"
-LEGS = ("lint", "test", "properties")
+LEGS = ("lint", "test", "properties", "mutants")
 # The root mise configs a repository's tasks are defined in.
 CONFIGS = ("mise.toml", ".mise.toml", ".config/mise.toml", ".config/mise/config.toml")
 # Where each split leg's closure starts, and whether the start's own run
@@ -127,6 +137,22 @@ LANGUAGES = {
 ADAPTED = {
     "mutants": ("rust", "go", "python", "typescript"),
     "deep-tests": ("python",),
+}
+# What adopts each mutation leg (#1432): a tracked file at the root
+# whose name matches, exactly the files each leg's guard reads
+# (mutants-<language>.sh). A StrykerJS config other than the JSON one is
+# the TypeScript leg's red, so it gets the row that says so.
+# mise/test_gate_shard.py holds each row to its leg's guard.
+MUTATED = {
+    "rust": (".cargo/mutants.toml",),
+    "go": (".gomuignore",),
+    "python": ("cosmic-ray.toml",),
+    "typescript": (
+        "stryker.config.json",
+        "stryker.conf.*",
+        "stryker.config.*",
+        ".stryker.conf.*",
+    ),
 }
 
 
@@ -301,6 +327,7 @@ def read_counts(files: list[str], root: Path, ceiling: int) -> Counts:
 
 
 type Task = dict[str, object]
+type Row = dict[str, object]
 
 
 def task_table(files: list[str], root: Path, belt: Path = BELT) -> dict[str, Task]:
@@ -484,6 +511,43 @@ def applies(task: str, files: list[str]) -> bool:
     )
 
 
+def mutated(language: str, files: list[str]) -> bool:
+    """Say whether the tree adopts a language's mutation leg.
+
+    Returns:
+        True when a tracked root file matches one of its MUTATED names.
+
+    """
+    return any(
+        f.count("/") == p.count("/") and fnmatch.fnmatchcase(f, p)
+        for f in files
+        for p in MUTATED[language]
+    )
+
+
+def mutation_rows(costs: Costs, counts: Counts, files: list[str]) -> list[Row]:
+    """Lay out the mutation leg (#1432): each adopted language's shards.
+
+    The counts are the repository's `[mutants]`, the ones repo-mutants.yml
+    runs the weekly whole population at, else the canon's. A tree that
+    adopts no language gets one row, `ci:mutants`, which skips clean.
+
+    Returns:
+        The leg's rows, each adopted language in LANGUAGES order.
+
+    """
+    shards = costs.languages["mutants"] | counts.languages.get("mutants", {})
+    adopted = [n for n in LANGUAGES["mutants"] if mutated(n, files)]
+    if not adopted:
+        return [{"leg": "mutants", "task": "ci:mutants", "shard": 1, "of": 1}]
+    return [
+        {"leg": "mutants", "task": "ci:mutants", "language": n, "shard": k, "of": of}
+        for n in adopted
+        for of in (shards[n],)
+        for k in range(1, of + 1)
+    ]
+
+
 def leg_tasks(
     leg: str, tasks: dict[str, Task], files: list[str]
 ) -> tuple[list[str], list[str], list[str]]:
@@ -510,7 +574,7 @@ def plan(
     """Lay out the gate's matrix: one row per runner.
 
     Returns:
-        The rows, lint first, then test, then properties.
+        The rows, lint first, then test, then properties, then mutants.
 
     Raises:
         PlanError: a defect in the repository's file or its task graph.
@@ -552,6 +616,7 @@ def plan(
             for task, of in legs
             for k in range(1, of + 1)
         ]
+    rows += mutation_rows(costs, counts, files)
     for row in rows:
         row["label"] = label(row)
     if len(rows) > MATRIX_LIMIT:
@@ -568,11 +633,14 @@ def label(row: dict[str, object]) -> str:
     """Name a row for its job: the leg, its task where split, its shard.
 
     Returns:
-        `lint 2/4`, `test`, `test test:unit`, `test test:unit 3/4`.
+        `lint 2/4`, `test`, `test test:unit`, `test test:unit 3/4`,
+        `mutants python 3/48`.
 
     """
     leg, task, at, of = row["leg"], row["task"], row["shard"], row["of"]
     name = str(leg) if task == f"ci:{leg}" else f"{leg} {task}"
+    if "language" in row:
+        name = f"{leg} {row['language']}"
     return f"{name} {at}/{of}" if of != 1 else name
 
 
@@ -854,6 +922,23 @@ def whole(text: str) -> int | None:
     return int(text) if text.isdigit() and int(text) > 0 else None
 
 
+def run_mutants(at: int, of: int, mise: str) -> int:
+    """Run one mutation row: its language's leg, its share of the change.
+
+    ci.yml names the row's language in MUTANTS_LEG; the legs count their
+    shards from 0 (MUTANTS_SHARD=k/n, k < n), as the weekly run does.
+
+    Returns:
+        mise's exit status, or 1 when a sharded row names no language.
+
+    """
+    if of > 1 and not os.environ.get("MUTANTS_LEG"):
+        findings.finding("", f"mutants {at}/{of}: MUTANTS_LEG names no language")
+        return 1
+    env = {"MUTANTS_SHARD": f"{at - 1}/{of}"} if of > 1 else {}
+    return run_tasks(mise, [["ci:mutants"]], env)
+
+
 def run(leg: str, task: str, at: int, of: int, mise: str) -> int:
     """Run one row: `ci:<leg>` alone, a lint shard's share, or one task's.
 
@@ -861,6 +946,8 @@ def run(leg: str, task: str, at: int, of: int, mise: str) -> int:
         mise's exit status.
 
     """
+    if leg == "mutants":
+        return run_mutants(at, of, mise)
     if task == f"ci:{leg}" and of == 1:
         return run_tasks(mise, [[task]], {})
     if leg == "lint":
@@ -920,7 +1007,7 @@ def print_plan(leg: str) -> int:
     split = {
         str(r["leg"])
         for r in rows
-        if r["leg"] != "lint" and r["task"] != f"ci:{r['leg']}"
+        if r["leg"] in STARTS and r["task"] != f"ci:{r['leg']}"
     }
     matrix: dict[str, object] = {"include": rows}
     print(f"legs={json.dumps(matrix, separators=(',', ':'))}")
@@ -942,7 +1029,7 @@ def union(directory: str) -> int:
         for line in err.lines:
             findings.finding("", line)
         return 1
-    planned = {str(r["task"]): int(str(r["of"])) for r in rows if r["leg"] != "lint"}
+    planned = {str(r["task"]): int(str(r["of"])) for r in rows if r["leg"] in STARTS}
     return shard.main([
         "union",
         directory,

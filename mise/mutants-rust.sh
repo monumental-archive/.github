@@ -46,6 +46,17 @@
 # `pg_test` so its `#[pg_test]` suite runs; which members are pgrx comes
 # from gate_surface.py, as for every other pgrx task.
 #
+# ON WHAT A CHANGE TOUCHES (`ci:mutants`, MUTANTS_DIFF set; #1432),
+# BY LINE, through cargo-mutants' own diff mode: mutants_diff.py writes
+# the change as a pinned unified diff, and every listing but the bare
+# `--no-config` one, and the run, take `--in-diff` it. The bare listing
+# stays whole, because the site records are held to it; a second
+# `--no-config` listing in the diff is what the excluded count is taken
+# from. Measured on 27.1.0: an empty diff, or one with no Rust in it,
+# lists nothing and exits 0, and the shard is then said to be empty. No
+# base, or a change to .cargo/mutants.toml or to cargo-mutants in a
+# tracked lockfile, judges the whole population.
+#
 # THIS FILE IS THE SEQUENCE; mutants_rust.py READS AND JUDGES (#1486).
 # Every step that parses or decides — the reason rule, the default
 # major, the listings' counts, which exit statuses mean judged, the
@@ -165,6 +176,16 @@ rc=0
 scratch=$(mktemp -d)
 trap 'rc=$?; rm -rf "${scratch}"; [ -n "${org_done:-}" ] || [ "${rc}" -ne 0 ] || rc=1; exit "${rc}"' EXIT
 
+# What the change touched, where the gate asks (#1432): a diff scope
+# hands every configured listing and the run `--in-diff`.
+scoped=()
+if [[ -n ${MUTANTS_DIFF:-} ]]; then
+  "${ORG_PYTHON}" "${belt}/mutants_diff.py" scope rust "${scratch}/scope"
+  if [[ $(< "${scratch}/scope/scope") == diff ]]; then
+    scoped=(--in-diff "${scratch}/scope/patch.diff")
+  fi
+fi
+
 # The run log the verdict replays, one line per event, in order.
 runs="${scratch}/runs.tsv"
 : > "${runs}"
@@ -182,17 +203,23 @@ mutate() {
   shift
   mkdir -p "${out}"
   cargo mutants --list --no-config "$@" > "${out}/all.txt"
-  cargo mutants --list ${excludes[@]+"${excludes[@]}"} "$@" > "${out}/listed.txt"
+  local every="${out}/all.txt"
+  if [[ -n ${scoped[0]+set} ]]; then
+    cargo mutants --list --no-config "${scoped[@]}" "$@" > "${out}/every.txt"
+    every="${out}/every.txt"
+  fi
+  cargo mutants --list ${scoped[@]+"${scoped[@]}"} ${excludes[@]+"${excludes[@]}"} "$@" > "${out}/listed.txt"
   local here=""
   if [[ -n ${shard} ]]; then
-    cargo mutants --list "${sharding[@]}" ${excludes[@]+"${excludes[@]}"} "$@" > "${out}/here.txt"
+    cargo mutants --list "${sharding[@]}" ${scoped[@]+"${scoped[@]}"} ${excludes[@]+"${excludes[@]}"} "$@" > "${out}/here.txt"
     here="${out}/here.txt"
   fi
   "${ORG_PYTHON}" "${belt}/mutants_rust.py" plan --name "${name}" --where "${where}" --dir "${out}" \
-    --all "${out}/all.txt" --listed "${out}/listed.txt" --here "${here}"
+    --all "${every}" --listed "${out}/listed.txt" --here "${here}"
   printf 'run\t%s\t%s\n' "${name}" "${out}" >> "${runs}"
   [[ ! -e ${out}/empty ]] || return 0
-  cargo mutants --output "${out}" ${sharding[@]+"${sharding[@]}"} ${excludes[@]+"${excludes[@]}"} "$@" || status=$?
+  cargo mutants --output "${out}" ${sharding[@]+"${sharding[@]}"} ${scoped[@]+"${scoped[@]}"} \
+    ${excludes[@]+"${excludes[@]}"} "$@" || status=$?
   echo "${status}" > "${out}/status"
 }
 

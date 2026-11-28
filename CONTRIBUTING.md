@@ -223,18 +223,26 @@ own; `measured` refuses one by name.
 ### What a pull request pays
 
 The gate stays fast and deterministic. A mechanism enters `ci` only
-with its measured cost written in its issue. The gate runs as three
-legs side by side (#1740): the lints (`ci:lint`), the tests with the
-coverage ratchet (`ci:test`) and the property tests
-(`ci:properties`), so a pull request waits on its slowest leg, not on
+with its measured cost written in its issue. The gate runs as four
+legs side by side (#1740, #1432): the lints (`ci:lint`), the tests
+with the coverage ratchet (`ci:test`), the property tests
+(`ci:properties`) and mutation testing on what the change touches
+(`ci:mutants`), so a pull request waits on its slowest leg, not on
 the sum, and a task added to one leg does not slow the others. Each
 leg runs on as many runners as the repository splits it into: a
 runner per task of its `test`, and the shard counts in its own
 tracked `shards.toml` (#2160); the canon supplies the means and the
-defaults (`mise/gate-shards.toml`), never the split. Mutation
-testing, which
-repeats the suite once per mutant, runs on its own weekly mutation
-workflow, apart from the audit, never on a pull request. Anything
+defaults (`mise/gate-shards.toml`), never the split.
+
+Mutation testing pays on the pull request for the lines it touches:
+you touch it, you kill it (#1432). A surviving mutant on a line the
+change touched reds the gate, whether the change made it or it was
+already there, so editing a line makes its survivors yours, and the
+backlog is paid down where work happens. No base, a touched adoption
+file or a moved mutation tool judges the language's whole population.
+The whole population runs weekly on its own mutation workflow, apart
+from the audit, for what a diff cannot see: a change that only weakens
+tests, a tool upgrade that adds mutators. Anything
 that is random (the random half of property testing), needs a
 second toolchain (Rust branch coverage) or re-runs the suite at
 several times its cost (Go condition coverage) runs on the Monday
