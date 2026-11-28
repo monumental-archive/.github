@@ -2,7 +2,7 @@
 
 Every belt Python command is run one way, from the pinned tree:
 
-    "${ORG_PYTHON}" -I "${ORG_BELT_ROOT}/belt" <command> [<argument>…]
+    "${ORG_PYTHON}" -I "${ORG_CANON_DIR}/belt" <command> [<argument>…]
 
 `-I` keeps out PYTHONPATH, the user's site directory and the caller's
 working directory, so nothing in a consumer's environment can shadow

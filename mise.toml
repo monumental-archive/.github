@@ -30,7 +30,7 @@ shell = "bash -euo pipefail -c"
 [tasks.test]
 description = "The belt's Python package and release scripts, under pytest"
 dir = "{{cwd}}"
-# Against the WORKING TREE's belt/, never ORG_BELT_ROOT. In this repo the
+# Against the WORKING TREE's belt/, never ORG_CANON_DIR. In this repo the
 # two resolve to the same place — gate.yml self-applies ci.yml through a
 # local `uses:`, so `$/.github/actions/canon` hands the job the pull
 # request's own ref — but the code under review is what a test task owes

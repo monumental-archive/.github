@@ -55,7 +55,7 @@ command -v gh > /dev/null || {
 # legs agree a shield is.
 # shellcheck source=mise/identity.sh
 . "${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: lefthook run post-checkout)}/identity.sh"
-: "${ORG_BELT_ROOT:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: lefthook run post-checkout)}"
+: "${ORG_CANON_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: lefthook run post-checkout)}"
 # ONE way to ask an issuer (#1161). Every leg that used `curl -sf`
 # folded three different answers into one: the issuer said no, the
 # issuer refused to talk, the issuer was down. All three were reported
@@ -267,7 +267,7 @@ while read -r repo; do
           failed="${failed} ${repo}(bestpractices: issuer returned nothing for project ${id})"
         elif [[ ${heard} != 200 ]]; then
           unanswered bestpractices "bestpractices.dev, about project ${id},"
-        elif ! bp_owner=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" bestpractices-owner \
+        elif ! bp_owner=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" bestpractices-owner \
           "${wearer}" <<< "${bp}"); then
           failed="${failed} ${repo}(bestpractices: ${bp_owner})"
         elif ! jq -e '(.badge_percentage_0 // 0) >= 100' <<< "${bp}" > /dev/null; then
@@ -293,7 +293,7 @@ while read -r repo; do
           failed="${failed} ${repo}(baseline: issuer returned nothing for project ${id})"
         elif [[ ${heard} != 200 ]]; then
           unanswered baseline "bestpractices.dev, about project ${id},"
-        elif ! bp_owner=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" bestpractices-owner \
+        elif ! bp_owner=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" bestpractices-owner \
           "${wearer}" <<< "${bp}"); then
           failed="${failed} ${repo}(baseline: ${bp_owner})"
         elif ! jq -e '[.achieved_baseline_1_at, .achieved_baseline_2_at, .achieved_baseline_3_at] | any(. != null)' \

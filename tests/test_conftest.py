@@ -1,7 +1,7 @@
-"""The fixtures every test runs under, each run on a planted test (#2177).
+"""The hooks every test runs under, each run on a planted test (#2177).
 
 Each row plants a test with pytester and runs it in this process, with
-a planted conftest that takes the two fixtures from tests/conftest.py,
+a planted conftest that takes the two hooks from tests/conftest.py,
 so the row sees each do its work: the environment cleared, the working
 directory held.
 """
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-CONFTEST = "from tests.conftest import _hermetic_environ, _directory_held\n"
+CONFTEST = "from tests.conftest import pytest_runtest_setup, pytest_runtest_teardown\n"
 
 
 def test_a_variable_the_job_sets_never_reaches_a_test(
@@ -32,7 +32,7 @@ def test_a_variable_the_job_sets_never_reaches_a_test(
     result.assert_outcomes(passed=1)
 
 
-def test_without_the_fixture_the_variable_would_reach_it(
+def test_without_the_hooks_the_variable_would_reach_it(
     pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The control: the same test, with no conftest, sees the variable."""

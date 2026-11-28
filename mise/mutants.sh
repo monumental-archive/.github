@@ -30,7 +30,7 @@ leg() {
   if [[ -f ${belt}/mutants-$1.sh ]]; then
     bash "${belt}/mutants-$1.sh" || red+=" $1"
   else
-    "${ORG_PYTHON:?unset — the belt Python}" -I "${ORG_BELT_ROOT:?unset — no belt}/belt" \
+    "${ORG_PYTHON:?unset — the belt Python}" -I "${ORG_CANON_DIR:?unset — no belt}/belt" \
       "mutants-$1" || red+=" $1"
   fi
 }

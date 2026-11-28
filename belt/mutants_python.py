@@ -12,13 +12,12 @@ ADOPTION IS MUTMUT'S OWN CONFIGURATION, tracked at the repository's
 root: a `[mutmut]` section in `setup.cfg`, or `[tool.mutmut]` in
 `pyproject.toml` (mutmut reads the second when it is there). Without
 one the leg skips clean, by name; with both it is red, since mutmut
-would silently read one. The section holds only the repository's own
-facts, ALLOWED: what is mutated (`source_paths`) and the tests that
-judge it (`pytest_add_cli_args_test_selection`). Every other key is the
-belt's policy and red by name, a key a later mutmut adds included,
-until it is weighed. mutmut 3.8.1's defaults are its maximum
-(`mutate_only_covered_lines` false, `max_stack_depth` -1, nothing
-excluded, no `type_check_command`).
+would silently read one. A repository's section holds only what is
+mutated (`source_paths`) and the tests that judge it
+(`pytest_add_cli_args_test_selection`); mutmut 3.8.1's defaults are
+its maximum (`mutate_only_covered_lines` false, `max_stack_depth` -1,
+nothing excluded, no `type_check_command`). The org writes every
+repository's section, so the leg does not police it.
 
 The belt adds what is not the repository's: pytest reads the belt's
 own `mise/pytest.toml` (`-c`), and the copy holds every tracked
@@ -62,7 +61,6 @@ from belt.tree import MISE
 
 LABEL = "audit:mutants: python"
 SHARD = "MUTANTS_SHARD"
-ALLOWED = ("source_paths", "pytest_add_cli_args_test_selection")
 SETUP = "setup.cfg"
 PYPROJECT = "pyproject.toml"
 COPY = "mutants"
@@ -139,16 +137,6 @@ def configuration(root: Path) -> tuple[str, dict[str, str]] | None:
         )
         raise AdoptionError(msg)
     return found[0] if found else None
-
-
-def refused_keys(keys: dict[str, str]) -> list[str]:
-    """Name every key outside the allow-list.
-
-    Returns:
-        The refused keys, sorted.
-
-    """
-    return sorted(k for k in keys if k not in ALLOWED)
 
 
 def source_paths(keys: dict[str, str]) -> list[str]:
@@ -343,15 +331,6 @@ def prepare(root: Path) -> list[str] | None:
     if found is None:
         return None
     name, keys = found
-    refused = refused_keys(keys)
-    if refused:
-        msg = (
-            f"{name} [mutmut] holds keys that are the belt's policy, not the"
-            " repository's facts:"
-        )
-        raise RefusedError(
-            msg, [*refused, f"a repository names only {', '.join(ALLOWED)}"]
-        )
     sources = source_paths(keys)
     if not sources:
         msg = f"{name} [mutmut] names no source_paths"

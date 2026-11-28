@@ -20,7 +20,7 @@ import sys
 from typing import Protocol, runtime_checkable
 
 PACKAGES = ("belt", "belt.release", "belt.release.pgrx", "belt.rekor_monitor")
-USAGE = 'usage: "${ORG_PYTHON}" -I "${ORG_BELT_ROOT}/belt" <command> [<argument>…]'
+USAGE = 'usage: "${ORG_PYTHON}" -I "${ORG_CANON_DIR}/belt" <command> [<argument>…]'
 EXIT_USAGE = 2
 
 

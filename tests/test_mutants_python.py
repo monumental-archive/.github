@@ -5,7 +5,7 @@ mutmut, the belt's pin, on a planted repository: a package, its tests
 and mutmut's own `[mutmut]` section. Each row asserts the leg's exact
 words: a survivor red by its module and function, a mutant no test
 reaches red by name, a timeout red, a pragma with no reason or a region
-form red, and a `[mutmut]` key outside the allow-list red by key.
+form red.
 """
 
 from __future__ import annotations
@@ -183,22 +183,6 @@ def test_a_pragma_that_is_not_the_reasoned_line_form_is_red(
         f"audit:mutants: pkg/calc.py:6: {message}\n"
         "  an exclusion records a mutant the suite cannot kill; say why at the site\n"
         "audit:mutants: python: a pragma above is refused; nothing was mutated\n"
-    )
-
-
-def test_a_key_outside_the_allow_list_is_red_by_key(
-    tmp_path: Path, leg: Callable[..., Called]
-) -> None:
-    """Policy in the repository's section: each key named, nothing run."""
-    setup = SETUP + "timeout_multiplier = 1.0\ndo_not_mutate = pkg/*\n"
-    done = leg(plant(tmp_path, "calc", CALC, CALC_TESTS, setup))
-    assert done.returncode == RED
-    assert done.stderr == (
-        "audit:mutants: python: setup.cfg [mutmut] holds keys that are the belt's"
-        " policy, not the repository's facts:\n"
-        "  do_not_mutate\n"
-        "  timeout_multiplier\n"
-        "  a repository names only source_paths, pytest_add_cli_args_test_selection\n"
     )
 
 

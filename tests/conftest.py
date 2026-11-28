@@ -1,15 +1,18 @@
-"""The fixtures every belt test runs under (#2177).
+"""The hooks every belt test runs under, and its fixtures (#2177).
 
-Two hold every test, unasked:
+Two hooks hold every test, unasked. They are hooks, not autouse
+fixtures: ruff's `pytest-fixture-autouse` reds an autouse fixture and
+has no code, so a fixture would need a suppression.
 
 - THE ENVIRONMENT (#1508, #857). Before a test runs, `os.environ` is
   cleared to `hermetic.env()`: the variables INHERITED names, HOME and
   a git identity. In-process code sees nothing from the job the suite
   runs in (a release job's `VERSION`, a hook's `GIT_DIR`, the gate's
   `MISE_TASK_NAME` and `ORG_FINDINGS`), and a process the test starts
-  inherits the same set. Restored afterwards.
+  inherits the same set. Restored at its teardown.
 - THE WORKING DIRECTORY (#1491). A test that changes directory and
-  does not change back fails, by name, at its teardown, and the suite's
+  does not change back fails, by name, at its teardown (after its
+  fixtures, so `monkeypatch.chdir` has been undone), and the suite's
   directory is restored for the next test. A test that needs another
   directory takes `monkeypatch.chdir`, which restores it.
 
@@ -35,27 +38,44 @@ from tests import hermetic
 from tests.hermetic import Called
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Generator
+    from collections.abc import Callable
 
 # The fixture tests run pytest on planted trees (tests/test_conftest.py,
 # tests/test_pytest_config.py).
 pytest_plugins = ("pytester",)
 
 
-# The directory guard is set up first, so it is torn down last: after
-# `monkeypatch`, which the environment fixture takes, has undone a
-# `monkeypatch.chdir`. pytest orders a plugin's autouse fixtures by
-# name, so the guard's name sorts before the environment's.
-@pytest.fixture(autouse=True)
-def _directory_held(request: pytest.FixtureRequest) -> Generator[None]:
-    """Fail a test that leaves the working directory elsewhere.
+ENVIRON: pytest.StashKey[dict[str, str]] = pytest.StashKey()
+DIRECTORY: pytest.StashKey[str] = pytest.StashKey()
+
+
+def _setup(item: pytest.Item) -> None:
+    """Hold the directory and clear the environment before a test.
+
+    Runs first, so every fixture the test takes is set up in the
+    environment it is given: the variables INHERITED names, HOME and a
+    git identity.
+    """
+    item.stash[DIRECTORY] = os.getcwd()
+    item.stash[ENVIRON] = dict(os.environ)
+    wanted = hermetic.env()
+    os.environ.clear()
+    os.environ.update(wanted)
+
+
+def _teardown(item: pytest.Item) -> None:
+    """Restore the environment, and fail a test that moved the directory.
+
+    Runs last, after the test's fixtures are torn down, so a
+    `monkeypatch.chdir` has been undone before the directory is read.
 
     Raises:
         pytest.fail.Exception: the directory moved, named with the test.
 
     """
-    start = os.getcwd()
-    yield
+    os.environ.clear()
+    os.environ.update(item.stash[ENVIRON])
+    start = item.stash[DIRECTORY]
     try:
         now = os.getcwd()
     except OSError:
@@ -63,21 +83,16 @@ def _directory_held(request: pytest.FixtureRequest) -> Generator[None]:
     if now != start:
         os.chdir(start)
         pytest.fail(
-            f"{request.node.nodeid} left the working directory at {now}"
+            f"{item.nodeid} left the working directory at {now}"
             f" (the suite runs from {start}); take monkeypatch.chdir",
             pytrace=False,
         )
 
 
-@pytest.fixture(autouse=True)
-def _hermetic_environ(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Clear the process environment to the one a fixture is given."""
-    wanted = hermetic.env()
-    for name in list(os.environ):
-        if name not in wanted:
-            monkeypatch.delenv(name)
-    for name, value in wanted.items():
-        monkeypatch.setenv(name, value)
+# Called with the function, the marker returns it typed; as a
+# decorator mypy reads it as Any.
+pytest_runtest_setup = pytest.hookimpl(_setup, tryfirst=True)
+pytest_runtest_teardown = pytest.hookimpl(_teardown, trylast=True)
 
 
 @pytest.fixture

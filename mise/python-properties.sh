@@ -41,7 +41,7 @@ case "${profile}" in
 esac
 # The task this script reports for, where mise named none (#1934).
 org_task "${label}"
-: "${ORG_BELT_ROOT:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: lefthook run post-checkout)}"
+: "${ORG_CANON_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: lefthook run post-checkout)}"
 
 # git's default pathspec lets `*` cross a slash, so this lists every
 # `prop_*.py` at any depth; the loop keeps the ones whose NAME starts
@@ -72,7 +72,7 @@ if [[ ${profile} == gate ]]; then
   done
   leaks=""
   if [[ -n ${ordinary[0]+set} ]]; then
-    leaks=$(printf '%s\0' "${ordinary[@]}" | xargs -0 "${ORG_PYTHON}" -I "${ORG_BELT_ROOT}/belt" hypothesis-imports)
+    leaks=$(printf '%s\0' "${ordinary[@]}" | xargs -0 "${ORG_PYTHON}" -I "${ORG_CANON_DIR}/belt" hypothesis-imports)
   fi
   if [[ -n ${leaks} ]]; then
     detail=()
@@ -86,7 +86,7 @@ if [[ ${profile} == gate ]]; then
   # is typed `Callable[..., None]`, which the belt's mypy reds on every
   # property, and the typed one also refuses a strategy that does not
   # match its parameter.
-  untyped=$(printf '%s\0' "${args[@]}" | xargs -0 "${ORG_PYTHON}" -I "${ORG_BELT_ROOT}/belt" hypothesis-imports --given)
+  untyped=$(printf '%s\0' "${args[@]}" | xargs -0 "${ORG_PYTHON}" -I "${ORG_CANON_DIR}/belt" hypothesis-imports --given)
   if [[ -n ${untyped} ]]; then
     detail=()
     while IFS= read -r file; do detail+=("${file}"); done <<< "${untyped}"
@@ -102,7 +102,7 @@ fi
 # names the interpreter the properties run on; the second, with
 # `--site`, has that venv import the package, and its directory is not
 # needed here. The runner is the belt's command, on that interpreter.
-venv_python=$("${ORG_PYTHON}" -I "${ORG_BELT_ROOT}/belt" tool-python "${label}" pytest) || exit 1
-"${ORG_PYTHON}" -I "${ORG_BELT_ROOT}/belt" tool-python "${label}" pytest --site hypothesis > /dev/null || exit 1
+venv_python=$("${ORG_PYTHON}" -I "${ORG_CANON_DIR}/belt" tool-python "${label}" pytest) || exit 1
+"${ORG_PYTHON}" -I "${ORG_CANON_DIR}/belt" tool-python "${label}" pytest --site hypothesis > /dev/null || exit 1
 
-"${venv_python}" -I "${ORG_BELT_ROOT}/belt" python-properties "${profile}" "${args[@]}"
+"${venv_python}" -I "${ORG_CANON_DIR}/belt" python-properties "${profile}" "${args[@]}"

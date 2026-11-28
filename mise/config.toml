@@ -185,15 +185,8 @@ ORG_BELT_REFUSED = '''{{ exec(command=`c='` ~ cwd | replace(from=`'`, to=`'"'"'`
 # in play. Empty when the belt did not arrive, for the same #569 reason
 # stated above — `dirname` of empty is empty, not an error.
 ORG_CANON_DIR = "{{ env.ORG_BELT_DIR | dirname }}"
-# WHERE THE BELT PACKAGE IS FOUND (#2177): the directory `belt/` sits
-# in, beside `mise/`, so every helper runs as
-# `"${ORG_PYTHON}" -I "${ORG_BELT_ROOT}/belt" <command>` from the tree
-# the gate stub pins and nowhere else. The same dirname as ORG_CANON_DIR,
-# named for what the launcher needs: a path, not a second search. Empty
-# when the belt did not arrive, as above.
-ORG_BELT_ROOT = "{{ env.ORG_BELT_DIR | dirname }}"
 # THE BELT'S PYTHON, as an absolute path: every helper a belt script
-# starts runs as `"${ORG_PYTHON}" -I "${ORG_BELT_ROOT}/belt" <command>`
+# starts runs as `"${ORG_PYTHON}" -I "${ORG_CANON_DIR}/belt" <command>`
 # (#1543, #2177), the same
 # interpreter CI's `$/.github/actions/canon` installs and exports under
 # this name. It is the belt's own `[tools]` pin, read from the belt's
@@ -1800,7 +1793,7 @@ if org_tracked_has "${generated}"; then
   org_finding "" "${generated} is tracked; the belt writes it for the length of one run"
   exit 1
 fi
-printf '%s\0' "${files[@]}" | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" biome-suppressions
+printf '%s\0' "${files[@]}" | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" biome-suppressions
 rc=0
 trap 'rc=$?; rm -f "${generated}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 bash "${ORG_BELT_DIR}/biome-generate.sh" "${generated}"
@@ -2097,7 +2090,7 @@ if [[ -n ${detail[0]+set} ]]; then
     "name it with underscores in place of the hyphens"
   exit 1
 fi
-"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" python-roots "${ORG_BELT_DIR}" "${files[@]}" > /dev/null || {
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" python-roots "${ORG_BELT_DIR}" "${files[@]}" > /dev/null || {
   org_finding "" "rename one of each pair above so every module name is one file's"
   exit 1
 }
@@ -2297,7 +2290,7 @@ files=() && action_files files
 # mise/ then .org-canon/ and SKIP CLEAN when it found neither — so a
 # consumer running the gate locally checked no embedded shell at all and
 # said nothing. ORG_BELT_DIR resolves in both worlds (#445).
-"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" embedded-shell "${files[@]}"
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" embedded-shell "${files[@]}"
 '''
 
 [tasks."lint:workflow-shell"]
@@ -2337,7 +2330,7 @@ files+=(${templates[@]+"${templates[@]}"})
   echo "lint:workflow-shell: no workflows, actions or templates, skipped"
   exit 0
 }
-"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" embedded-shell \
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" embedded-shell \
   --ceiling security/workflow-shell-debt.txt "${files[@]}"
 '''
 
@@ -2359,7 +2352,7 @@ files+=(${templates[@]+"${templates[@]}"})
   echo "fix:workflow-shell: no workflows, actions or templates, nothing to fix"
   exit 0
 }
-"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" embedded-shell \
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" embedded-shell \
   --ceiling security/workflow-shell-debt.txt --write "${files[@]}"
 '''
 
@@ -2388,7 +2381,7 @@ files=() && org_tracked_read files ':!vendor/**' "*mise.toml" "*mise.*.toml" \
   echo "lint:task-shell: no mise config tracked, skipped"
   exit 0
 }
-"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" embedded-shell \
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" embedded-shell \
   --task-ceiling security/task-shell-debt.txt "${files[@]}"
 '''
 
@@ -2408,7 +2401,7 @@ files=() && org_tracked_read files ':!vendor/**' "*mise.toml" "*mise.*.toml" \
   echo "fix:task-shell: no mise config tracked, nothing to fix"
   exit 0
 }
-"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" embedded-shell \
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" embedded-shell \
   --task-ceiling security/task-shell-debt.txt --write "${files[@]}"
 '''
 
@@ -2618,7 +2611,7 @@ files=() && org_tracked_read files ':!vendor/**' "*mise.toml" "*mise.*.toml" \
 # also handed over as an ENV source rather than a target: a repo's task
 # body reads ORG_BELT_DIR the way a workflow step reads its `env:`, and
 # the name is declared there, not here. Nothing restates it.
-"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" belt-shell --env-from "${ORG_BELT_DIR}/config.toml" \
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" belt-shell --env-from "${ORG_BELT_DIR}/config.toml" \
   --source-path "${ORG_BELT_DIR}" "${files[@]}"
 '''
 
@@ -2666,7 +2659,7 @@ files=() && org_tracked_read files ':!vendor/**' "*mise.toml" "*mise.*.toml" \
   echo "fix:belt-shell: no mise config tracked, nothing to fix"
   exit 0
 }
-"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" belt-shell --write "${files[@]}"
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" belt-shell --write "${files[@]}"
 '''
 
 [tasks."lint:commits"]
@@ -2775,7 +2768,7 @@ dir = "{{cwd}}"
 # ceiling is read from the delivered committed.toml rather than restated
 # — one definition of 72, which is what made the file's delivery the
 # first step of #576.
-run = 'org_tracked ":!vendor/**" | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" subject-budget'
+run = 'org_tracked ":!vendor/**" | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" subject-budget'
 
 [tasks."lint:zizmor"]
 description = "Security-audit GitHub Actions workflows (zizmor, auditor)"
@@ -2829,7 +2822,7 @@ dir = "{{cwd}}"
 # sentence (mise/vex-one-per-merge.txt) and the files named. Skips
 # clean, by name, where no decision is tracked and on the default
 # branch itself.
-run = '"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" vex-one-per-merge'
+run = '"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" vex-one-per-merge'
 
 [tasks."lint:dco"]
 description = "Every commit carries a Developer Certificate of Origin sign-off"
@@ -3044,7 +3037,7 @@ manifests=() && org_tracked_read manifests ':!vendor/**' "Cargo.toml" "*/Cargo.t
   echo "lint:rust: no Cargo.toml tracked, skipped"
   exit 0
 }
-"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" rust-lint lint
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" rust-lint lint
 '''
 
 [tasks."fix:rust"]
@@ -3084,7 +3077,7 @@ manifests=() && org_tracked_read manifests ':!vendor/**' "Cargo.toml" "*/Cargo.t
   echo "fix:rust: no Cargo.toml tracked, skipped"
   exit 0
 }
-"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" rust-lint fix
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" rust-lint fix
 '''
 
 [tasks."lint:msrv"]
@@ -3174,7 +3167,7 @@ manifests=() && org_tracked_read manifests ':!vendor/**' "Cargo.toml" "*/Cargo.t
   echo "lint:msrv: no Cargo.toml tracked, skipped"
   exit 0
 }
-"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" msrv-lint
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" msrv-lint
 '''
 
 [tasks."lint:pg-clippy"]
@@ -3218,7 +3211,7 @@ manifests=() && org_tracked_read manifests ':!vendor/**' "Cargo.toml" "*/Cargo.t
   echo "lint:pg-clippy: no Cargo.toml tracked, skipped"
   exit 0
 }
-"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" pg-clippy
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" pg-clippy
 '''
 
 [tasks."lint:pg-schema"]
@@ -3415,7 +3408,7 @@ command -v cargo > /dev/null || {
   exit 1
 }
 surface=$(cargo metadata --no-deps --format-version 1 --locked \
-  | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" gate-surface --exclude "${CLIPPY_EXCLUDE:-}" \
+  | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" gate-surface --exclude "${CLIPPY_EXCLUDE:-}" \
     --publish .github/workflows/publish.yml)
 count=0
 while IFS=$'\t' read -r record _spec _kind _majors _dir; do
@@ -3752,7 +3745,7 @@ for cfg in "${cfgs[@]}"; do
     rc=1
     continue
   }
-  "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" tsconfig-dials --flags "${ORG_BELT_DIR}/tsc-flags.txt" \
+  "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" tsconfig-dials --flags "${ORG_BELT_DIR}/tsc-flags.txt" \
     --name "${cfg}" < "${tmp}/resolved.json" || rc=1
 done
 [[ ${rc} -eq 0 ]] || {
@@ -4253,7 +4246,7 @@ for m in "${mods[@]}"; do
     org_finding "" "${m} names no module"
     exit 1
   }
-  "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" stele-findings assert advisories --scan "${scan}" --vex "${vex}" --subject "${module}"
+  "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" stele-findings assert advisories --scan "${scan}" --vex "${vex}" --subject "${module}"
 done
 org_done=1
 '''
@@ -4298,7 +4291,7 @@ command -v stele > /dev/null || {
   exit 1
 }
 : "${GITHUB_REPOSITORY_OWNER:?audit:blast-radius walks an org the environment names (#579) — Actions sets it; a local run exports it}"
-"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" stele-findings assert blast-radius \
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" stele-findings assert blast-radius \
   --org "${GITHUB_REPOSITORY_OWNER}" \
   --policy slsa/assert-policy.json \
   --vex security/vex
@@ -4342,7 +4335,7 @@ command -v stele > /dev/null || {
   exit 1
 }
 : "${GITHUB_REPOSITORY_OWNER:?audit:attestations walks an org the environment names (#579) — Actions sets it; a local run exports it}"
-"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" stele-findings assert evidence \
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" stele-findings assert evidence \
   --org "${GITHUB_REPOSITORY_OWNER}" \
   --policy slsa/assert-policy.json \
   --depth full \
@@ -4385,7 +4378,7 @@ command -v stele > /dev/null || {
   exit 1
 }
 : "${GITHUB_REPOSITORY_OWNER:?audit:source-vsa walks an org the environment names (#579) — Actions sets it; a local run exports it}"
-"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" stele-findings assert chains \
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" stele-findings assert chains \
   --org "${GITHUB_REPOSITORY_OWNER}" \
   --policy slsa/assert-policy.json \
   --verify-policy slsa/verify-policy.json
@@ -4440,7 +4433,7 @@ org_tracked_has .bestpractices.json || {
 }
 top=$(git rev-parse --show-toplevel)
 readme=() && org_tracked_read readme ':(icase)readme' ':(icase)readme.md' ':(icase)readme.markdown'
-"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" bestpractices-drift .bestpractices.json "${GITHUB_REPOSITORY:-${top##*/}}" "${readme[0]:-}"
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" bestpractices-drift .bestpractices.json "${GITHUB_REPOSITORY:-${top##*/}}" "${readme[0]:-}"
 '''
 
 [tasks."audit:links"]
@@ -4484,7 +4477,7 @@ names=() && org_tracked_read names ":!vendor/**" "*.md" "*.markdown"
 if [[ -z ${names[0]+set} ]]; then
   echo "audit:links: no markdown tracked, skipped"
 else
-  "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" lychee-findings --no-progress --include-fragments --config "${ORG_BELT_DIR}/lychee.toml" "${names[@]}"
+  "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" lychee-findings --no-progress --include-fragments --config "${ORG_BELT_DIR}/lychee.toml" "${names[@]}"
 fi
 '''
 
@@ -4533,7 +4526,7 @@ files=() && workflow_files files
 }
 . "${ORG_BELT_DIR}/identity.sh"
 signer_wf=$(org_identity signer-workflow)
-"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" zizmor-signer --signer-workflow "${signer_wf}" --persona=auditor "${files[@]}"
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" zizmor-signer --signer-workflow "${signer_wf}" --persona=auditor "${files[@]}"
 '''
 
 [tasks."audit:template-pins"]
@@ -4560,7 +4553,7 @@ canon_owner=$(org_identity owner)
 canon_repo=$(org_identity repo)
 # The pin, the drift since it, and the post-release window (#290,
 # #310): mise/template_drift.py (#1911).
-"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" template-drift \
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" template-drift \
   "${canon_owner}/${canon_repo}" "${files[@]}"
 '''
 
@@ -5024,7 +5017,7 @@ files=() && workflow_files files
   exit 0
 }
 # The two -ignore flags and the `.org-canon` link: mise/actions_lint.py.
-"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" actions-lint "${files[@]}"
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" actions-lint "${files[@]}"
 '''
 
 [tasks."release:preview"]
@@ -5131,7 +5124,7 @@ command -v cargo > /dev/null || {
 }
 . "${ORG_BELT_DIR}/rust-workspaces.sh"
 roots=() && org_rust_workspace_roots roots || exit 1
-"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" workspace-inherit "${roots[@]}"
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" workspace-inherit "${roots[@]}"
 '''
 
 [tasks."lint:gate-stub"]
@@ -5179,7 +5172,7 @@ files=() && workflow_files files
 canon_owner=$(org_identity owner)
 canon_repo=$(org_identity repo)
 # The three requirements and their messages: mise/gate_stub.py (#1911).
-"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" gate-stub \
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" gate-stub \
   "${canon_owner}/${canon_repo}" "${files[@]}"
 '''
 
@@ -5204,7 +5197,7 @@ files=() && workflow_files files
 canon_owner=$(org_identity owner)
 canon_repo=$(org_identity repo)
 canon="${canon_owner}/${canon_repo}"
-"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" gate-stub-fix "${canon}" "${files[@]}"
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" gate-stub-fix "${canon}" "${files[@]}"
 '''
 
 [tasks."lint:belt-link"]
@@ -5267,7 +5260,7 @@ files=() && workflow_files files
 # Only a real grant counts: a workflow that says "no id-token, ever" in
 # a comment is documenting the boundary, not breaching it. The logic is
 # mise/capability_boundary.py (#1911).
-"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" capability-boundary "${files[@]}"
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" capability-boundary "${files[@]}"
 '''
 
 [tasks."lint:release-phases"]
@@ -5503,7 +5496,7 @@ files=() && workflow_files files
 owner=$(org_identity owner)
 repo=$(org_identity repo)
 signer=$(org_identity signer-workflow)
-"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" signer-pin "${owner}/${repo}" \
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" signer-pin "${owner}/${repo}" \
   "${signer}" "${files[@]}"
 '''
 
@@ -5876,7 +5869,7 @@ command -v gh > /dev/null || {
 }
 . "${ORG_BELT_DIR}/identity.sh"
 owner=$(org_identity owner)
-"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" security-config --owner "${owner}" \
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" security-config --owner "${owner}" \
   --record security/org-default.json --private-record security/org-private.json \
   --roster slsa/assert-policy.json
 '''
@@ -5941,7 +5934,7 @@ files=() && workflow_files files
   echo "lint:installer-pinned: no workflows, skipped"
   exit 0
 }
-"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" installer-pinned "${files[@]}"
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" installer-pinned "${files[@]}"
 '''
 
 [tasks."lint:cold-attested"]
@@ -6023,7 +6016,7 @@ files=() && workflow_files files
   exit 0
 }
 # The marker rules above are mise/cold_attested.py's logic (#1911).
-"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" cold-attested "${files[@]}"
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" cold-attested "${files[@]}"
 '''
 
 [tasks."lint:coverage-exclusions"]
@@ -6051,7 +6044,7 @@ files=() && org_tracked_read files ':!vendor/**' '*.py' '*.pyi' '*.rs' '*.go' \
   echo "lint:coverage-exclusions: no Python, Rust, Go, TypeScript or JavaScript tracked, skipped"
   exit 0
 }
-printf '%s\0' "${files[@]}" | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" coverage-exclusions
+printf '%s\0' "${files[@]}" | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" coverage-exclusions
 '''
 
 [tasks."lint:test-adoption"]
@@ -6068,7 +6061,7 @@ dir = "{{cwd}}"
 # What an adoption file must contain stays each leg's business. No
 # repository list and no small-code exemption: a repository that does
 # not want the obligation does not ship the language.
-run = 'org_tracked | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" testing-adoption'
+run = 'org_tracked | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" testing-adoption'
 
 [tasks."coverage:check"]
 description = "Enforce the derived coverage floor (.coverage-floor); repos without one skip clean"
@@ -6146,8 +6139,8 @@ depends = [{ task = "test", optional = true }]
 # every target and replays its corpus. A `fuzz-*` line left in the
 # floor is refused by name, with the lines to delete.
 run = '''
-floor=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" coverage-floor read) || exit 1
-tracked=$(org_tracked '*.py' | tr '\0' '\n' && "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" coverage-floor legs) || tracked=""
+floor=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" coverage-floor read) || exit 1
+tracked=$(org_tracked '*.py' | tr '\0' '\n' && "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" coverage-floor legs) || tracked=""
 if [[ -z ${floor} ]] || { ! org_tracked_has Cargo.toml && ! org_tracked_has go.mod && [[ -z ${tracked} ]] && ! org_tracked_has package.json; }; then
   if [[ -z ${floor} ]]; then
     echo "coverage:check: no .coverage-floor, skipped"
@@ -6158,7 +6151,7 @@ if [[ -z ${floor} ]] || { ! org_tracked_has Cargo.toml && ! org_tracked_has go.m
 fi
 legs=$("${ORG_BELT_DIR}/coverage-measure.sh" coverage:check reports) || exit 1
 upload=${legs##*$'\n'} legs=${legs%$'\n'*}
-"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" coverage-floor hold --label coverage:check --job gate <<< "${legs}" || exit 1
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" coverage-floor hold --label coverage:check --job gate <<< "${legs}" || exit 1
 echo "${upload}"
 '''
 
@@ -6347,7 +6340,7 @@ files=() && action_files files
   echo "audit:action-pins: no workflows or actions, skipped"
   exit 0
 }
-"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" pinact-findings --config "${ORG_BELT_DIR}/pinact.yaml" --fix=false --verify-comment --verify-min-age "${files[@]}"
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" pinact-findings --config "${ORG_BELT_DIR}/pinact.yaml" --fix=false --verify-comment --verify-min-age "${files[@]}"
 '''
 
 [tasks."audit:caller-permissions"]
@@ -6378,7 +6371,7 @@ command -v stele > /dev/null || {
   exit 1
 }
 : "${GITHUB_REPOSITORY_OWNER:?audit:caller-permissions walks an org the environment names (#579) — Actions sets it; a local run exports it}"
-if ! "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" stele-findings assert permissions \
+if ! "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" stele-findings assert permissions \
   --policy slsa/assert-policy.json \
   --tree . \
   --org "${GITHUB_REPOSITORY_OWNER}"; then
@@ -6608,7 +6601,7 @@ command -v stele > /dev/null || {
   exit 1
 }
 : "${GITHUB_REPOSITORY_OWNER:?audit:release-tags walks an org the environment names (#579) — Actions sets it; a local run exports it}"
-"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" stele-findings assert tags \
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" stele-findings assert tags \
   --org "${GITHUB_REPOSITORY_OWNER}" \
   --policy slsa/assert-policy.json
 '''
@@ -6899,7 +6892,7 @@ org_tracked_has security/identity.toml || {
   echo "audit:citations: no tracked security/identity.toml, not the canon, skipped"
   exit 0
 }
-"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" citations
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" citations
 '''
 
 [tasks."audit:adoption"]
@@ -7011,7 +7004,7 @@ done
 # tracks (#505, #354, #693). A disagreeing roster prints no members, so
 # it derives nothing and the reconciliation below says why.
 owed=""
-if [[ -n ${repos} ]] && ! owed=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" adoption-population "${canon}" <<< "${population}"); then
+if [[ -n ${repos} ]] && ! owed=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" adoption-population "${canon}" <<< "${population}"); then
   org_finding "" "the population document was refused, so no obligations were derived"
   exit 1
 fi
@@ -7217,7 +7210,7 @@ org_tracked_has Cargo.toml || {
   echo "audit:coverage-branches: no Cargo.toml, skipped"
   exit 0
 }
-floor=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" coverage-floor read --leg rust-branches) || exit 1
+floor=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" coverage-floor read --leg rust-branches) || exit 1
 [[ -n ${floor} ]] || {
   echo "audit:coverage-branches: no rust-branches line in .coverage-floor, skipped"
   exit 0
@@ -7251,7 +7244,7 @@ org_tracked_has go.mod || {
   echo "audit:coverage-go-branches: no go.mod, skipped"
   exit 0
 }
-floor=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" coverage-floor read --leg go-branches) || exit 1
+floor=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" coverage-floor read --leg go-branches) || exit 1
 [[ -n ${floor} ]] || {
   echo "audit:coverage-go-branches: no go-branches line in .coverage-floor, skipped"
   exit 0
@@ -7428,7 +7421,7 @@ if [[ -z ${lic[0]+set} ]]; then
     "with no licence the default is all rights reserved, the opposite of the intent"
   exit 1
 fi
-org_tracked ':!vendor/**' | "${ORG_PYTHON}" -I "${ORG_BELT_ROOT}/belt" licence-texts || exit 1
+org_tracked ':!vendor/**' | "${ORG_PYTHON}" -I "${ORG_CANON_DIR}/belt" licence-texts || exit 1
 echo "lint:licence: ok"
 '''
 
@@ -7523,7 +7516,7 @@ dir = "{{cwd}}"
 run = '''
 . "${ORG_BELT_DIR}/action-files.sh"
 files=() && workflow_files files
-"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" citation-check ${files[@]+"${files[@]}"}
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" citation-check ${files[@]+"${files[@]}"}
 '''
 
 [tasks."fix:badges"]
@@ -7847,7 +7840,7 @@ run = '''
 . "${ORG_BELT_DIR}/action-files.sh"
 workflows=() && workflow_files workflows
 printf '%s\0' ${workflows[@]+"${workflows[@]}"} \
-  | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" lock-platforms \
+  | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" lock-platforms \
     --defaults "${ORG_CANON_DIR}/.github/workflows/publish.yml"
 '''
 
@@ -7882,7 +7875,7 @@ command -v gh > /dev/null || {
     "release which assets it published; without gh it cannot ask."
   exit 1
 }
-candidates=$(printf '%s\0' "${locks[@]}" | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" lock-arch)
+candidates=$(printf '%s\0' "${locks[@]}" | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" lock-arch)
 # Dated allowances. A KNOWN, FILED, DEFERRED mismatch is carried the way
 # deny.toml carries a skip — with its date and the issue that retires
 # it — and for the same reason: the alternative is a scheduled red that
@@ -8142,7 +8135,7 @@ args=(--since "6 months ago" --recent "7 days ago")
 if [[ -n ${GITHUB_STEP_SUMMARY:-} ]]; then
   args+=(--summary "${GITHUB_STEP_SUMMARY}")
 fi
-"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" regression-count "${args[@]}"
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" regression-count "${args[@]}"
 '''
 
 [tasks."lint:nested-permissions"]
@@ -8172,7 +8165,7 @@ files=() && workflow_files files
 # Any file with a `uses:` job — reusable workflows AND caller stubs —
 # since the trap is the same in both; the logic is
 # mise/nested_permissions.py (#1911).
-"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" nested-permissions "${files[@]}"
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" nested-permissions "${files[@]}"
 '''
 
 [tasks."lint:audit-scheduled"]
@@ -8232,7 +8225,7 @@ if [[ -n ${own} && -n ${flows[0]+set} ]]; then
   canon="${owner}/${repo}"
 fi
 # Both halves and their messages: mise/audit_scheduled.py (#1911).
-"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" audit-scheduled \
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" audit-scheduled \
   --own "${own}" --canon "${canon}" ${flows[@]+"${flows[@]}"}
 '''
 
@@ -8402,7 +8395,7 @@ org_tracked_has "${policy}" || {
   exit 0
 }
 flows=() && org_tracked_read flows '.github/workflows/build-*.yml' '.github/workflows/publish.yml'
-"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" plan-producers --policy "${policy}" ${flows[@]+"${flows[@]}"}
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" plan-producers --policy "${policy}" ${flows[@]+"${flows[@]}"}
 '''
 
 [tasks."lint:caller-permissions"]
@@ -8450,7 +8443,7 @@ files=() && workflow_files files
   exit 0
 }
 # stele's join and its messages: mise/caller_permissions.py (#1911).
-"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" caller-permissions \
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" caller-permissions \
   "${ORG_CANON_DIR}" "${files[@]}"
 '''
 
@@ -8471,7 +8464,7 @@ files=() && workflow_template_files files
 . "${ORG_BELT_DIR}/identity.sh"
 owner=$(org_identity owner)
 repo=$(org_identity repo)
-"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" template-pins "${owner}/${repo}" \
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" template-pins "${owner}/${repo}" \
   "${files[@]}"
 '''
 
@@ -8501,7 +8494,7 @@ templates=() && workflow_template_files templates
   exit 0
 }
 # The two checks and their message: mise/runner_pin.py (#1911).
-"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" runner-pin \
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" runner-pin \
   ${workflows[@]+"${workflows[@]}"} -- ${templates[@]+"${templates[@]}"}
 '''
 
@@ -8537,7 +8530,7 @@ presets=() && org_tracked_read presets ':!vendor/**' "renovate.json" "*/renovate
 . "${ORG_BELT_DIR}/action-files.sh"
 workflows=() && workflow_files workflows
 # The four surfaces, the skip and the message: mise/canon_pins.py (#1911).
-"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" canon-pins "${canon_owner}/${canon_repo}" \
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" canon-pins "${canon_owner}/${canon_repo}" \
   ${yml[@]+"${yml[@]}"} -- ${hooks[@]+"${hooks[@]}"} -- ${presets[@]+"${presets[@]}"} -- \
   ${workflows[@]+"${workflows[@]}"}
 '''
@@ -8672,6 +8665,6 @@ flows=() && workflow_files flows
   echo "lint:bash-portability: nothing to check, skipped"
   exit 0
 }
-"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_BELT_ROOT}/belt" bash-portability ${flows[@]+"${flows[@]}"} -- \
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" bash-portability ${flows[@]+"${flows[@]}"} -- \
   ${scripts[@]+"${scripts[@]}"} -- ${configs[@]+"${configs[@]}"}
 '''

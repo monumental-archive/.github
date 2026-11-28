@@ -67,7 +67,7 @@ A test that needs a belt or a canon tree of its own gets the whole one
 A belt is planted as the tree it is delivered in: `mise/` and the
 `belt/` package beside it (#2177), so a script that finds the package
 beside its own directory finds the planted one. `belt` returns the
-`mise/` directory, ORG_BELT_DIR; its parent is ORG_BELT_ROOT. A stub
+`mise/` directory, ORG_BELT_DIR; its parent is ORG_CANON_DIR. A stub
 named `belt/<module>.py` replaces a module of the planted package.
 
 A hand-kept list of the files a helper reads goes stale the day it
@@ -209,7 +209,7 @@ def env(
     Returns:
         INHERITED's variables and each named tool's, HOME, a git
         identity, and the overrides applied last; an ORG_BELT_DIR among
-        them brings its ORG_BELT_ROOT, unless they name one.
+        them brings its ORG_CANON_DIR, unless they name one.
 
     A tool no extension names is a KeyError: an unmeasured tool has
     nothing to borrow.
@@ -233,11 +233,11 @@ def env(
     # The package sits beside the belt directory, as the belt's [env]
     # derives it (#2177): the canon's own, unless the row names a belt,
     # which brings its root with it.
-    out["ORG_BELT_ROOT"] = str(CANON)
+    out["ORG_CANON_DIR"] = str(CANON)
     out |= overrides
     belt_dir = overrides.get("ORG_BELT_DIR")
-    if belt_dir and "ORG_BELT_ROOT" not in overrides:
-        out["ORG_BELT_ROOT"] = os.path.dirname(belt_dir.rstrip("/"))
+    if belt_dir and "ORG_CANON_DIR" not in overrides:
+        out["ORG_CANON_DIR"] = os.path.dirname(belt_dir.rstrip("/"))
     return out
 
 
@@ -584,7 +584,7 @@ def belt(dest: Path | str, *, stubs: Mapping[str, str] | None = None) -> Path:
 
     Returns:
         `dest/mise`, the planted belt directory (ORG_BELT_DIR); `dest`
-        is its ORG_BELT_ROOT.
+        is its ORG_CANON_DIR.
 
     """
     names = tracked(CANON, "mise/", "belt/")

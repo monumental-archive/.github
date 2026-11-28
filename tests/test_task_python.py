@@ -182,8 +182,8 @@ class TestTaskBodiesStartHelpersUnderTheBeltsPython:
         """Planted: the shape every belt task had before #1582."""
         text = (
             "[tasks.\"lint:x\"]\nrun = '''\n"
-            'python3 -I "${ORG_BELT_ROOT}/belt" gate-surface --exclude ""\n'
-            'plan=$(python3 -I "${ORG_BELT_ROOT}/belt" msrv-plan \\\n  --x y)\n'
+            'python3 -I "${ORG_CANON_DIR}/belt" gate-surface --exclude ""\n'
+            'plan=$(python3 -I "${ORG_CANON_DIR}/belt" msrv-plan \\\n  --x y)\n'
             "'''\n"
         )
         want: list[str] = [

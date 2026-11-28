@@ -704,7 +704,7 @@ class TestTable:
         Read alone, the helper names no yq; the table's yq row would be
         stale and a consumer's gate would lack the parser.
         """
-        text = '"${ORG_PYTHON}" -I "${ORG_BELT_ROOT}/belt" embedded-shell ${files}'
+        text = '"${ORG_PYTHON}" -I "${ORG_CANON_DIR}/belt" embedded-shell ${files}'
         assert "workflow_yaml.py" in belt_imports("embedded_shell.py")
         assert first_call(expand(text, set()), ["yq"]) == 1
 
@@ -803,13 +803,13 @@ class TestTable:
         none: list[str] = []
         assert none == python_code("testing_adoption.py").scripts
         adoption = expand(
-            '"${ORG_PYTHON}" -I "${ORG_BELT_ROOT}/belt" testing-adoption', set()
+            '"${ORG_PYTHON}" -I "${ORG_CANON_DIR}/belt" testing-adoption', set()
         )
         assert first_call(adoption, ["cargo-mutants", "cosmic-ray"]) is None
 
     def test_the_venv_check_uses_its_command(self) -> None:
         """`tool_python.py LABEL COMMAND` uses COMMAND's tool (#1788)."""
-        run = '"${ORG_PYTHON}" -I "${ORG_BELT_ROOT}/belt" tool-python'
+        run = '"${ORG_PYTHON}" -I "${ORG_CANON_DIR}/belt" tool-python'
         for text, used in (
             (f'v=$({run} "${{label}}" hypothesis) || exit 1', True),
             (f"{run} x hypothesis --site hypothesis > /dev/null || exit 1", True),

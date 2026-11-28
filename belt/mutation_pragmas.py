@@ -8,8 +8,10 @@ written at its site, on the line it excludes:
 Only that line form exists. mutmut 3.8.1 also reads a region: `# pragma:
 no mutate block` (the statement it trails, with its body), and the
 context opened by `start` and closed by `end`
-(mutmut/mutation/pragma_handling.py). Each of those is red by name: an
-exclusion is one line, read at its site, never a span nobody re-reads.
+(mutmut/mutation/pragma_handling.py). Each of those is red by name. A
+region excludes whole AST nodes, so a line added inside one later is
+never mutated and never gets a reason; a line pragma covers its line
+and nothing else.
 The word after `no mutate` is read as mutmut reads it (the first word,
 before any comma, after a `:`).
 
@@ -30,7 +32,8 @@ from pathlib import Path
 
 from belt import findings
 
-# What mutmut reads as a region rather than one line.
+# What mutmut reads as a region rather than one line: a region excludes
+# whole AST nodes, so a line added inside one later is never mutated.
 REGIONS = ("block", "start", "end")
 REASON = " -- "
 
