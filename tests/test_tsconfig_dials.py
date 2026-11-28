@@ -13,15 +13,18 @@ exactly like a floor check that works.
 
 import io
 import json
-import sys
 import tempfile
-from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from belt import decoded, tsconfig_dials
+from belt.typed_pytest import fixture
 from tests import support
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 FLAGS_FILE = support.MISE / "tsc-flags.txt"
 REQUIRED, UNREADABLE = tsconfig_dials.dials(FLAGS_FILE)
@@ -192,124 +195,172 @@ def test_findings_keep_the_flags_file_order() -> None:
 
 
 # End to end, through the entry point the belt task pipes into.
-def invoke(
-    resolved: object,
-    flags_file: Path | None = None,
-) -> tuple[int, str, str]:
-    """Run the checker over one resolved config.
+@fixture
+def fed(monkeypatch: pytest.MonkeyPatch) -> Callable[[object], None]:
+    """Put one resolved config, as JSON, on stdin, as the task pipes it.
 
     Returns:
-        Exit status, stdout and stderr.
+        A function that feeds one document; None feeds a truncated one.
 
     """
-    argv = [
-        "--flags",
-        str(flags_file or FLAGS_FILE),
-        "--name",
-        "tsconfig.json",
-    ]
-    out, err = io.StringIO(), io.StringIO()
-    stdin = io.StringIO(json.dumps(resolved) if resolved is not None else "{")
-    original = sys.stdin
-    sys.stdin = stdin
-    try:
-        with redirect_stdout(out), redirect_stderr(err):
-            status = tsconfig_dials.main(argv)
-    finally:
-        sys.stdin = original
-    return status, out.getvalue(), err.getvalue()
+
+    def feed(doc: object) -> None:
+        text = json.dumps(doc) if doc is not None else "{"
+        monkeypatch.setattr("sys.stdin", io.StringIO(text))
+
+    return feed
 
 
-def test_a_config_at_the_org_level_passes() -> None:
+def test_a_config_at_the_org_level_passes(
+    capfd: pytest.CaptureFixture[str], fed: Callable[[object], None]
+) -> None:
     """Built from the delivered level itself, so it cannot drift."""
-    status, out, _err = invoke({"compilerOptions": dict(REQUIRED)})
+    fed({"compilerOptions": dict(REQUIRED)})
+    status = tsconfig_dials.main(
+        ["--flags", str(FLAGS_FILE), "--name", "tsconfig.json"]
+    )
+    out = capfd.readouterr().out
     assert status == 0
     assert f"{len(REQUIRED)} dial(s)" in out
 
 
-def test_the_scaffold_stub_passes_its_own_check() -> None:
+def test_the_scaffold_stub_passes_its_own_check(
+    capfd: pytest.CaptureFixture[str], fed: Callable[[object], None]
+) -> None:
     """A scaffold that fails the org's gate is worse than none."""
     stub = decoded.load_json(
         (support.CANON / "scaffold" / "tsconfig.json").read_text(
             encoding="utf-8",
         ),
     )
-    status, _out, err = invoke(stub)
+    fed(stub)
+    status = tsconfig_dials.main(
+        ["--flags", str(FLAGS_FILE), "--name", "tsconfig.json"]
+    )
+    err = capfd.readouterr().err
     assert status == 0, err
 
 
-def test_a_stripped_config_fails_with_every_dial_named() -> None:
+def test_a_stripped_config_fails_with_every_dial_named(
+    capfd: pytest.CaptureFixture[str], fed: Callable[[object], None]
+) -> None:
     """The old scaffold instruction, refused, and told what is missing."""
-    status, _out, err = invoke(
-        {"compilerOptions": {"lib": ["es2025"], "module": "nodenext"}},
+    fed({"compilerOptions": {"lib": ["es2025"], "module": "nodenext"}})
+    status = tsconfig_dials.main(
+        ["--flags", str(FLAGS_FILE), "--name", "tsconfig.json"]
     )
+    err = capfd.readouterr().err
     assert status == 1
     for key in REQUIRED:
         assert f'"{key}"' in err
 
 
-def test_one_weaker_dial_fails_the_whole_config() -> None:
+def test_one_weaker_dial_fails_the_whole_config(
+    capfd: pytest.CaptureFixture[str], fed: Callable[[object], None]
+) -> None:
     """The fixture's actual state."""
     options = dict(REQUIRED)
     options["skipLibCheck"] = True
-    status, _out, err = invoke({"compilerOptions": options})
+    fed({"compilerOptions": options})
+    status = tsconfig_dials.main(
+        ["--flags", str(FLAGS_FILE), "--name", "tsconfig.json"]
+    )
+    err = capfd.readouterr().err
     assert status == 1
     assert "skipLibCheck" in err
 
 
-def test_a_config_without_ts_extension_imports_fails() -> None:
+def test_a_config_without_ts_extension_imports_fails(
+    capfd: pytest.CaptureFixture[str], fed: Callable[[object], None]
+) -> None:
     """One import form, the file on disk, so every config states it (#2107)."""
     options = dict(REQUIRED)
     options.pop("allowImportingTsExtensions", None)
-    status, _out, err = invoke({"compilerOptions": options})
+    fed({"compilerOptions": options})
+    status = tsconfig_dials.main(
+        ["--flags", str(FLAGS_FILE), "--name", "tsconfig.json"]
+    )
+    err = capfd.readouterr().err
     assert status == 1
     assert '"allowImportingTsExtensions" is absent' in err
 
 
-def test_a_config_with_no_compiler_options_fails() -> None:
+def test_a_config_with_no_compiler_options_fails(fed: Callable[[object], None]) -> None:
     """Nothing stated is nothing enforced."""
-    status, _out, _err = invoke({})
+    fed({})
+    status = tsconfig_dials.main(
+        ["--flags", str(FLAGS_FILE), "--name", "tsconfig.json"]
+    )
     assert status == 1
 
 
-def test_a_compileroptions_that_is_not_an_object_fails() -> None:
+def test_a_compileroptions_that_is_not_an_object_fails(
+    capfd: pytest.CaptureFixture[str], fed: Callable[[object], None]
+) -> None:
     """Malformed input gets a sentence, not a traceback."""
-    status, _out, err = invoke({"compilerOptions": []})
+    fed({"compilerOptions": []})
+    status = tsconfig_dials.main(
+        ["--flags", str(FLAGS_FILE), "--name", "tsconfig.json"]
+    )
+    err = capfd.readouterr().err
     assert status == 1
     assert "not an object" in err
 
 
-def test_a_resolved_config_that_is_not_an_object_fails() -> None:
+def test_a_resolved_config_that_is_not_an_object_fails(
+    capfd: pytest.CaptureFixture[str], fed: Callable[[object], None]
+) -> None:
     """The shrunk example, `[]`: a sentence, not AttributeError (#1555)."""
     shapes: tuple[object, ...] = ([], 1, "x")
     for resolved in shapes:
-        status, _out, err = invoke(resolved)
+        fed(resolved)
+        status = tsconfig_dials.main(
+            ["--flags", str(FLAGS_FILE), "--name", "tsconfig.json"]
+        )
+        err = capfd.readouterr().err
         assert status == 1
         assert "did not resolve to an object" in err
 
 
-def test_unresolvable_json_fails() -> None:
+def test_unresolvable_json_fails(
+    capfd: pytest.CaptureFixture[str], fed: Callable[[object], None]
+) -> None:
     """Output from tsc that is not JSON must not pass."""
-    status, _out, err = invoke(None)
+    fed(None)
+    status = tsconfig_dials.main(
+        ["--flags", str(FLAGS_FILE), "--name", "tsconfig.json"]
+    )
+    err = capfd.readouterr().err
     assert status == 1
     assert "did not resolve" in err
 
 
-def test_a_flags_file_naming_no_dial_fails() -> None:
+def test_a_flags_file_naming_no_dial_fails(
+    capfd: pytest.CaptureFixture[str], fed: Callable[[object], None]
+) -> None:
     """An empty level would silently pass every repo in the org."""
-    status, _out, err = invoke(
-        {"compilerOptions": {}},
-        flags("# nothing but prose"),
+    fed({"compilerOptions": {}})
+    status = tsconfig_dials.main(
+        ["--flags", str(flags("# nothing but prose")), "--name", "tsconfig.json"]
     )
+    err = capfd.readouterr().err
     assert status == 1
     assert "no dial" in err
 
 
-def test_a_flags_file_the_check_cannot_read_fails() -> None:
+def test_a_flags_file_the_check_cannot_read_fails(
+    capfd: pytest.CaptureFixture[str], fed: Callable[[object], None]
+) -> None:
     """Refuse rather than enforce a subset nobody chose."""
-    status, _out, err = invoke(
-        {"compilerOptions": {"strict": True}},
-        flags("--strict", "--target es2025"),
+    fed({"compilerOptions": {"strict": True}})
+    status = tsconfig_dials.main(
+        [
+            "--flags",
+            str(flags("--strict", "--target es2025")),
+            "--name",
+            "tsconfig.json",
+        ]
     )
+    err = capfd.readouterr().err
     assert status == 1
     assert "cannot read" in err

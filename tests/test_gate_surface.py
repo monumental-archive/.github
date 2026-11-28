@@ -17,7 +17,6 @@ them rather than trust this line.
 import io
 import json
 import tempfile
-from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -491,33 +490,29 @@ def test_a_missing_stub_is_a_finding(invariant_test: InvariantTest) -> None:
 
 
 # The whole check. Mutation: emit the plan even when a finding stands.
-def invoke(
-    doc: object, exclude: str = "", publish: Path | None = None
-) -> tuple[int, str, str]:
-    """Run the derivation over one workspace.
+@fixture
+def fed(monkeypatch: pytest.MonkeyPatch) -> Callable[[object], None]:
+    """Put one workspace's metadata, as JSON, on stdin, as the task pipes it.
 
     Returns:
-        Exit status, stdout and stderr.
+        A function that feeds one document; None feeds a truncated one.
 
     """
-    argv = ["--exclude", exclude]
-    if publish is not None:
-        argv += ["--publish", str(publish)]
-    out, err = io.StringIO(), io.StringIO()
-    stdin = io.StringIO(json.dumps(doc) if doc is not None else "{")
-    with (
-        pytest.MonkeyPatch.context() as patched,
-        redirect_stdout(out),
-        redirect_stderr(err),
-    ):
-        patched.setattr("sys.stdin", stdin)
-        status = gate_surface.main(argv)
-    return status, out.getvalue(), err.getvalue()
+
+    def feed(doc: object) -> None:
+        text = json.dumps(doc) if doc is not None else "{"
+        monkeypatch.setattr("sys.stdin", io.StringIO(text))
+
+    return feed
 
 
-def test_a_plain_workspace_is_all_crate_records() -> None:
+def test_a_plain_workspace_is_all_crate_records(
+    capfd: pytest.CaptureFixture[str], fed: Callable[[object], None]
+) -> None:
     """Every repo in the org that is not edtf or release-lab."""
-    status, out, err = invoke(metadata(member("a"), member("b")))
+    fed(metadata(member("a"), member("b")))
+    status = gate_surface.main(["--exclude", ""])
+    out, err = capfd.readouterr()
     assert status == 0, err
     records: list[str] = [
         "crate\ta@1.3.1\tplain\t-\tcrates/a",
@@ -526,40 +521,48 @@ def test_a_plain_workspace_is_all_crate_records() -> None:
     assert out.splitlines() == records
 
 
-def test_an_extension_carries_its_majors() -> None:
+def test_an_extension_carries_its_majors(
+    capfd: pytest.CaptureFixture[str], fed: Callable[[object], None]
+) -> None:
     """What test:pgrx iterates and lint:pg-clippy picks from."""
-    status, out, err = invoke(
-        metadata(member("ext", features=PG_FEATURES, pgrx=True)),
-    )
+    fed(metadata(member("ext", features=PG_FEATURES, pgrx=True)))
+    status = gate_surface.main(["--exclude", ""])
+    out, err = capfd.readouterr()
     assert status == 0, err
     assert out.strip() == "crate\text@1.3.1\tpgrx\t15,16,17,18\tcrates/ext"
 
 
-def test_an_excluded_member_is_reported_as_excluded() -> None:
+def test_an_excluded_member_is_reported_as_excluded(
+    capfd: pytest.CaptureFixture[str], fed: Callable[[object], None]
+) -> None:
     """Held out, and never silently absent from the population."""
-    status, out, err = invoke(metadata(member("a"), member("b")), exclude="b")
+    fed(metadata(member("a"), member("b")))
+    status = gate_surface.main(["--exclude", "b"])
+    out, err = capfd.readouterr()
     assert status == 0, err
     assert "excluded\tb@1.3.1\tplain\t-\tcrates/b" in out
     assert "crate\ta@1.3.1\tplain\t-\tcrates/a" in out
 
 
-def test_the_invariant_reds_and_emits_no_plan() -> None:
+def test_the_invariant_reds_and_emits_no_plan(
+    capfd: pytest.CaptureFixture[str], fed: Callable[[object], None]
+) -> None:
     """A consumer must not act on a surface the check just refused."""
     published = stub(
         "    with:",
         "      classes: rust-crate",
     )
-    status, out, err = invoke(
-        metadata(member("a"), member("b")),
-        exclude="b",
-        publish=published,
-    )
+    fed(metadata(member("a"), member("b")))
+    status = gate_surface.main(["--exclude", "b", "--publish", str(published)])
+    out, err = capfd.readouterr()
     assert status == 1
     assert out == ""
     assert "b@1.3.1" in err
 
 
-def test_no_record_field_is_ever_empty() -> None:
+def test_no_record_field_is_ever_empty(
+    capfd: pytest.CaptureFixture[str], fed: Callable[[object], None]
+) -> None:
     """Bash collapses a run of tabs, so an empty field shifts the rest.
 
     Measured: a plain crate's empty major list made its DIRECTORY
@@ -567,12 +570,14 @@ def test_no_record_field_is_ever_empty() -> None:
     package spec as a positional argument. `-` is the placeholder,
     and this row is what stops it being deleted as noise.
     """
-    _status, out, _err = invoke(
+    fed(
         metadata(
             member("plain"),
             member("ext", features={"pg17": []}, pgrx=True),
-        ),
+        )
     )
+    _status = gate_surface.main(["--exclude", ""])
+    out = capfd.readouterr().out
     for line in out.splitlines():
         fields = line.split("\t")
         assert len(fields) == 5, line
@@ -580,16 +585,22 @@ def test_no_record_field_is_ever_empty() -> None:
             assert field != "", line
 
 
-def test_metadata_that_is_not_an_object_is_red() -> None:
+def test_metadata_that_is_not_an_object_is_red(
+    capfd: pytest.CaptureFixture[str], fed: Callable[[object], None]
+) -> None:
     """The shrunk example, `[]`: refused by name, not raised (#1555)."""
     not_an_object: list[object] = []
-    status, out, err = invoke(not_an_object)
+    fed(not_an_object)
+    status = gate_surface.main(["--exclude", ""])
+    out, err = capfd.readouterr()
     assert status == 1
     assert out == ""
     assert "is not a JSON object" in err
 
 
-def test_fields_of_the_wrong_type_read_as_absent() -> None:
+def test_fields_of_the_wrong_type_read_as_absent(
+    capfd: pytest.CaptureFixture[str], fed: Callable[[object], None]
+) -> None:
     """A package, member id or field of the wrong type is no crate (#1555)."""
     good = metadata(member("a"))
     packages = decoded.as_array(good["packages"], "packages")
@@ -600,7 +611,9 @@ def test_fields_of_the_wrong_type_read_as_absent() -> None:
         "workspace_members": [[], *ids],
         "workspace_root": 5,
     }
-    status, out, err = invoke(doc)
+    fed(doc)
+    status = gate_surface.main(["--exclude", ""])
+    out, err = capfd.readouterr()
     assert status == 0, err
     assert len(out.splitlines()) == 1
 
@@ -616,8 +629,12 @@ def test_no_standard_input_is_red(
     assert err == f"{TASK}: no standard input: the process was started without one\n"
 
 
-def test_metadata_that_is_not_json_is_red() -> None:
+def test_metadata_that_is_not_json_is_red(
+    capfd: pytest.CaptureFixture[str], fed: Callable[[object], None]
+) -> None:
     """A broken cargo must not read as a workspace with no crates."""
-    status, _out, err = invoke(None)
+    fed(None)
+    status = gate_surface.main(["--exclude", ""])
+    err = capfd.readouterr().err
     assert status == 1
     assert "did not give JSON" in err

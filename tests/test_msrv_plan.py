@@ -15,9 +15,9 @@ exactly like a check that works.
 """
 
 import io
+import itertools
 import json
 import tempfile
-from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -406,56 +406,65 @@ def test_the_stable_pin_can_be_the_msrv_pin() -> None:
 
 
 # The whole check. Mutation: emit the plan even when nothing matched.
-def invoke(
-    doc: object,
-    listing: object,
-    exclude: str = "",
-    pgrx: str = "",
-    floor: str = PIN_ROWS_FLOOR,
-) -> tuple[int, str, str]:
-    """Run the planner over one workspace and one toolchain listing.
+@fixture
+def plan(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Callable[..., list[str]]:
+    """Feed the planner one workspace on stdin and one toolchain listing.
 
     Returns:
-        Exit status, stdout and stderr.
+        A function that writes the listing, puts the workspace on stdin
+        and returns the planner's argv.
 
     """
-    path = Path(tempfile.mkdtemp()) / "toolchains.json"
-    path.write_text(
-        json.dumps(listing) if listing is not None else "{",
-        encoding="utf-8",
-    )
-    argv = [
-        *("--toolchains", str(path), "--floor", str(floor_file(floor))),
-        *("--exclude", exclude, "--pgrx", pgrx),
-    ]
-    out, err = io.StringIO(), io.StringIO()
-    stdin = io.StringIO(json.dumps(doc) if doc is not None else "{")
-    with (
-        pytest.MonkeyPatch.context() as patched,
-        redirect_stdout(out),
-        redirect_stderr(err),
-    ):
-        patched.setattr("sys.stdin", stdin)
-        status = msrv_plan.main(argv)
-    return status, out.getvalue(), err.getvalue()
+    written = itertools.count()
+
+    def lay_out(
+        doc: object,
+        listing: object,
+        exclude: str = "",
+        pgrx: str = "",
+        floor: str = PIN_ROWS_FLOOR,
+    ) -> list[str]:
+        path = tmp_path / f"toolchains{next(written)}.json"
+        path.write_text(
+            json.dumps(listing) if listing is not None else "{",
+            encoding="utf-8",
+        )
+        stdin = io.StringIO(json.dumps(doc) if doc is not None else "{")
+        monkeypatch.setattr("sys.stdin", stdin)
+        return [
+            *("--toolchains", str(path), "--floor", str(floor_file(floor))),
+            *("--exclude", exclude, "--pgrx", pgrx),
+        ]
+
+    return lay_out
 
 
-def test_a_pinned_minimum_plans_one_check() -> None:
+def test_a_pinned_minimum_plans_one_check(
+    capfd: pytest.CaptureFixture[str], plan: Callable[..., list[str]]
+) -> None:
     """The org's own shape: 1.82 declared, 1.82.0 pinned beside the stable."""
-    status, out, err = invoke(
-        metadata(member("edtf-core", "1.82"), member("edtf-cli", "1.82")),
-        [pin("1.97.1"), pin("1.82.0"), pin("nightly-2026-07-20")],
+    status = msrv_plan.main(
+        plan(
+            metadata(member("edtf-core", "1.82"), member("edtf-cli", "1.82")),
+            [pin("1.97.1"), pin("1.82.0"), pin("nightly-2026-07-20")],
+        )
     )
+    out, err = capfd.readouterr()
     assert status == 0, err
     assert out.strip() == "check\t1.82.0\tdefault\tedtf-core@1.3.1 edtf-cli@1.3.1"
 
 
-def test_a_promise_no_pin_covers_is_red() -> None:
+def test_a_promise_no_pin_covers_is_red(
+    capfd: pytest.CaptureFixture[str], plan: Callable[..., list[str]]
+) -> None:
     """Direction one: the state edtf is in today, before the pin lands."""
-    status, out, err = invoke(
-        metadata(member("edtf-core", "1.82")),
-        [pin("1.97.1"), pin("nightly-2026-07-20")],
+    status = msrv_plan.main(
+        plan(
+            metadata(member("edtf-core", "1.82")),
+            [pin("1.97.1"), pin("nightly-2026-07-20")],
+        )
     )
+    out, err = capfd.readouterr()
     assert status == 1
     assert out == ""
     assert "Cargo.toml" in err
@@ -463,91 +472,108 @@ def test_a_promise_no_pin_covers_is_red() -> None:
     assert "1.82.0" in err
 
 
-def test_a_pin_moved_off_the_promise_is_red() -> None:
+def test_a_pin_moved_off_the_promise_is_red(
+    capfd: pytest.CaptureFixture[str], plan: Callable[..., list[str]]
+) -> None:
     """Direction two: the pin bumped alone, which a green check would hide."""
-    status, out, err = invoke(
-        metadata(member("edtf-core", "1.82")),
-        [pin("1.97.1"), pin("1.85.0")],
+    status = msrv_plan.main(
+        plan(metadata(member("edtf-core", "1.82")), [pin("1.97.1"), pin("1.85.0")])
     )
+    out, err = capfd.readouterr()
     assert status == 1
     assert out == ""
     assert "1.85.0" in err
     assert "the same toolchain" in err
 
 
-def test_a_patch_apart_is_not_the_same_promise() -> None:
+def test_a_patch_apart_is_not_the_same_promise(
+    capfd: pytest.CaptureFixture[str], plan: Callable[..., list[str]]
+) -> None:
     """1.82 promises 1.82.0; a green run at 1.82.1 answers nothing."""
-    status, _out, err = invoke(
-        metadata(member("edtf-core", "1.82")),
-        [pin("1.82.1")],
+    status = msrv_plan.main(
+        plan(metadata(member("edtf-core", "1.82")), [pin("1.82.1")])
     )
+    err = capfd.readouterr().err
     assert status == 1
     assert "1.82.0" in err
 
 
-def test_a_pin_that_is_not_installed_is_red_and_says_so() -> None:
+def test_a_pin_that_is_not_installed_is_red_and_says_so(
+    capfd: pytest.CaptureFixture[str], plan: Callable[..., list[str]]
+) -> None:
     """Otherwise the remedy printed would be an edit that changes nothing."""
-    status, _out, err = invoke(
-        metadata(member("edtf-core", "1.82")),
-        [pin("1.82.0", installed=False)],
+    status = msrv_plan.main(
+        plan(metadata(member("edtf-core", "1.82")), [pin("1.82.0", installed=False)])
     )
+    err = capfd.readouterr().err
     assert status == 1
     assert "not installed" in err
 
 
-def test_every_promise_excluded_plans_notes_and_no_check() -> None:
+def test_every_promise_excluded_plans_notes_and_no_check(
+    capfd: pytest.CaptureFixture[str], plan: Callable[..., list[str]]
+) -> None:
     """A repo whose only crate the gate cannot compile."""
-    status, out, err = invoke(
-        metadata(member("lab-pg", "1.82")),
-        [pin("1.97.1")],
-        exclude="lab-pg",
+    status = msrv_plan.main(
+        plan(metadata(member("lab-pg", "1.82")), [pin("1.97.1")], exclude="lab-pg")
     )
+    out, err = capfd.readouterr()
     assert status == 0, err
     assert out.startswith("note\t")
     assert "check\t" not in out
 
 
-def test_an_excluded_promise_rides_beside_a_checked_one() -> None:
+def test_an_excluded_promise_rides_beside_a_checked_one(
+    capfd: pytest.CaptureFixture[str], plan: Callable[..., list[str]]
+) -> None:
     """Both records in one plan, which is edtf after this lands."""
-    status, out, err = invoke(
-        metadata(member("edtf-core", "1.82"), member("edtf-postgres", "1.82")),
-        [pin("1.82.0")],
-        exclude="edtf-postgres",
+    status = msrv_plan.main(
+        plan(
+            metadata(member("edtf-core", "1.82"), member("edtf-postgres", "1.82")),
+            [pin("1.82.0")],
+            exclude="edtf-postgres",
+        )
     )
+    out, err = capfd.readouterr()
     assert status == 0, err
     lines = out.strip().splitlines()
     assert lines[0].startswith("note\t")
     assert lines[1] == "check\t1.82.0\tdefault\tedtf-core@1.3.1"
 
 
-def test_two_minimums_plan_two_checks() -> None:
+def test_two_minimums_plan_two_checks(
+    capfd: pytest.CaptureFixture[str], plan: Callable[..., list[str]]
+) -> None:
     """Each at its own pin; neither verified by the other's toolchain."""
-    status, out, err = invoke(
-        two_minimums(),
-        [pin("1.82.0"), pin("1.90.0")],
-    )
+    status = msrv_plan.main(plan(two_minimums(), [pin("1.82.0"), pin("1.90.0")]))
+    out, err = capfd.readouterr()
     want = ["check\t1.82.0\tdefault\ta@1.3.1", "check\t1.90.0\tdefault\tb@1.3.1"]
     assert status == 0, err
     assert out.strip().splitlines() == want
 
 
-def test_one_uncovered_minimum_reds_the_whole_plan() -> None:
+def test_one_uncovered_minimum_reds_the_whole_plan(
+    capfd: pytest.CaptureFixture[str], plan: Callable[..., list[str]]
+) -> None:
     """A partial plan would compile half a promise and report success."""
-    status, out, _err = invoke(
-        two_minimums(),
-        [pin("1.82.0")],
-    )
+    status = msrv_plan.main(plan(two_minimums(), [pin("1.82.0")]))
+    out = capfd.readouterr().out
     assert status == 1
     assert out == ""
 
 
-def test_a_pgrx_member_is_checked_with_its_own_features() -> None:
+def test_a_pgrx_member_is_checked_with_its_own_features(
+    capfd: pytest.CaptureFixture[str], plan: Callable[..., list[str]]
+) -> None:
     """#813: --all-features cannot compile a crate whose features fight."""
-    status, out, err = invoke(
-        metadata(member("edtf-core", "1.82"), member("edtf-postgres", "1.82")),
-        [pin("1.82.0")],
-        pgrx="edtf-postgres:18",
+    status = msrv_plan.main(
+        plan(
+            metadata(member("edtf-core", "1.82"), member("edtf-postgres", "1.82")),
+            [pin("1.82.0")],
+            pgrx="edtf-postgres:18",
+        )
     )
+    out, err = capfd.readouterr()
     want = [
         "check\t1.82.0\tdefault\tedtf-core@1.3.1",
         ("check\t1.82.0\t--no-default-features --features pg18\tedtf-postgres@1.3.1"),
@@ -556,13 +582,14 @@ def test_a_pgrx_member_is_checked_with_its_own_features() -> None:
     assert out.strip().splitlines() == want
 
 
-def test_a_workspace_of_nothing_but_an_extension_still_plans() -> None:
+def test_a_workspace_of_nothing_but_an_extension_still_plans(
+    capfd: pytest.CaptureFixture[str], plan: Callable[..., list[str]]
+) -> None:
     """The plain record must not be emitted empty."""
-    status, out, err = invoke(
-        metadata(member("ext", "1.82")),
-        [pin("1.82.0")],
-        pgrx="ext:17",
+    status = msrv_plan.main(
+        plan(metadata(member("ext", "1.82")), [pin("1.82.0")], pgrx="ext:17")
     )
+    out, err = capfd.readouterr()
     assert status == 0, err
     assert (
         out.strip() == "check\t1.82.0\t--no-default-features --features pg17\text@1.3.1"
@@ -578,12 +605,12 @@ def test_a_pgrx_name_with_no_major_is_ignored() -> None:
     assert msrv_plan.features("ext:¹⁸") == nothing
 
 
-def test_a_declaration_this_cannot_compare_is_red() -> None:
+def test_a_declaration_this_cannot_compare_is_red(
+    capfd: pytest.CaptureFixture[str], plan: Callable[..., list[str]]
+) -> None:
     """Refuse rather than verify a promise the check never read."""
-    status, _out, err = invoke(
-        metadata(member("a", "stable")),
-        [pin("1.97.1")],
-    )
+    status = msrv_plan.main(plan(metadata(member("a", "stable")), [pin("1.97.1")]))
+    err = capfd.readouterr().err
     assert status == 1
     assert "cannot compare" in err
 
@@ -624,7 +651,9 @@ def test_a_root_is_the_subject_of_each_finding_about_its_members(
     assert err_io.startswith(f"{TASK}: {fuzz}: a@1 failed to compile")
 
 
-def test_a_document_of_the_wrong_shape_is_red_by_where() -> None:
+def test_a_document_of_the_wrong_shape_is_red_by_where(
+    capfd: pytest.CaptureFixture[str], plan: Callable[..., list[str]]
+) -> None:
     """A wrong-shaped account or listing is named, never a crash."""
     good = metadata(member("a", "1.82"))
     cases: tuple[tuple[object, object, str], ...] = (
@@ -648,20 +677,27 @@ def test_a_document_of_the_wrong_shape_is_red_by_where() -> None:
         (good, ["1.82.0"], "`mise ls rust`: listing[0] is not an object"),
     )
     for doc, listing, said in cases:
-        status, out, err = invoke(doc, listing)
+        status = msrv_plan.main(plan(doc, listing))
+        out, err = capfd.readouterr()
         assert (1, "", f"{TASK}: {said}\n") == (status, out, err)
 
 
-def test_metadata_that_is_not_json_is_red() -> None:
+def test_metadata_that_is_not_json_is_red(
+    capfd: pytest.CaptureFixture[str], plan: Callable[..., list[str]]
+) -> None:
     """A broken cargo must not read as a workspace with no promises."""
-    status, _out, err = invoke(None, [pin("1.97.1")])
+    status = msrv_plan.main(plan(None, [pin("1.97.1")]))
+    err = capfd.readouterr().err
     assert status == 1
     assert "did not give JSON" in err
 
 
-def test_a_toolchain_listing_that_is_not_json_is_red() -> None:
+def test_a_toolchain_listing_that_is_not_json_is_red(
+    capfd: pytest.CaptureFixture[str], plan: Callable[..., list[str]]
+) -> None:
     """Same for mise: no listing is not the same as no pins."""
-    status, _out, err = invoke(metadata(member("a", "1.82")), None)
+    status = msrv_plan.main(plan(metadata(member("a", "1.82")), None))
+    err = capfd.readouterr().err
     assert status == 1
     assert "did not give JSON" in err
 
@@ -930,14 +966,16 @@ PGRX = dependency("pgrx", "1.96", "0.19.3")
 # (three here, one in EdgeFilterTest), drop the dependency term (one
 # here, nine in EdgeFilterTest, one in MainTest), count a reached
 # member's own number (one).
-RULE_TEST_invoke = staticmethod(invoke)
 
 
-def test_promise_below_the_floor_is_a_finding() -> None:
+def test_promise_below_the_floor_is_a_finding(
+    capfd: pytest.CaptureFixture[str], plan: Callable[..., list[str]]
+) -> None:
     """Before #1883 edtf promised 1.82, which no distribution ships."""
-    status, out, err = RULE_TEST_invoke(
-        converted("1.82", SERDE), [pin("1.82.0")], floor=TRIXIE
+    status = msrv_plan.main(
+        plan(converted("1.82", SERDE), [pin("1.82.0")], floor=TRIXIE)
     )
+    out, err = capfd.readouterr()
     assert (status, out) == (1, "")
     assert (
         "edtf-core@1.3.5 declares rust-version 1.82; the rule derives 1.85: "
@@ -947,20 +985,26 @@ def test_promise_below_the_floor_is_a_finding() -> None:
     assert "missing_const_for_fn" in err
 
 
-def test_promise_above_the_floor_with_no_dependency_reason_is_a_finding() -> None:
+def test_promise_above_the_floor_with_no_dependency_reason_is_a_finding(
+    capfd: pytest.CaptureFixture[str], plan: Callable[..., list[str]]
+) -> None:
     """release-lab before #1883: 1.97 for a crate needing 1.81."""
-    status, out, err = RULE_TEST_invoke(
-        converted("1.97", WASM_BINDGEN), [pin("1.97.0")], floor=TRIXIE
+    status = msrv_plan.main(
+        plan(converted("1.97", WASM_BINDGEN), [pin("1.97.0")], floor=TRIXIE)
     )
+    out, err = capfd.readouterr()
     assert (status, out) == (1, "")
     assert "declares rust-version 1.97; the rule derives 1.85: the floor" in err
 
 
-def test_promise_raised_by_a_dependency_passes_and_names_it() -> None:
+def test_promise_raised_by_a_dependency_passes_and_names_it(
+    capfd: pytest.CaptureFixture[str], plan: Callable[..., list[str]]
+) -> None:
     """lab-pg: 1.96 because pgrx 0.19.3 declares it, and says so."""
-    status, out, err = RULE_TEST_invoke(
-        converted("1.96", SERDE, PGRX), [pin("1.96.0")], floor=TRIXIE
+    status = msrv_plan.main(
+        plan(converted("1.96", SERDE, PGRX), [pin("1.96.0")], floor=TRIXIE)
     )
+    out, err = capfd.readouterr()
     assert status == 0, err
     assert out.strip() == "check\t1.96.0\tdefault\tedtf-core@1.3.5"
     floor = msrv_plan.Floor((1, 85, 0), TRIXIE)
@@ -968,18 +1012,22 @@ def test_promise_raised_by_a_dependency_passes_and_names_it() -> None:
         derived(converted("1.96", SERDE, PGRX), "edtf-core", floor).reason
         == "`pgrx 0.19.3` requires it"
     )
-    status, _out, err = RULE_TEST_invoke(
-        converted("1.85", SERDE, PGRX), [pin("1.85.0")], floor=TRIXIE
+    status = msrv_plan.main(
+        plan(converted("1.85", SERDE, PGRX), [pin("1.85.0")], floor=TRIXIE)
     )
+    err = capfd.readouterr().err
     assert status == 1
     assert "the rule derives 1.96: `pgrx 0.19.3` requires it" in err
 
 
-def test_promise_at_the_floor_passes() -> None:
+def test_promise_at_the_floor_passes(
+    capfd: pytest.CaptureFixture[str], plan: Callable[..., list[str]]
+) -> None:
     """The edtf crates after #1883: 1.85, every dependency declaring less."""
-    status, out, err = RULE_TEST_invoke(
-        converted("1.85", SERDE, WASM_BINDGEN), [pin("1.85.0")], floor=TRIXIE
+    status = msrv_plan.main(
+        plan(converted("1.85", SERDE, WASM_BINDGEN), [pin("1.85.0")], floor=TRIXIE)
     )
+    out, err = capfd.readouterr()
     assert status == 0, err
     assert out.strip() == "check\t1.85.0\tdefault\tedtf-core@1.3.5"
 
@@ -998,11 +1046,14 @@ def test_compile_failure_at_the_derived_number_names_the_rule(
     assert "declares less than it\n  needs, and is held back" in said
 
 
-def test_an_excluded_member_declaring_another_number_is_red() -> None:
+def test_an_excluded_member_declaring_another_number_is_red(
+    capfd: pytest.CaptureFixture[str], plan: Callable[..., list[str]]
+) -> None:
     """#1909: CLIPPY_EXCLUDE keeps a crate out of the compile, not the rule."""
-    status, out, err = RULE_TEST_invoke(
-        converted("1.82"), [pin("1.85.0")], exclude="edtf-core", floor=TRIXIE
+    status = msrv_plan.main(
+        plan(converted("1.82"), [pin("1.85.0")], exclude="edtf-core", floor=TRIXIE)
     )
+    out, err = capfd.readouterr()
     assert (status, out) == (1, "")
     assert (
         "edtf-core@1.3.5 declares rust-version 1.82; the rule derives 1.85: "
@@ -1010,18 +1061,23 @@ def test_an_excluded_member_declaring_another_number_is_red() -> None:
     ) in err
 
 
-def test_an_excluded_member_at_its_number_is_noted_not_checked() -> None:
+def test_an_excluded_member_at_its_number_is_noted_not_checked(
+    capfd: pytest.CaptureFixture[str], plan: Callable[..., list[str]]
+) -> None:
     """Held to the rule, it is still unverified at the number, and says so."""
-    status, out, err = RULE_TEST_invoke(
-        converted("1.85"), [pin("1.85.0")], exclude="edtf-core", floor=TRIXIE
+    status = msrv_plan.main(
+        plan(converted("1.85"), [pin("1.85.0")], exclude="edtf-core", floor=TRIXIE)
     )
+    out, err = capfd.readouterr()
     assert status == 0, err
     assert out.startswith("note\t")
     assert "unverified" in out
     assert "check\t" not in out
 
 
-def test_a_member_declaring_nothing_is_red_at_the_floor() -> None:
+def test_a_member_declaring_nothing_is_red_at_the_floor(
+    capfd: pytest.CaptureFixture[str], plan: Callable[..., list[str]]
+) -> None:
     """#1909: leaving the field out is not a way to make no promise."""
     core, app = member("edtf-core", "1.85", "1.3.5"), member("app")
     doc = metadata(
@@ -1030,7 +1086,8 @@ def test_a_member_declaring_nothing_is_red_at_the_floor() -> None:
         nodes=[node(core, edge(SERDE)), node(app, edge(SERDE)), node(SERDE)],
         extra=(SERDE,),
     )
-    status, out, err = RULE_TEST_invoke(doc, [pin("1.85.0")], floor=TRIXIE)
+    status = msrv_plan.main(plan(doc, [pin("1.85.0")], floor=TRIXIE))
+    out, err = capfd.readouterr()
     assert (status, out) == (1, "")
     assert (
         "app@1.3.1 declares no rust-version; the rule derives 1.85: the floor: "
@@ -1040,11 +1097,14 @@ def test_a_member_declaring_nothing_is_red_at_the_floor() -> None:
     assert "a crate declaring none included" in err
 
 
-def test_a_member_declaring_nothing_is_red_at_its_dependency() -> None:
+def test_a_member_declaring_nothing_is_red_at_its_dependency(
+    capfd: pytest.CaptureFixture[str], plan: Callable[..., list[str]]
+) -> None:
     """#1909: the number named is the derived one, dependency and all."""
-    status, out, err = RULE_TEST_invoke(
-        converted("", SERDE, PGRX), [pin("1.96.0")], floor=TRIXIE
+    status = msrv_plan.main(
+        plan(converted("", SERDE, PGRX), [pin("1.96.0")], floor=TRIXIE)
     )
+    out, err = capfd.readouterr()
     assert (status, out) == (1, "")
     assert (
         "edtf-core@1.3.5 declares no rust-version; the rule derives 1.96: "
@@ -1052,13 +1112,18 @@ def test_a_member_declaring_nothing_is_red_at_its_dependency() -> None:
     ) in err
 
 
-def test_a_workspace_declaring_nothing_is_red_per_member() -> None:
+def test_a_workspace_declaring_nothing_is_red_per_member(
+    capfd: pytest.CaptureFixture[str], plan: Callable[..., list[str]]
+) -> None:
     """#1909: once the skip "no crate declares rust-version"."""
-    status, out, err = RULE_TEST_invoke(
-        metadata(member("stele-core"), member("stele-cli")),
-        [pin("1.97.1")],
-        floor=TRIXIE,
+    status = msrv_plan.main(
+        plan(
+            metadata(member("stele-core"), member("stele-cli")),
+            [pin("1.97.1")],
+            floor=TRIXIE,
+        )
     )
+    out, err = capfd.readouterr()
     assert (status, out) == (1, "")
     said = [line for line in err.splitlines() if "declares no" in line]
     want: list[str] = [
@@ -1069,7 +1134,9 @@ def test_a_workspace_declaring_nothing_is_red_per_member() -> None:
     assert said == want
 
 
-def test_a_member_reached_through_another_lends_no_number() -> None:
+def test_a_member_reached_through_another_lends_no_number(
+    capfd: pytest.CaptureFixture[str], plan: Callable[..., list[str]]
+) -> None:
     """lab-cli reaches lab-core; only lab-core's dependencies count.
 
     Here the reached member promises 1.99 and nothing it reaches
@@ -1078,26 +1145,31 @@ def test_a_member_reached_through_another_lends_no_number() -> None:
     """
     app, ext = member("app", "1.85"), member("ext", "1.99")
     doc = metadata(app, ext, nodes=[node(app, edge(ext)), node(ext)])
-    status, out, err = RULE_TEST_invoke(doc, [pin("1.85.0")], floor=TRIXIE)
+    status = msrv_plan.main(plan(doc, [pin("1.85.0")], floor=TRIXIE))
+    out, err = capfd.readouterr()
     assert (status, out) == (1, "")
     assert "ext@1.3.1 declares rust-version 1.99; the rule derives" in err
     assert "app@" not in err
 
 
-def test_metadata_without_a_resolve_graph_is_red() -> None:
+def test_metadata_without_a_resolve_graph_is_red(
+    capfd: pytest.CaptureFixture[str], plan: Callable[..., list[str]]
+) -> None:
     """`--no-deps` metadata would derive every number as the floor."""
     doc = converted("1.85")
     doc.pop("resolve")
-    status, _out, err = RULE_TEST_invoke(doc, [pin("1.85.0")], floor=TRIXIE)
+    status = msrv_plan.main(plan(doc, [pin("1.85.0")], floor=TRIXIE))
+    err = capfd.readouterr().err
     assert status == 1
     assert "no resolve graph" in err
 
 
-def test_an_unreadable_floor_file_is_red_and_named() -> None:
+def test_an_unreadable_floor_file_is_red_and_named(
+    capfd: pytest.CaptureFixture[str], plan: Callable[..., list[str]]
+) -> None:
     """No floor is not a floor of zero."""
-    status, _out, err = RULE_TEST_invoke(
-        converted("1.85"), [pin("1.85.0")], floor="1.85"
-    )
+    status = msrv_plan.main(plan(converted("1.85"), [pin("1.85.0")], floor="1.85"))
+    err = capfd.readouterr().err
     assert status == 1
     assert "the floor file" in err
 

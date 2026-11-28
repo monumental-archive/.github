@@ -14,7 +14,6 @@ reader can repeat them rather than trust this line.
 import io
 import json
 import tempfile
-from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -221,56 +220,71 @@ def test_a_pin_that_is_not_installed_is_named_in_the_remedy() -> None:
 
 
 # The whole check. Mutation: treat an empty --majors as success.
-def invoke(majors: str, listing: object) -> tuple[int, str, str]:
-    """Run the provisioner over one listing.
+@fixture
+def fed(monkeypatch: pytest.MonkeyPatch) -> Callable[[object], None]:
+    """Put one release listing, as JSON, on stdin, as the task pipes it.
 
     Returns:
-        Exit status, stdout and stderr.
+        A function that feeds one document; None feeds a truncated one.
 
     """
-    out, err = io.StringIO(), io.StringIO()
-    stdin = io.StringIO(json.dumps(listing) if listing is not None else "{")
-    with (
-        pytest.MonkeyPatch.context() as patched,
-        redirect_stdout(out),
-        redirect_stderr(err),
-    ):
-        patched.setattr("sys.stdin", stdin)
-        status = pgrx_postgres.main(["--majors", majors])
-    return status, out.getvalue(), err.getvalue()
+
+    def feed(doc: object) -> None:
+        text = json.dumps(doc) if doc is not None else "{"
+        monkeypatch.setattr("sys.stdin", io.StringIO(text))
+
+    return feed
 
 
-def test_a_served_major_prints_its_record() -> None:
+def test_a_served_major_prints_its_record(
+    capfd: pytest.CaptureFixture[str], fed: Callable[[object], None]
+) -> None:
     """What org_pgrx_postgres reads to find the pg_config it clones."""
-    status, out, err = invoke("18", [entry("18.6.0")])
+    fed([entry("18.6.0")])
+    status = pgrx_postgres.main(["--majors", "18"])
+    out, err = capfd.readouterr()
     assert status == 0, err
     assert out.startswith("pg\t18\t")
 
 
-def test_a_non_ascii_major_names_no_major() -> None:
+def test_a_non_ascii_major_names_no_major(
+    capfd: pytest.CaptureFixture[str], fed: Callable[[object], None]
+) -> None:
     """`--majors ²` is refused by name, not a ValueError (#1555)."""
-    status, out, err = invoke("\u00b2", [entry("18.6.0")])
+    fed([entry("18.6.0")])
+    status = pgrx_postgres.main(["--majors", "\u00b2"])
+    out, err = capfd.readouterr()
     assert status == 1
     assert out == ""
     assert "--majors named no Postgres major" in err
 
 
-def test_a_missing_pin_is_red_with_no_records() -> None:
+def test_a_missing_pin_is_red_with_no_records(
+    capfd: pytest.CaptureFixture[str], fed: Callable[[object], None]
+) -> None:
     """Both halves: the exit status and the empty plan."""
-    status, out, err = invoke("17,18", [entry("18.6.0")])
+    fed([entry("18.6.0")])
+    status = pgrx_postgres.main(["--majors", "17,18"])
+    out, err = capfd.readouterr()
     assert status == 1
     assert out == ""
     assert "pg17" in err
 
 
-def test_no_majors_is_red() -> None:
+def test_no_majors_is_red(
+    capfd: pytest.CaptureFixture[str], fed: Callable[[object], None]
+) -> None:
     """A caller with nothing to provision must not reach this."""
-    status, _out, err = invoke("", [entry("18.6.0")])
+    fed([entry("18.6.0")])
+    status = pgrx_postgres.main(["--majors", ""])
+    err = capfd.readouterr().err
     assert status == 1
     assert "no Postgres major" in err
 
 
-def test_a_listing_of_the_wrong_shape_is_red_by_where() -> None:
+def test_a_listing_of_the_wrong_shape_is_red_by_where(
+    capfd: pytest.CaptureFixture[str], fed: Callable[[object], None]
+) -> None:
     """Not a list, or an entry not an object: named, never a crash."""
     cmd = f"{TASK}: `mise ls aqua:theseus-rs/postgresql-binaries`"
     cases: tuple[tuple[object, str], ...] = (
@@ -278,12 +292,18 @@ def test_a_listing_of_the_wrong_shape_is_red_by_where() -> None:
         (["18.6.0"], "listing[0] is not an object"),
     )
     for listing, where in cases:
-        status, out, err = invoke("18", listing)
+        fed(listing)
+        status = pgrx_postgres.main(["--majors", "18"])
+        out, err = capfd.readouterr()
         assert (1, "", f"{cmd}: {where}\n") == (status, out, err)
 
 
-def test_a_listing_that_is_not_json_is_red() -> None:
+def test_a_listing_that_is_not_json_is_red(
+    capfd: pytest.CaptureFixture[str], fed: Callable[[object], None]
+) -> None:
     """No listing is not the same as no pins."""
-    status, _out, err = invoke("18", None)
+    fed(None)
+    status = pgrx_postgres.main(["--majors", "18"])
+    err = capfd.readouterr().err
     assert status == 1
     assert "did not give JSON" in err
