@@ -75,7 +75,7 @@ def run(files: dict[str, str]) -> tuple[int, str]:
         ):
             sys.stdin = io.StringIO("\0".join(files) + "\0")
             try:
-                status = lt.main(["licence_texts.py"])
+                status = lt.main([])
             finally:
                 sys.stdin = stdin
         return status, err.getvalue()
@@ -257,4 +257,4 @@ class TestLicenceTexts:
         err = io.StringIO()
         with contextlib.redirect_stderr(err):
             assert lt.main(["extra"]) == 2
-        assert f"{TASK}: usage: org_tracked | licence_texts.py\n" == err.getvalue()
+        assert f"{TASK}: usage: org_tracked | belt licence-texts\n" == err.getvalue()

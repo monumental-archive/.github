@@ -135,7 +135,7 @@ class TestPlanted:
         self.trees = {}
         for sha in (A, B):
             tree = self.tmp / "cache" / "org-belt" / sha
-            support.belt(tree / "mise", stubs={"config.toml": stub})
+            support.belt(tree, stubs={"config.toml": stub})
             self.trees[sha] = tree
         self.repo = self.tmp / "consumer"
         self.repo.mkdir()
@@ -295,7 +295,7 @@ class TestTheBeltAnswersOnlyForItsPin(TestPlanted):
 
     def test_the_canons_own_tree_runs(self) -> None:
         """Carrier 2: the tree is its own belt, whatever stub or link it holds."""
-        support.belt(self.repo / "mise", stubs={"config.toml": belt_lines()})
+        support.belt(self.repo, stubs={"config.toml": belt_lines()})
         self.pin(self.repo, B)
         self.link(self.repo, A)
         self.assert_runs(self.repo)
