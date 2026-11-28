@@ -217,14 +217,19 @@ def planted_lock(body: str) -> pathlib.Path:
 class TestMain:
     """The entry the task starts, called in the test process (#1697)."""
 
-    def test_each_lock_on_stdin_is_read_and_its_candidates_printed(self) -> None:
+    def test_each_lock_on_stdin_is_read_and_its_candidates_printed(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """An empty entry and a missing file are passed over; exit is 0."""
         path = planted_lock(DEFECT)
         listing = f"\0{path}\0{path.parent / 'absent.lock'}\0"
-        done = support.call(lambda: lock_arch.main([]), stdin=listing)
-        assert done.returncode == 0
-        assert lock_arch.candidates(path) == done.stdout.splitlines()
-        assert len(done.stdout.splitlines()) == 1
+        with pytest.MonkeyPatch.context() as patched:
+            patched.setattr(sys, "stdin", io.StringIO(listing))
+            status = lock_arch.main([])
+        out, err = capfd.readouterr()
+        assert status == 0
+        assert lock_arch.candidates(path) == out.splitlines()
+        assert len(out.splitlines()) == 1
 
     def test_the_script_contract(self) -> None:
         """Started as a process, it reads stdin and exits 0 with a finding."""

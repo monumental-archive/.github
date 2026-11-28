@@ -108,7 +108,9 @@ class TestBoundary:
             path.write_text(text, encoding="utf-8")
         return rel
 
-    def helper(self, *files: str) -> support.Called:
+    def helper(
+        self, *files: str, capfd: pytest.CaptureFixture[str]
+    ) -> tuple[int, str, str]:
         """Call the helper's main in the planted tree.
 
         Returns:
@@ -116,9 +118,13 @@ class TestBoundary:
 
         """
         argv = list(files)
-        return support.call(
-            lambda: capability_boundary.main(argv), env=self.env, cwd=self.tree
-        )
+        with pytest.MonkeyPatch.context() as patched:
+            for name, value in self.env.items():
+                patched.setenv(name, value)
+            patched.chdir(self.tree)
+            status = capability_boundary.main(argv)
+        out, err = capfd.readouterr()
+        return status, out, err
 
     def task(self) -> subprocess.CompletedProcess[str]:
         """Run the task body in the planted tree.
@@ -153,7 +159,7 @@ class TestBoundary:
         same(done.returncode, capability_boundary.EXIT_RED)
         same(done.stderr.splitlines(), red(bad))
 
-    def test_inside_the_boundary_is_ok(self) -> None:
+    def test_inside_the_boundary_is_ok(self, capfd: pytest.CaptureFixture[str]) -> None:
         """Not called, no grant, a grant in prose, a marked signer: ok."""
         rows = {
             "not called": "on: push\n" + GRANT + JOBS,
@@ -165,12 +171,14 @@ class TestBoundary:
         }
         for row, text in rows.items():
             rel = self.plant("wf.yml", text)
-            done = self.helper(rel)
-            same(done.returncode, 0, done.stderr)
-            same(done.stdout.splitlines(), OK)
-            same(done.stderr, "")
+            status, out, err = self.helper(rel, capfd=capfd)
+            same(status, 0, err)
+            same(out.splitlines(), OK)
+            same(err, "")
 
-    def test_breaches_are_red_and_named(self) -> None:
+    def test_breaches_are_red_and_named(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """No marker, or a marker only in prose: red, every file named."""
         bare = self.plant("bare.yml", CALLED + GRANT + JOBS)
         prose = self.plant(
@@ -179,40 +187,44 @@ class TestBoundary:
         )
         tabbed = self.plant("tabbed.yml", "on:\n\tworkflow_call:\n\tid-token:\twrite\n")
         clean = self.plant("clean.yml", CALLED + JOBS)
-        done = self.helper(bare, clean, prose, tabbed)
-        same(done.returncode, capability_boundary.EXIT_RED)
-        same(done.stderr.splitlines(), red(bare, prose, tabbed))
-        same(done.stdout, "")
+        status, out, err = self.helper(bare, clean, prose, tabbed, capfd=capfd)
+        same(status, capability_boundary.EXIT_RED)
+        same(err.splitlines(), red(bare, prose, tabbed))
+        same(out, "")
 
-    def test_a_line_is_split_on_newline_alone(self) -> None:
+    def test_a_line_is_split_on_newline_alone(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A carriage return or form feed inside a line does not end it."""
         text = "on:\n  workflow_call:\nx: '#'\rid-token: write\n"
         rel = self.plant("cr.yml", text)
-        done = self.helper(rel)
-        same(done.returncode, 0, done.stderr)
-        same(done.stdout.splitlines(), OK)
+        status, out, err = self.helper(rel, capfd=capfd)
+        same(status, 0, err)
+        same(out.splitlines(), OK)
 
-    def test_not_utf8_is_an_error(self) -> None:
+    def test_not_utf8_is_an_error(self, capfd: pytest.CaptureFixture[str]) -> None:
         """A workflow that is not UTF-8 is refused by name, exit 2."""
         rel = self.plant("bad.yml", b"on: \xff\n")
-        done = self.helper(rel)
-        same(done.returncode, capability_boundary.EXIT_ERROR)
-        assert done.stderr.startswith(
+        status, out, err = self.helper(rel, capfd=capfd)
+        same(status, capability_boundary.EXIT_ERROR)
+        assert err.startswith(
             f"lint:capability-boundary: {rel}: cannot be read as UTF-8:"
-        ), done.stderr
+        ), err
 
-    def test_missing_file_is_an_error(self) -> None:
+    def test_missing_file_is_an_error(self, capfd: pytest.CaptureFixture[str]) -> None:
         """A named workflow that does not exist is refused by name, exit 2."""
-        done = self.helper(".github/workflows/gone.yml")
-        same(done.returncode, capability_boundary.EXIT_ERROR)
-        assert done.stderr.startswith(
+        status, out, err = self.helper(".github/workflows/gone.yml", capfd=capfd)
+        same(status, capability_boundary.EXIT_ERROR)
+        assert err.startswith(
             "lint:capability-boundary: .github/workflows/gone.yml:"
             " cannot be read as UTF-8:"
-        ), done.stderr
+        ), err
 
-    def test_no_workflows_is_a_usage_error(self) -> None:
+    def test_no_workflows_is_a_usage_error(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """No workflow named: exit 2 with the usage line."""
-        done = self.helper()
-        same(done.returncode, capability_boundary.EXIT_ERROR)
+        status, out, err = self.helper(capfd=capfd)
+        same(status, capability_boundary.EXIT_ERROR)
         usage = "lint:capability-boundary: usage: belt capability-boundary WORKFLOW..."
-        same(done.stderr.splitlines(), [usage])
+        same(err.splitlines(), [usage])

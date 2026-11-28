@@ -152,7 +152,9 @@ class TestRows:
             "--legs", str(legs),
         ]  # fmt: skip
 
-    def run_helper(self, kept: str = "true", legs: int = LEGS) -> support.Called:
+    def run_helper(
+        self, kept: str = "true", legs: int = LEGS, *, capfd: pytest.CaptureFixture[str]
+    ) -> tuple[int, str, str]:
         """Call the helper's main in this process, as the gaining job runs it.
 
         Returns:
@@ -164,7 +166,12 @@ class TestRows:
         # around it, so the finding writer names the script (#1934).
         with pytest.MonkeyPatch.context() as patched:
             patched.setattr(sys, "argv", [str(HELPER), *argv])
-            return support.call(lambda: gain.main(argv), env=self.env)
+            with pytest.MonkeyPatch.context() as patched:
+                for name, value in self.env.items():
+                    patched.setenv(name, value)
+                status = gain.main(argv)
+            out, err = capfd.readouterr()
+            return status, out, err
 
     def recorded(self) -> list[dict[str, object]]:
         """Read back every record the helper appended.
@@ -209,10 +216,10 @@ class TestRows:
 class TestBehind(TestRows):
     """Each outcome the header calls behind: exit 1, one record."""
 
-    def test_did_not_advance(self) -> None:
+    def test_did_not_advance(self, capfd: pytest.CaptureFixture[str]) -> None:
         """Not advanced: red, the detail lines in order, the reason counted."""
-        proc = self.run_helper()
-        assert proc.returncode == 1, proc.stderr
+        status, out, err = self.run_helper(capfd=capfd)
+        assert status == 1, err
         why = "the checkpoint did not advance in this run (next 448196522)"
         assert self.detail() == expect(
             f"{NEXT}448,196,522",
@@ -222,15 +229,15 @@ class TestBehind(TestRows):
             f"{THIS_RUN}{why}",
             f"14 legs: {BUDGET}",
         )
-        assert f"::error::gain.py: {MESSAGE}\n" in proc.stderr
-        assert f"  {THIS_RUN}{why}\n" in proc.stderr
+        assert f"::error::gain.py: {MESSAGE}\n" in err
+        assert f"  {THIS_RUN}{why}\n" in err
 
-    def test_advanced_not_gaining(self) -> None:
+    def test_advanced_not_gaining(self, capfd: pytest.CaptureFixture[str]) -> None:
         """Advanced, but the log grew faster: red, both counts (green before #1967)."""
         grown = checkpoint(next=BEHIND_NEXT + 1000, size=BEHIND_SIZE + 5000)
         self.write(self.end, grown)
-        proc = self.run_helper()
-        assert proc.returncode == 1, proc.stderr
+        status, out, err = self.run_helper(capfd=capfd)
+        assert status == 1, err
         lines = self.detail()
         assert lines[2:4] == expect(f"{STARTED}25,905", f"{NOW}29,905")
         assert lines[4] == (
@@ -238,20 +245,22 @@ class TestBehind(TestRows):
             " 29,905 now"
         )
 
-    def test_advanced_outstanding_equal(self) -> None:
+    def test_advanced_outstanding_equal(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Advanced, outstanding exactly as at the start: not smaller, red."""
         level = checkpoint(next=BEHIND_NEXT + 1000, size=BEHIND_SIZE + 1000)
         self.write(self.end, level)
-        proc = self.run_helper()
-        assert proc.returncode == 1, proc.stderr
+        status, out, err = self.run_helper(capfd=capfd)
+        assert status == 1, err
         assert self.detail()[3] == f"{NOW}25,905"
 
-    def test_no_newest_checkpoint(self) -> None:
+    def test_no_newest_checkpoint(self, capfd: pytest.CaptureFixture[str]) -> None:
         """No checkpoint at all (before the founding run): red, named."""
         self.start.unlink()
         self.end.unlink()
-        proc = self.run_helper(kept="false")
-        assert proc.returncode == 1, proc.stderr
+        status, out, err = self.run_helper(kept="false", capfd=capfd)
+        assert status == 1, err
         missing = "unknown: no checkpoint file"
         assert self.detail()[:5] == expect(
             f"{NEXT}{missing}",
@@ -261,10 +270,10 @@ class TestBehind(TestRows):
             f"{THIS_RUN}the newest checkpoint: no checkpoint file",
         )
 
-    def test_start_not_kept(self) -> None:
+    def test_start_not_kept(self, capfd: pytest.CaptureFixture[str]) -> None:
         """The start job did not finish: red, the count named unknown."""
-        proc = self.run_helper(kept="")
-        assert proc.returncode == 1, proc.stderr
+        status, out, err = self.run_helper(kept="", capfd=capfd)
+        assert status == 1, err
         lines = self.detail()
         assert lines[2] == f"{STARTED}unknown: the start job did not finish"
         assert lines[4] == (
@@ -272,11 +281,11 @@ class TestBehind(TestRows):
             " (the start job did not finish)"
         )
 
-    def test_kept_but_not_restored(self) -> None:
+    def test_kept_but_not_restored(self, capfd: pytest.CaptureFixture[str]) -> None:
         """The start was kept but its copy is gone: red, named."""
         self.start.unlink()
-        proc = self.run_helper()
-        assert proc.returncode == 1, proc.stderr
+        status, out, err = self.run_helper(capfd=capfd)
+        assert status == 1, err
         assert self.detail()[4] == (
             f"{THIS_RUN}the checkpoint the run started from was not kept"
             " (no checkpoint file)"
@@ -286,38 +295,40 @@ class TestBehind(TestRows):
 class TestReasons(TestRows):
     """Why the legs stopped: one line per distinct reason, with its count."""
 
-    def test_two_reasons_counted(self) -> None:
+    def test_two_reasons_counted(self, capfd: pytest.CaptureFixture[str]) -> None:
         """Three stopped for one reason, two for another: counts 3 and 2."""
         self.legs([THROTTLED, BUDGET, THROTTLED, BUDGET, THROTTLED])
-        proc = self.run_helper(legs=5)
-        assert proc.returncode == 1, proc.stderr
+        status, out, err = self.run_helper(legs=5, capfd=capfd)
+        assert status == 1, err
         assert self.detail()[5:] == expect(f"3 legs: {THROTTLED}", f"2 legs: {BUDGET}")
 
-    def test_missing_report_is_counted(self) -> None:
+    def test_missing_report_is_counted(self, capfd: pytest.CaptureFixture[str]) -> None:
         """Twelve reports for fourteen legs: two counted as "no report"."""
         self.legs([THROTTLED] * 12)
-        proc = self.run_helper()
-        assert proc.returncode == 1, proc.stderr
+        status, out, err = self.run_helper(capfd=capfd)
+        assert status == 1, err
         assert self.detail()[5:] == expect(f"12 legs: {THROTTLED}", "2 legs: no report")
 
-    def test_empty_report_is_no_report(self) -> None:
+    def test_empty_report_is_no_report(self, capfd: pytest.CaptureFixture[str]) -> None:
         """A leg whose stele wrote nothing hands on an empty file: no report."""
         self.legs([THROTTLED] * 13)
         empty = self.reports / "watch-report-14" / "report.json"
         empty.parent.mkdir()
         empty.write_text("", encoding="utf-8")
-        proc = self.run_helper()
-        assert proc.returncode == 1, proc.stderr
+        status, out, err = self.run_helper(capfd=capfd)
+        assert status == 1, err
         assert self.detail()[5:] == expect(f"13 legs: {THROTTLED}", "1 leg: no report")
 
-    def test_report_without_stopped_fact(self) -> None:
+    def test_report_without_stopped_fact(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A report with no `stopped` fact: named, never dropped."""
         self.legs([None] * LEGS)
-        proc = self.run_helper()
-        assert proc.returncode == 1, proc.stderr
+        status, out, err = self.run_helper(capfd=capfd)
+        assert status == 1, err
         assert self.detail()[5:] == expect("14 legs: no reason given")
 
-    def test_report_at_the_head(self) -> None:
+    def test_report_at_the_head(self, capfd: pytest.CaptureFixture[str]) -> None:
         """A leg that judged to the head gave no reason: said so."""
         self.legs([])
         at_head = self.reports / "watch-report-1" / "report.json"
@@ -327,71 +338,72 @@ class TestReasons(TestRows):
                 decoded.load_json((DATA / "report-pass.json").read_bytes()), "pass"
             ),
         )
-        proc = self.run_helper()
-        assert proc.returncode == 1, proc.stderr
+        status, out, err = self.run_helper(capfd=capfd)
+        assert status == 1, err
         assert self.detail()[5:] == expect(
             "13 legs: no report", "1 leg: judged to the head of the log"
         )
 
-    def test_unreadable_report(self) -> None:
+    def test_unreadable_report(self, capfd: pytest.CaptureFixture[str]) -> None:
         """A report that is not stele's: the reader's own reason."""
         self.legs([BUDGET] * 13)
         bad = self.reports / "watch-report-14" / "report.json"
         bad.parent.mkdir()
         bad.write_text("[", encoding="utf-8")
-        proc = self.run_helper()
-        assert proc.returncode == 1, proc.stderr
+        status, out, err = self.run_helper(capfd=capfd)
+        assert status == 1, err
         assert self.detail()[5:] == expect(
             f"13 legs: {BUDGET}", "1 leg: the report could not be read"
         )
 
-    def test_no_reports_directory(self) -> None:
+    def test_no_reports_directory(self, capfd: pytest.CaptureFixture[str]) -> None:
         """No report reached the job at all: every leg counted."""
         shutil.rmtree(self.reports)
-        proc = self.run_helper()
-        assert proc.returncode == 1, proc.stderr
+        status, out, err = self.run_helper(capfd=capfd)
+        assert status == 1, err
         assert self.detail()[5:] == expect("14 legs: no report")
 
 
 class TestGreen(TestRows):
     """Each outcome the header calls green: exit 0, nothing appended."""
 
-    def test_gaining(self) -> None:
+    def test_gaining(self, capfd: pytest.CaptureFixture[str]) -> None:
         """Advanced, outstanding smaller than at the start: green."""
         self.write(self.end, checkpoint(next=BEHIND_NEXT + 10000))
-        proc = self.run_helper()
-        assert proc.returncode == 0, proc.stderr
+        status, out, err = self.run_helper(capfd=capfd)
+        assert status == 0, err
         assert self.recorded() == list[dict[str, object]]()
         assert (
-            "gain: green: gaining: outstanding 25,905 at the start, 15,905 now"
-            in proc.stdout
+            "gain: green: gaining: outstanding 25,905 at the start, 15,905 now" in out
         )
 
-    def test_caught_up(self) -> None:
+    def test_caught_up(self, capfd: pytest.CaptureFixture[str]) -> None:
         """Newest checkpoint at its head: green, whatever the start."""
         self.write(self.end, checkpoint("checkpoint-pass.json"))
-        proc = self.run_helper(kept="")
-        assert proc.returncode == 0, proc.stderr
+        status, out, err = self.run_helper(kept="", capfd=capfd)
+        assert status == 0, err
         assert self.recorded() == list[dict[str, object]]()
-        assert "gain: the newest checkpoint: next index 448221522" in proc.stdout
-        assert "gain: green: judged to the head of the log" in proc.stdout
+        assert "gain: the newest checkpoint: next index 448221522" in out
+        assert "gain: green: judged to the head of the log" in out
 
-    def test_founded(self) -> None:
+    def test_founded(self, capfd: pytest.CaptureFixture[str]) -> None:
         """No checkpoint at the start: no earlier count, by name, green."""
         self.start.unlink()
-        proc = self.run_helper(kept="false")
-        assert proc.returncode == 0, proc.stderr
+        status, out, err = self.run_helper(kept="false", capfd=capfd)
+        assert status == 0, err
         assert self.recorded() == list[dict[str, object]]()
         assert (
             "gain: green: advanced to 448196522; no earlier count, this run founded it"
-            in proc.stdout
+            in out
         )
 
 
 class TestDecoded(TestRows):
     """Each checkpoint gain.py reads, decoded where it is read (#1683)."""
 
-    def test_a_checkpoint_field_that_is_not_an_integer(self) -> None:
+    def test_a_checkpoint_field_that_is_not_an_integer(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """next, treeSize or timestamp of another kind: named unreadable."""
         rows: dict[str, tuple[str, object]] = {
             "next as text": ("next", "448196522"),
@@ -407,27 +419,31 @@ class TestDecoded(TestRows):
             else:
                 tree_head(doc)[field] = value
             self.write(self.end, doc)
-            proc = self.run_helper()
-            assert proc.returncode == 1, proc.stderr
+            status, out, err = self.run_helper(capfd=capfd)
+            assert status == 1, err
             assert self.detail()[4] == (
                 f"{THIS_RUN}the newest checkpoint:"
                 " the checkpoint file could not be read"
             )
 
-    def test_next_infinity_is_unreadable(self) -> None:
+    def test_next_infinity_is_unreadable(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A `next` of Infinity: named unreadable, never a traceback (#1557)."""
         text = json.dumps(checkpoint())
         self.end.write_text(
             text.replace(f'"next": {BEHIND_NEXT}', '"next": Infinity'),
             encoding="utf-8",
         )
-        proc = self.run_helper()
-        assert proc.returncode == 1, proc.stderr
+        status, out, err = self.run_helper(capfd=capfd)
+        assert status == 1, err
         assert (
             self.detail()[0] == f"{NEXT}unknown: the checkpoint file could not be read"
         )
 
-    def test_timestamp_out_of_range_is_unreadable(self) -> None:
+    def test_timestamp_out_of_range_is_unreadable(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A head time past the platform's range: named, never a traceback.
 
         prop_gain.py's shrunk example (#1557): the start's timestamp
@@ -436,8 +452,8 @@ class TestDecoded(TestRows):
         doc = checkpoint()
         tree_head(doc)["timestamp"] = 9.223372036854776e21
         self.write(self.start, doc)
-        proc = self.run_helper()
-        assert proc.returncode == 1, proc.stderr
+        status, out, err = self.run_helper(capfd=capfd)
+        assert status == 1, err
         assert self.detail()[4] == (
             f"{THIS_RUN}the checkpoint the run started from was not kept"
             " (the checkpoint file could not be read)"

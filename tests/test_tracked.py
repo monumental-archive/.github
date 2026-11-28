@@ -156,7 +156,7 @@ def run_task(
 @pytest.mark.usefixtures("_stack")
 class TestProducers:
     """org_tracked and tracked.tracked list exactly what git tracks."""
-    
+
     @pytest.fixture
     def _stack(self, request: pytest.FixtureRequest) -> None:
         """Hold the row's cleanups, undone last first after it ends."""
@@ -194,40 +194,44 @@ class TestProducers:
         assert got == WANT
         assert UNTRACKED not in listed
 
-    def test_org_tracked_read_fills_the_array_with_the_three_names(self) -> None:
+    @pytest.mark.parametrize("shell", SHELLS)
+    def test_org_tracked_read_fills_the_array_with_the_three_names(
+        self, shell: object
+    ) -> None:
         """One element per name, unquoted; no empty last element; no file left."""
         tree = self.planted()
-        for shell in SHELLS:
-            with self.subTest(shell=shell), tempfile.TemporaryDirectory() as tmp:
-                done = read_into(shell, tree, "", Path(tmp))
-                left: list[Path] = list(Path(tmp).iterdir())
-            assert (done.returncode, done.stderr) == (0, b"")
-            got: list[str] = sorted(n.decode() for n in done.stdout.split(b"\0")[:-1])
-            assert got == WANT
-            assert list[Path]() == left
+        with tempfile.TemporaryDirectory() as tmp:
+            done = read_into(shell, tree, "", Path(tmp))
+            left: list[Path] = list(Path(tmp).iterdir())
+        assert (done.returncode, done.stderr) == (0, b"")
+        got: list[str] = sorted(n.decode() for n in done.stdout.split(b"\0")[:-1])
+        assert got == WANT
+        assert list[Path]() == left
 
-    def test_org_tracked_read_of_nothing_is_an_empty_array(self) -> None:
+    @pytest.mark.parametrize("shell", SHELLS)
+    def test_org_tracked_read_of_nothing_is_an_empty_array(self, shell: object) -> None:
         """A pathspec matching nothing: exit 0 and no element at all."""
         tree = self.planted()
-        for shell in SHELLS:
-            with self.subTest(shell=shell), tempfile.TemporaryDirectory() as tmp:
-                done = read_into(shell, tree, "'*.zz'", Path(tmp))
-            assert (done.returncode, done.stdout, done.stderr) == (0, b"", b"")
+        with tempfile.TemporaryDirectory() as tmp:
+            done = read_into(shell, tree, "'*.zz'", Path(tmp))
+        assert (done.returncode, done.stdout, done.stderr) == (0, b"", b"")
 
-    def test_org_tracked_read_fails_when_git_fails_and_leaves_no_file(self) -> None:
+    @pytest.mark.parametrize("shell", SHELLS)
+    def test_org_tracked_read_fails_when_git_fails_and_leaves_no_file(
+        self, shell: object
+    ) -> None:
         """Outside a repository: git's error, exit 1 under errexit, no file."""
-        for shell in SHELLS:
-            with self.subTest(shell=shell), tempfile.TemporaryDirectory() as tmp:
-                outside = Path(tmp) / "plain"
-                outside.mkdir()
-                scratch = Path(tmp) / "tmp"
-                scratch.mkdir()
-                done = read_into(shell, outside, "", scratch)
-                left: list[Path] = list(scratch.iterdir())
-            assert done.returncode == 1
-            assert done.stdout == b""
-            assert b"fatal: not a git repository" in done.stderr
-            assert list[Path]() == left
+        with tempfile.TemporaryDirectory() as tmp:
+            outside = Path(tmp) / "plain"
+            outside.mkdir()
+            scratch = Path(tmp) / "tmp"
+            scratch.mkdir()
+            done = read_into(shell, outside, "", scratch)
+            left: list[Path] = list(scratch.iterdir())
+        assert done.returncode == 1
+        assert done.stdout == b""
+        assert b"fatal: not a git repository" in done.stderr
+        assert list[Path]() == left
 
     def test_tracked_lists_the_three_names_from_a_root(self) -> None:
         """The Python producer, the same list, the untracked log absent."""
@@ -254,13 +258,17 @@ class TestProducers:
         assert list[str]([ACCENTED]) == narrowed
         assert every == WANT
 
-    def test_stdin_paths_reads_a_nul_separated_list(self) -> None:
+    def test_stdin_paths_reads_a_nul_separated_list(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A name with a space or a newline is one path; empties dropped."""
-        done = support.call(
-            lambda: len(tracked.stdin_paths()) - 3,
-            stdin=f"{SPACED}\0\0a\nb.md\0{ACCENTED}\0",
-        )
-        assert done.returncode == 0
+        with pytest.MonkeyPatch.context() as patched:
+            patched.setattr(
+                sys, "stdin", io.StringIO(f"{SPACED}\0\0a\nb.md\0{ACCENTED}\0")
+            )
+            status = len(tracked.stdin_paths()) - 3
+        out, err = capfd.readouterr()
+        assert status == 0
 
     def test_split_decodes_each_entry_as_a_file_name(self) -> None:
         """Bytes that are not UTF-8 survive as the name os.fsdecode makes."""
@@ -428,7 +436,7 @@ def has_status(
 @pytest.mark.usefixtures("_stack")
 class TestHas:
     """org_tracked_has and tracked.has answer from the index (#2013)."""
-    
+
     @pytest.fixture
     def _stack(self, request: pytest.FixtureRequest) -> None:
         """Hold the row's cleanups, undone last first after it ends."""

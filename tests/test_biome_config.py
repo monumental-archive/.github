@@ -14,6 +14,7 @@ exercised code in the org, where a check that admits what it should
 refuse looks precisely like success.
 """
 
+import contextlib
 import io
 import json
 import subprocess
@@ -27,7 +28,6 @@ import pytest
 
 from belt import biome_config, decoded
 from tests import support
-import contextlib
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -268,7 +268,7 @@ class TestOmissionsTest:
 @pytest.mark.usefixtures("_stack")
 class TestDeclaredPackagesTest:
     """Where a dependency may be declared, and what is not a manifest."""
-    
+
     @pytest.fixture
     def _stack(self, request: pytest.FixtureRequest) -> None:
         """Hold the row's cleanups, undone last first after it ends."""
@@ -815,7 +815,7 @@ class TestRunTest:
 
     @staticmethod
     def invoke(
-        body: object, manifests: dict[str, object]
+        body: object, manifests: dict[str, object], *, capfd: pytest.CaptureFixture[str]
     ) -> tuple[int, str, str, Path]:
         """Run the generator in a temporary tree.
 
@@ -834,15 +834,17 @@ class TestRunTest:
             path.write_text(json.dumps(content), encoding="utf-8")
             paths.append(path)
         out = tree / "generated.json"
-        done = support.call(
-            lambda: biome_config.main([
+        with pytest.MonkeyPatch.context() as patched:
+            patched.setattr(
+                sys, "stdin", io.StringIO("".join(f"{path}\0" for path in paths))
+            )
+            status = biome_config.main([
                 *("--org", str(ORG_FILE), "--domains", str(DOMAINS_FILE)),
                 *("--nursery", str(NURSERY_FILE), "--out", str(out)),
                 *("--declaration", str(declared)),
-            ]),
-            stdin="".join(f"{path}\0" for path in paths),
-        )
-        return done.returncode, done.stdout, done.stderr, out
+            ])
+        out, err = capfd.readouterr()
+        return status, out, err, out
 
     def test_the_script_contract(self) -> None:
         """Started as a process, it reads its flags and stdin and writes."""
@@ -897,11 +899,14 @@ class TestRunTest:
         )
         assert not args.out.exists()
 
-    def test_a_conforming_react_repository_generates(self) -> None:
+    def test_a_conforming_react_repository_generates(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """The MA shape: one claim, one matching dependency."""
         status, out, _err, path = self.invoke(
             {"linter": {"domains": {"react": "all"}}},
             {"apps/web/package.json": {"dependencies": {"react": "19.2.8"}}},
+            capfd=capfd,
         )
         assert status == 0
         assert "react" in out
@@ -910,28 +915,36 @@ class TestRunTest:
         assert written["react"] == "all"
         assert written["qwik"] == "none"
 
-    def test_a_repository_with_no_declaration_and_no_framework_generates(self) -> None:
+    def test_a_repository_with_no_declaration_and_no_framework_generates(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """The canon itself must keep working with no biome.json at all."""
-        status, _out, _err, path = self.invoke(None, {})
+        status, _out, _err, path = self.invoke(None, {}, capfd=capfd)
         assert status == 0
         assert path.is_file()
 
-    def test_an_undeclared_framework_fails_with_the_manifest_named(self) -> None:
+    def test_an_undeclared_framework_fails_with_the_manifest_named(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Lowering by silence, refused, with the evidence in the message."""
         status, _out, err, path = self.invoke(
             None,
             {"apps/web/package.json": {"dependencies": {"react": "19.2.8"}}},
+            capfd=capfd,
         )
         assert status == 1
         assert "react" in err
         assert "apps/web/package.json" in err
         assert not path.exists()
 
-    def test_a_declaration_carrying_rules_fails(self) -> None:
+    def test_a_declaration_carrying_rules_fails(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """No config is written when the declaration is refused."""
         status, _out, err, path = self.invoke(
             {"linter": {"rules": {"correctness": {"noNodejsModules": "off"}}}},
             {},
+            capfd=capfd,
         )
         assert status == 1
         assert "linter.rules" in err
@@ -968,22 +981,25 @@ NO_ENTRIES: list[dict[str, object]] = []
 NODE_OFF = {"rules": {"correctness": {"noNodejsModules": "off"}}}
 
 
-def generate_main(tree: Path, out: Path, *extra: str) -> support.Called:
+def generate_main(
+    tree: Path, out: Path, *extra: str, capfd: pytest.CaptureFixture[str]
+) -> tuple[int, str, str]:
     """Run the generator's entry point with a tree's declaration.
 
     Returns:
         The finished call.
 
     """
-    return support.call(
-        lambda: biome_config.main([
+    with pytest.MonkeyPatch.context() as patched:
+        patched.setattr(sys, "stdin", io.StringIO(""))
+        status = biome_config.main([
             *("--org", str(ORG_FILE), "--domains", str(DOMAINS_FILE)),
             *("--nursery", str(NURSERY_FILE), "--out", str(out)),
             *("--declaration", str(tree / "biome.json")),
             *extra,
-        ]),
-        stdin="",
-    )
+        ])
+    out, err = capfd.readouterr()
+    return status, out, err
 
 
 def node_tsconfig(types: list[str]) -> str:
@@ -1007,6 +1023,14 @@ def node_rule(entry: object) -> object:
     """
     rules = table(entry, "linter", "rules")
     return table_or_empty(rules, "correctness").get("noNodejsModules")
+
+
+A_RESOLVED_DOCUMENT_THAT_IS_NOT_AN_OBJECT_IS_REFUSED_ROWS: tuple[
+    tuple[object, str], ...
+] = (
+    ([], "apps/a/tsconfig.json is not an object"),
+    ({"compilerOptions": []}, "apps/a/tsconfig.json compilerOptions is not"),
+)
 
 
 class TestNodeOverridesTest:
@@ -1061,17 +1085,17 @@ class TestNodeOverridesTest:
             entries = biome_config.node_overrides(project)
             assert entries == NO_ENTRIES
 
-    def test_a_resolved_document_that_is_not_an_object_is_refused(self) -> None:
+    @pytest.mark.parametrize(
+        ("document", "said"), A_RESOLVED_DOCUMENT_THAT_IS_NOT_AN_OBJECT_IS_REFUSED_ROWS
+    )
+    def test_a_resolved_document_that_is_not_an_object_is_refused(
+        self, document: object, said: str
+    ) -> None:
         """A shape the belt does not read is named, never read as "not Node"."""
-        rows: tuple[tuple[object, str], ...] = (
-            ([], "apps/a/tsconfig.json is not an object"),
-            ({"compilerOptions": []}, "apps/a/tsconfig.json compilerOptions is not"),
-        )
-        for document, said in rows:
-            refused = self.assertRaises(decoded.UndecodableError)
-            with self.subTest(said=said), refused as raised:
-                biome_config.node_overrides({"apps/a/tsconfig.json": document})
-            assert str(raised.exception).startswith(said), raised.exception
+        refused = self.assertRaises(decoded.UndecodableError)
+        with refused as raised:
+            biome_config.node_overrides({"apps/a/tsconfig.json": document})
+        assert str(raised.exception).startswith(said), raised.exception
 
     def test_the_entries_follow_the_org_overrides_in_the_generated_config(self) -> None:
         """Appended, so the org's test-file entry is kept and stays first."""
@@ -1102,7 +1126,9 @@ class TestNodeOverridesTest:
         assert top["preset"] == "all"
         assert "noNodejsModules" not in table_or_empty(top, "correctness")
 
-    def test_a_repository_stating_the_rule_is_still_refused(self) -> None:
+    def test_a_repository_stating_the_rule_is_still_refused(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """The repository writes nothing: its own override is refused as before."""
         stated: tuple[object, ...] = (
             {"linter": NODE_OFF},
@@ -1116,24 +1142,31 @@ class TestNodeOverridesTest:
             node = json.dumps(self.resolved(["node"]))
             resolved.write_text(node, encoding="utf-8")
             out = tree / "generated.json"
-            done = generate_main(
-                tree, out, "--tsconfig", "apps/a/tsconfig.json", str(resolved)
+            status, out, err = generate_main(
+                tree,
+                out,
+                "--tsconfig",
+                "apps/a/tsconfig.json",
+                str(resolved),
+                capfd=capfd,
             )
-            assert done.returncode == 1
-            assert "says more than a repository may say" in done.stderr
+            assert status == 1
+            assert "says more than a repository may say" in err
             assert not out.exists()
 
-    def test_a_resolved_file_that_is_not_json_is_refused_by_its_tsconfig(self) -> None:
+    def test_a_resolved_file_that_is_not_json_is_refused_by_its_tsconfig(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """The task hands over tsc's output; garbage there is named, not crashed on."""
         tree = Path(tempfile.mkdtemp())
         resolved = tree / "resolved.json"
         resolved.write_text("{", encoding="utf-8")
         out = tree / "generated.json"
-        done = generate_main(
-            tree, out, "--tsconfig", "apps/a/tsconfig.json", str(resolved)
+        status, out, err = generate_main(
+            tree, out, "--tsconfig", "apps/a/tsconfig.json", str(resolved), capfd=capfd
         )
-        assert done.returncode == 1
-        lines = done.stderr.splitlines()
+        assert status == 1
+        lines = err.splitlines()
         assert (
             lines[0]
             == f"{TASK}: a resolved tsconfig.json is not the shape the belt reads"
@@ -1179,7 +1212,9 @@ class TestNodeFixtureTest:
     the config says.
     """
 
-    def test_the_node_project_is_clean_and_the_other_is_a_finding(self) -> None:
+    def test_the_node_project_is_clean_and_the_other_is_a_finding(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """apps/a declares node and passes; apps/b does not and is reported."""
         biome = support.tool("biome")
         git = support.tool("git")
@@ -1199,9 +1234,9 @@ class TestNodeFixtureTest:
             subprocess.run([git, "init", "-q"], cwd=tree, env=env, check=True)
             pairs = show_configs(tree, env, ("a", "b"))
             generated = tree / "biome-org.generated.json"
-            made = generate_main(tree, generated, *pairs)
-            assert made.returncode == 0, made.stderr
-            assert "noNodejsModules off in 1 Node project(s)" in made.stdout
+            status, out, err = generate_main(tree, generated, *pairs, capfd=capfd)
+            assert status == 0, err
+            assert "noNodejsModules off in 1 Node project(s)" in out
             report = tree / "report.json"
             subprocess.run(
                 [

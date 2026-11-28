@@ -250,7 +250,8 @@ class TestStubbed:
         default: str = "main",
         findings: Path | None = None,
         workflow: str = WORKFLOW,
-    ) -> support.Called:
+        capfd: pytest.CaptureFixture[str],
+    ) -> tuple[int, str, str]:
         """Run the report as the job runs it.
 
         Returns:
@@ -269,7 +270,12 @@ class TestStubbed:
         ]
         if findings is not None:
             argv += ["--findings", str(findings)]
-        return support.call(lambda: standing.main(argv), env=self.env)
+        with pytest.MonkeyPatch.context() as patched:
+            for name, value in self.env.items():
+                patched.setenv(name, value)
+            status = standing.main(argv)
+        out, err = capfd.readouterr()
+        return status, out, err
 
     def gh_calls(self) -> list[list[str]]:
         """Read every argv the stub gh received.
@@ -303,10 +309,12 @@ class TestStubbed:
 class TestRows(TestStubbed):
     """The report's outcomes, by the calls gh received."""
 
-    def test_red_creates_with_title_and_label(self) -> None:
+    def test_red_creates_with_title_and_label(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Red, none open: one issue, the job's title, the label."""
-        proc = self.run_report()
-        same(proc.returncode, 0, proc.stderr)
+        status, out, err = self.run_report(capfd=capfd)
+        same(status, 0, err)
         calls = self.gh_calls()
         same(calls[:3], [JOBS, LIST, LABELS])
         same(len(calls), 4)
@@ -326,13 +334,15 @@ class TestRows(TestStubbed):
         assert "```text\nwalking\nassert: edtf/release.yml: caller-grant\n```" in text
         assert "##[error]" not in text
         assert "2026-11-20T" not in text
-        assert f"red-check: opened '{TITLE}'" in proc.stdout
+        assert f"red-check: opened '{TITLE}'" in out
 
-    def test_red_with_one_open_replaces_and_keeps_since(self) -> None:
+    def test_red_with_one_open_replaces_and_keeps_since(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Red, one open: its body is replaced, Red since kept, the run counted."""
         self.env["STUB_LIST"] = issues((42, TITLE, previous(FIRST, 3)))
-        proc = self.run_report()
-        same(proc.returncode, 0, proc.stderr)
+        status, out, err = self.run_report(capfd=capfd)
+        same(status, 0, err)
         calls = self.gh_calls()
         same(calls[:2], [JOBS, LIST])
         same(len(calls), 3)
@@ -341,75 +351,85 @@ class TestRows(TestStubbed):
         assert f"- Red since: {FIRST}\n" in text
         assert f"- Latest red run: {RUN}\n" in text
         assert "- Red runs: 4\n" in text
-        assert "updated #42 (4 red runs)" in proc.stdout
+        assert "updated #42 (4 red runs)" in out
 
-    def test_same_run_is_counted_once(self) -> None:
+    def test_same_run_is_counted_once(self, capfd: pytest.CaptureFixture[str]) -> None:
         """A second report in one run does not count the run twice."""
         self.env["STUB_LIST"] = issues((42, TITLE, previous(FIRST, 3, RUN)))
-        proc = self.run_report()
-        same(proc.returncode, 0, proc.stderr)
+        status, out, err = self.run_report(capfd=capfd)
+        same(status, 0, err)
         assert "- Red runs: 3\n" in self.body_of(self.gh_calls()[2])
 
-    def test_green_closes_with_the_run(self) -> None:
+    def test_green_closes_with_the_run(self, capfd: pytest.CaptureFixture[str]) -> None:
         """A job green, its issue open: closed, naming the run."""
         self.jobs([job(1, "plan", "success"), job(2, "source-vsa", "skipped")])
         open_one = (42, "red: source-vsa (slsa)", previous(FIRST, 3))
         self.env["STUB_LIST"] = issues(open_one)
-        proc = self.run_report()
-        same(proc.returncode, 0, proc.stderr)
+        status, out, err = self.run_report(capfd=capfd)
+        same(status, 0, err)
         comment = f"Green: {RUN} ran every leg of this job green or skipped."
         closed = ["issue", "close", "42", "--repo", REPO, "--comment", comment]
         same(self.gh_calls(), [JOBS, LIST, closed])
-        assert "green: closed #42" in proc.stdout
+        assert "green: closed #42" in out
 
-    def test_green_with_none_open_writes_nothing(self) -> None:
+    def test_green_with_none_open_writes_nothing(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Green, none open: the two reads and nothing else."""
         self.jobs([job(1, "plan", "success")])
-        proc = self.run_report()
-        same(proc.returncode, 0, proc.stderr)
+        status, out, err = self.run_report(capfd=capfd)
+        same(status, 0, err)
         same(self.gh_calls(), [JOBS, LIST])
-        assert "red-check: nothing to change" in proc.stdout
+        assert "red-check: nothing to change" in out
 
-    def test_other_branch_calls_nothing(self) -> None:
+    def test_other_branch_calls_nothing(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A run on another branch changes nothing, and asks nothing."""
-        proc = self.run_report(ref="refs/heads/feature")
-        same(proc.returncode, 0, proc.stderr)
+        status, out, err = self.run_report(ref="refs/heads/feature", capfd=capfd)
+        same(status, 0, err)
         same(self.gh_calls(), [])
-        assert "refs/heads/feature is not the default branch (main)" in proc.stdout
+        assert "refs/heads/feature is not the default branch (main)" in out
 
-    def test_failed_listing_files_nothing(self) -> None:
+    def test_failed_listing_files_nothing(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A listing that fails exits 2 by name and files nothing."""
         self.env["STUB_LIST_FAIL"] = "1"
-        proc = self.run_report()
-        same(proc.returncode, 2)
+        status, out, err = self.run_report(capfd=capfd)
+        same(status, 2)
         same(self.gh_calls(), [JOBS, LIST])
         assert (
             "gh issue list failed (exit 1): HTTP 502: Bad Gateway; nothing was filed"
-            in proc.stderr
+            in err
         )
 
-    def test_two_open_is_a_named_error(self) -> None:
+    def test_two_open_is_a_named_error(self, capfd: pytest.CaptureFixture[str]) -> None:
         """Two open issues with one job's title: a named error, nothing filed."""
         self.jobs([job(1, "plan", "failure"), job(2, "caller permissions", "failure")])
         both = [(n, TITLE, previous(FIRST, 1)) for n in (41, 42)]
         self.env["STUB_LIST"] = issues(*both)
-        proc = self.run_report()
-        same(proc.returncode, 2)
+        status, out, err = self.run_report(capfd=capfd)
+        same(status, 2)
         same(self.gh_calls(), [JOBS, LIST])
-        assert f"2 open issues are titled exactly '{TITLE}' (#41, #42)" in proc.stderr
+        assert f"2 open issues are titled exactly '{TITLE}' (#41, #42)" in err
 
-    def test_resembling_title_is_not_the_issue(self) -> None:
+    def test_resembling_title_is_not_the_issue(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A title that only resembles is never edited."""
         self.env["STUB_LIST"] = issues((7, f"{TITLE} again", ""))
-        proc = self.run_report()
-        same(proc.returncode, 0, proc.stderr)
+        status, out, err = self.run_report(capfd=capfd)
+        same(status, 0, err)
         same(self.gh_calls()[-1][:2], ["issue", "create"])
 
-    def test_missing_label_is_created_from_the_baseline(self) -> None:
+    def test_missing_label_is_created_from_the_baseline(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """No red-check label: created from settings/repo-baseline.json first."""
         self.env["STUB_LABELS"] = labels("hold")
-        proc = self.run_report()
-        same(proc.returncode, 0, proc.stderr)
+        status, out, err = self.run_report(capfd=capfd)
+        same(status, 0, err)
         label = standing.label_definition()
         made = [
             "label", "create", "red-check", "--repo", REPO,
@@ -418,21 +438,25 @@ class TestRows(TestStubbed):
         calls = self.gh_calls()
         same(calls[3], made)
         same(calls[4][:2], ["issue", "create"])
-        assert "created the red-check label; opened" in proc.stdout
+        assert "created the red-check label; opened" in out
 
-    def test_unfinished_sibling_changes_nothing(self) -> None:
+    def test_unfinished_sibling_changes_nothing(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Green so far with a caller's job still running: nothing is read."""
         self.jobs([
             job(1, "records / links", "success"),
             job(3, "citations", None, "in_progress"),
         ])
         self.env["STUB_LIST"] = issues((42, "red: links (records)", previous(FIRST, 3)))
-        proc = self.run_report()
-        same(proc.returncode, 0, proc.stderr)
+        status, out, err = self.run_report(capfd=capfd)
+        same(status, 0, err)
         same(self.gh_calls(), [JOBS])
-        assert "neither red nor green yet" in proc.stdout
+        assert "neither red nor green yet" in out
 
-    def test_unfinished_sibling_keeps_red_and_closes_nothing(self) -> None:
+    def test_unfinished_sibling_keeps_red_and_closes_nothing(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A red job is kept with a sibling running; no green job is closed."""
         self.jobs([
             job(1, "plan", "success"),
@@ -440,17 +464,17 @@ class TestRows(TestStubbed):
             job(3, "citations", None, "in_progress"),
         ])
         self.env["STUB_LIST"] = issues((41, "red: plan (slsa)", previous(FIRST, 3)))
-        proc = self.run_report()
-        same(proc.returncode, 0, proc.stderr)
+        status, out, err = self.run_report(capfd=capfd)
+        same(status, 0, err)
         calls = self.gh_calls()
         same([c[:2] for c in calls[2:]], [["label", "list"], ["issue", "create"]])
 
-    def test_timed_out_is_red(self) -> None:
+    def test_timed_out_is_red(self, capfd: pytest.CaptureFixture[str]) -> None:
         """A job that timed out is red."""
         self.jobs([job(4, "watch (leg 1)", "timed_out")])
         self.log(4, logged("reading"))
-        proc = self.run_report()
-        same(proc.returncode, 0, proc.stderr)
+        status, out, err = self.run_report(capfd=capfd)
+        same(status, 0, err)
         create = self.gh_calls()[-1]
         same(create[5], "red: watch (slsa)")
         assert "```text\nreading\n```" in self.body_of(create)
@@ -488,7 +512,9 @@ class TestPerJob(TestStubbed):
             if c[:2] == ["issue", "create"]
         }
 
-    def test_two_red_jobs_open_two_issues(self) -> None:
+    def test_two_red_jobs_open_two_issues(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Two red jobs in one run: two issues, each titled for its job."""
         self.jobs([
             job(1, "rust branch coverage holds its floor", "failure"),
@@ -496,8 +522,8 @@ class TestPerJob(TestStubbed):
         ])
         self.log(1, failing("mise run coverage", "below the floor"))
         self.log(2, failing("mise run chain", "link 3 does not verify"))
-        proc = self.run_report()
-        same(proc.returncode, 0, proc.stderr)
+        status, out, err = self.run_report(capfd=capfd)
+        same(status, 0, err)
         calls = self.gh_calls()
         same(calls[:3], [JOBS, LIST, LABELS])
         same(
@@ -515,7 +541,9 @@ class TestPerJob(TestStubbed):
         assert "link 3 does not verify" in second
         assert "below the floor" not in second
 
-    def test_a_reusable_workflow_leg_is_named_for_its_job(self) -> None:
+    def test_a_reusable_workflow_leg_is_named_for_its_job(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """`deep-tests / x (3/8)` under deep-tests is a leg of the job `x`."""
         same(standing.job_name("deep-tests / x (3/8)", "deep-tests"), "x")
         self.jobs([
@@ -523,8 +551,8 @@ class TestPerJob(TestStubbed):
             job(2, "deep-tests / x (4/8)", "success"),
         ])
         self.log(1, failing("mise run x", "boom"))
-        proc = self.run_report(workflow="deep-tests")
-        same(proc.returncode, 0, proc.stderr)
+        status, out, err = self.run_report(workflow="deep-tests", capfd=capfd)
+        same(status, 0, err)
         create = self.gh_calls()[-1]
         same(create[5], "red: x (deep-tests)")
         text = self.body_of(create)
@@ -532,14 +560,16 @@ class TestPerJob(TestStubbed):
         assert f"- [deep-tests / x (3/8)]({RUN}/job/1): failure\n" in text
         assert "x (4/8)" not in text
 
-    def test_fourteen_legs_with_one_output_are_one_excerpt(self) -> None:
+    def test_fourteen_legs_with_one_output_are_one_excerpt(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Fourteen red legs, one output: one issue, one excerpt, 14 links."""
         name = "fuzz targets survive a bounded run"
         self.jobs([job(n, f"{name} (leg {n})", "failure") for n in range(1, 15)])
         for n in range(1, 15):
             self.log(n, failing("mise run fuzz", "llvm-tools is not installed"))
-        proc = self.run_report()
-        same(proc.returncode, 0, proc.stderr)
+        status, out, err = self.run_report(capfd=capfd)
+        same(status, 0, err)
         creates = [c for c in self.gh_calls() if c[:2] == ["issue", "create"]]
         same(len(creates), 1)
         same(creates[0][5], f"red: {name} (slsa)")
@@ -549,40 +579,48 @@ class TestPerJob(TestStubbed):
         same(text.count(f"- [{name} (leg "), 14)
         assert f"### {name} (leg 1) and 13 more legs\n" in text
 
-    def test_one_red_leg_of_fourteen_is_red(self) -> None:
+    def test_one_red_leg_of_fourteen_is_red(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """One leg red and thirteen green: the job is red."""
         legs = [job(1, "shard (1)", "failure")]
         legs += [job(n, f"shard ({n})", "success") for n in range(2, 15)]
         self.jobs(legs)
         self.log(1, failing("mise run shard", "one shard failed"))
-        proc = self.run_report()
-        same(proc.returncode, 0, proc.stderr)
+        status, out, err = self.run_report(capfd=capfd)
+        same(status, 0, err)
         create = self.gh_calls()[-1]
         same(create[:2], ["issue", "create"])
         same(create[5], "red: shard (slsa)")
         assert "with 1 of its 14 legs red" in self.body_of(create)
 
-    def test_every_leg_green_or_skipped_closes(self) -> None:
+    def test_every_leg_green_or_skipped_closes(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Every leg green or skipped: the job's issue is closed."""
         legs = [job(n, f"shard ({n})", "success") for n in range(1, 14)]
         self.jobs([*legs, job(14, "shard (14)", "skipped")])
         self.env["STUB_LIST"] = issues((42, "red: shard (slsa)", previous(FIRST, 2)))
-        proc = self.run_report()
-        same(proc.returncode, 0, proc.stderr)
+        status, out, err = self.run_report(capfd=capfd)
+        same(status, 0, err)
         comment = f"Green: {RUN} ran every leg of this job green or skipped."
         closed = ["issue", "close", "42", "--repo", REPO, "--comment", comment]
         same(self.gh_calls(), [JOBS, LIST, closed])
 
-    def test_a_cancelled_leg_with_no_red_leg_changes_nothing(self) -> None:
+    def test_a_cancelled_leg_with_no_red_leg_changes_nothing(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A cancelled leg, the rest green: the job's issue is unchanged."""
         self.jobs([job(1, "shard (1)", "success"), job(2, "shard (2)", "cancelled")])
         self.env["STUB_LIST"] = issues((42, "red: shard (slsa)", previous(FIRST, 2)))
-        proc = self.run_report()
-        same(proc.returncode, 0, proc.stderr)
+        status, out, err = self.run_report(capfd=capfd)
+        same(status, 0, err)
         same(self.gh_calls(), [JOBS, LIST])
-        assert "neither red nor green, unchanged: shard" in proc.stdout
+        assert "neither red nor green, unchanged: shard" in out
 
-    def test_green_job_closed_and_red_job_replaced(self) -> None:
+    def test_green_job_closed_and_red_job_replaced(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Job A green and job B red: A's issue closed, B's body replaced."""
         self.jobs([job(1, "a", "success"), job(2, "b", "failure")])
         self.log(2, failing("mise run b", "b broke"))
@@ -590,8 +628,8 @@ class TestPerJob(TestStubbed):
             (41, "red: a (slsa)", previous(FIRST, 1)),
             (42, "red: b (slsa)", previous(FIRST, 1)),
         )
-        proc = self.run_report()
-        same(proc.returncode, 0, proc.stderr)
+        status, out, err = self.run_report(capfd=capfd)
+        same(status, 0, err)
         calls = self.gh_calls()
         same(len(calls), 4)
         same(calls[2][:5], ["issue", "edit", "42", "--repo", REPO])
@@ -600,7 +638,9 @@ class TestPerJob(TestStubbed):
         closed = ["issue", "close", "41", "--repo", REPO, "--comment", comment]
         same(calls[3], closed)
 
-    def test_a_job_not_in_the_run_is_closed_saying_so(self) -> None:
+    def test_a_job_not_in_the_run_is_closed_saying_so(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """`red: gone` labelled is closed; the same shape unlabelled is not."""
         self.jobs([job(1, "plan", "success")])
         labelled = issues((50, "red: gone (slsa)", previous(FIRST, 1)))
@@ -610,8 +650,8 @@ class TestPerJob(TestStubbed):
             *decoded.as_array(decoded.load_json(unlabelled), "unlabelled"),
         ]
         self.env["STUB_LIST"] = json.dumps(listing)
-        proc = self.run_report()
-        same(proc.returncode, 0, proc.stderr)
+        status, out, err = self.run_report(capfd=capfd)
+        same(status, 0, err)
         comment = (
             f"Not in the run: {RUN} lists no job named `gone`;"
             " it was renamed or removed."
@@ -620,7 +660,9 @@ class TestPerJob(TestStubbed):
         same(self.gh_calls(), [JOBS, LIST, closed])
 
     @pytest.mark.parametrize("red", (True, False))
-    def test_the_old_issue_is_closed_red_or_green(self, red: object) -> None:
+    def test_the_old_issue_is_closed_red_or_green(
+        self, red: object, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """An open `<workflow> is red` is closed on a red run and a green one."""
         comment = (
             f"{RUN} reported this workflow with one issue per red job"
@@ -633,21 +675,23 @@ class TestPerJob(TestStubbed):
             self.jobs([job(1, "plan", "success")])
         old = (30, OLD, previous(FIRST, 5))
         self.env["STUB_LIST"] = issues(old, label=False)
-        proc = self.run_report()
-        same(proc.returncode, 0, proc.stderr)
+        status, out, err = self.run_report(capfd=capfd)
+        same(status, 0, err)
         calls = self.gh_calls()
         same(calls[-1], closed)
         creates = [c for c in calls if c[:2] == ["issue", "create"]]
         same(len(creates), 1 if red else 0)
 
-    def test_red_since_and_runs_carry_per_issue(self) -> None:
+    def test_red_since_and_runs_carry_per_issue(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Each job's issue carries its own Red since and run count."""
         self.jobs([job(1, "a", "failure"), job(2, "b", "failure")])
         self.log(1, failing("mise run a", "a broke"))
         self.log(2, failing("mise run b", "b broke"))
         self.env["STUB_LIST"] = issues((41, "red: a (slsa)", previous(FIRST, 3)))
-        proc = self.run_report()
-        same(proc.returncode, 0, proc.stderr)
+        status, out, err = self.run_report(capfd=capfd)
+        same(status, 0, err)
         calls = self.gh_calls()
         edit = next(c for c in calls if c[:3] == ["issue", "edit", "41"])
         assert f"- Red since: {FIRST}\n" in self.body_of(edit)
@@ -660,28 +704,28 @@ class TestPerJob(TestStubbed):
 class TestLogs(TestStubbed):
     """How a red job's log is read (#1925)."""
 
-    def test_unreadable_log_is_named(self) -> None:
+    def test_unreadable_log_is_named(self, capfd: pytest.CaptureFixture[str]) -> None:
         """A log the forge will not serve is named in the entry, not fatal."""
         self.jobs([job(5, "drafts", "failure")])
-        proc = self.run_report()
-        same(proc.returncode, 0, proc.stderr)
+        status, out, err = self.run_report(capfd=capfd)
+        same(status, 0, err)
         assert (
             "_Log tail unknown: the log could not be read: GET"
             f" repos/{REPO}/actions/jobs/5/logs answered HTTP 410_"
         ) in self.body_of(self.gh_calls()[-1])
 
-    def test_no_token_is_named(self) -> None:
+    def test_no_token_is_named(self, capfd: pytest.CaptureFixture[str]) -> None:
         """No GH_TOKEN: named in the entry, not fatal, nothing requested."""
         del self.env["GH_TOKEN"]
-        proc = self.run_report()
-        same(proc.returncode, 0, proc.stderr)
+        status, out, err = self.run_report(capfd=capfd)
+        same(status, 0, err)
         assert "GH_TOKEN is not set_" in self.body_of(self.gh_calls()[-1])
         same(self.seen, [])
 
-    def test_log_is_read_without_gh(self) -> None:
+    def test_log_is_read_without_gh(self, capfd: pytest.CaptureFixture[str]) -> None:
         """The log comes from the endpoint; gh never reads one."""
-        proc = self.run_report()
-        same(proc.returncode, 0, proc.stderr)
+        status, out, err = self.run_report(capfd=capfd)
+        same(status, 0, err)
         reads = [
             call
             for call in self.gh_calls()
@@ -691,10 +735,12 @@ class TestLogs(TestStubbed):
         same(reads, [])
         assert "caller-grant" in self.body_of(self.gh_calls()[-1])
 
-    def test_token_never_reaches_the_blob_host(self) -> None:
+    def test_token_never_reaches_the_blob_host(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """The API read carries the token; the redirected read does not."""
-        proc = self.run_report()
-        same(proc.returncode, 0, proc.stderr)
+        status, out, err = self.run_report(capfd=capfd)
+        same(status, 0, err)
         same(
             self.seen,
             [
@@ -1101,21 +1147,23 @@ class TestFindingsBody:
 class TestFindingsReport(TestStubbed):
     """`--findings` end to end: the records reach the body gh is sent."""
 
-    def test_records_reach_the_issue(self) -> None:
+    def test_records_reach_the_issue(self, capfd: pytest.CaptureFixture[str]) -> None:
         """The run's records are listed, and the red job points at them."""
         found = self.dir / "findings"
         records(
             found, "job.jsonl", standing.Finding("lint:caller", "edtf", "caller-grant")
         )
-        proc = self.run_report(findings=found)
-        same(proc.returncode, 0, proc.stderr)
+        status, out, err = self.run_report(findings=found, capfd=capfd)
+        same(status, 0, err)
         text = self.body_of(self.gh_calls()[3])
         assert "### lint:caller (1)\n" in text
         assert "- edtf: caller-grant\n" in text
         assert "Its findings are above, under <code>lint:caller</code>." in text
         assert "```text\nwalking\nassert: edtf/release.yml: caller-grant\n```" in text
 
-    def test_each_record_reaches_the_job_whose_step_ran_it(self) -> None:
+    def test_each_record_reaches_the_job_whose_step_ran_it(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A's record in A's issue only; verdict.py by its script; the rest in all."""
         verdict = '"${ORG_PYTHON}" -I belt verdict --report r.json'
         self.jobs([
@@ -1135,8 +1183,8 @@ class TestFindingsReport(TestStubbed):
             standing.Finding("verdict.py", "leg 1", "finding of the watch"),
             standing.Finding("audit:loose", "", "finding of no failing step"),
         )
-        proc = self.run_report(findings=found)
-        same(proc.returncode, 0, proc.stderr)
+        status, out, err = self.run_report(findings=found, capfd=capfd)
+        same(status, 0, err)
         made = {
             c[5]: self.body_of(c)
             for c in self.gh_calls()
@@ -1156,8 +1204,10 @@ class TestFindingsReport(TestStubbed):
             assert "- finding of no failing step\n" in outside
             same(outside.count("\n- "), 1)
 
-    def test_without_the_flag_no_findings_are_read(self) -> None:
+    def test_without_the_flag_no_findings_are_read(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """No `--findings`: the body has no findings section."""
-        proc = self.run_report()
-        same(proc.returncode, 0, proc.stderr)
+        status, out, err = self.run_report(capfd=capfd)
+        same(status, 0, err)
         assert "## Findings" not in self.body_of(self.gh_calls()[3])

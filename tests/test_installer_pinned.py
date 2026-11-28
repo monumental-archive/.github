@@ -108,7 +108,9 @@ class TestPinned:
             path.write_text(text, encoding="utf-8")
         return rel
 
-    def helper(self, *files: str) -> support.Called:
+    def helper(
+        self, *files: str, capfd: pytest.CaptureFixture[str]
+    ) -> tuple[int, str, str]:
         """Call the helper's main in the planted tree.
 
         Returns:
@@ -116,9 +118,13 @@ class TestPinned:
 
         """
         argv = list(files)
-        return support.call(
-            lambda: installer_pinned.main(argv), env=self.env, cwd=self.tree
-        )
+        with pytest.MonkeyPatch.context() as patched:
+            for name, value in self.env.items():
+                patched.setenv(name, value)
+            patched.chdir(self.tree)
+            status = installer_pinned.main(argv)
+        out, err = capfd.readouterr()
+        return status, out, err
 
     def task(self, *tracked: str) -> subprocess.CompletedProcess[str]:
         """Run the task body in the planted tree, git tracking some files.
@@ -158,7 +164,7 @@ class TestPinned:
         same(done.returncode, installer_pinned.EXIT_RED)
         same(done.stderr.splitlines(), red(f"{bad}(1 steps, 0 version pins)"))
 
-    def test_holding_workflows_are_ok(self) -> None:
+    def test_holding_workflows_are_ok(self, capfd: pytest.CaptureFixture[str]) -> None:
         """No step, a pin per step, spare pins, a step in a comment: ok."""
         rows = {
             "no step": "on: push\n",
@@ -170,41 +176,43 @@ class TestPinned:
         }
         for row, text in rows.items():
             rel = self.plant("wf.yml", text)
-            done = self.helper(rel)
-            same(done.returncode, 0, done.stderr)
-            same(done.stdout.splitlines(), OK)
-            same(done.stderr, "")
+            status, out, err = self.helper(rel, capfd=capfd)
+            same(status, 0, err)
+            same(out.splitlines(), OK)
+            same(err, "")
 
-    def test_shortfalls_are_red_with_counts(self) -> None:
+    def test_shortfalls_are_red_with_counts(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """No pin, too few, a pin in prose or short: each named, in order."""
         bare = self.plant("bare.yml", STEP)
         few = self.plant("few.yml", STEP + PIN + STEP)
         prose = self.plant("prose.yml", STEP + "  # version: 2026.11.3\n")
         short = self.plant("short.yml", STEP + "version: 2026.1\n")
         clean = self.plant("clean.yml", STEP + PIN)
-        done = self.helper(bare, clean, few, prose, short)
-        same(done.returncode, installer_pinned.EXIT_RED)
+        status, out, err = self.helper(bare, clean, few, prose, short, capfd=capfd)
+        same(status, installer_pinned.EXIT_RED)
         want = red(
             f"{bare}(1 steps, 0 version pins)",
             f"{few}(2 steps, 1 version pins)",
             f"{prose}(1 steps, 0 version pins)",
             f"{short}(1 steps, 0 version pins)",
         )
-        same(done.stderr.splitlines(), want)
-        same(done.stdout, "")
+        same(err.splitlines(), want)
+        same(out, "")
 
-    def test_not_utf8_is_an_error(self) -> None:
+    def test_not_utf8_is_an_error(self, capfd: pytest.CaptureFixture[str]) -> None:
         """A workflow that is not UTF-8 is refused by name, exit 2."""
         rel = self.plant("bad.yml", b"on: \xff\n")
-        done = self.helper(rel)
-        same(done.returncode, installer_pinned.EXIT_ERROR)
-        assert done.stderr.startswith(f"{TASK}: {rel}: cannot be read as UTF-8:"), (
-            done.stderr
-        )
+        status, out, err = self.helper(rel, capfd=capfd)
+        same(status, installer_pinned.EXIT_ERROR)
+        assert err.startswith(f"{TASK}: {rel}: cannot be read as UTF-8:"), err
 
-    def test_no_workflows_is_a_usage_error(self) -> None:
+    def test_no_workflows_is_a_usage_error(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """No workflow named: exit 2 with the usage line."""
-        done = self.helper()
-        same(done.returncode, installer_pinned.EXIT_ERROR)
+        status, out, err = self.helper(capfd=capfd)
+        same(status, installer_pinned.EXIT_ERROR)
         usage = f"{TASK}: usage: installer_pinned.py WORKFLOW..."
-        same(done.stderr.splitlines(), [usage])
+        same(err.splitlines(), [usage])

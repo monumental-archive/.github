@@ -91,7 +91,9 @@ def plant(root: Path, module: str, source: str, tests: str, setup: str = SETUP) 
 
 @pytest.fixture
 def leg(
-    call_main: Callable[..., Called], as_task: Callable[[str], None]
+    call_main: Callable[..., Called],
+    as_task: Callable[[str], None],
+    capfd: pytest.CaptureFixture[str],
 ) -> Callable[..., Called]:
     """Call the leg in a planted repository, as audit:mutants runs it.
 
@@ -103,16 +105,20 @@ def leg(
     support.tool("pytest")
 
     def call(root: Path, *argv: str) -> Called:
-        return call_main(lambda: mutants_python.main(list(argv)), cwd=root)
+        with pytest.MonkeyPatch.context() as patched:
+            patched.chdir(root)
+            status = mutants_python.main(list(argv))
+        out, err = capfd.readouterr()
+        return status, out, err
 
     return call
 
 
 def test_a_survivor_is_red_by_module_and_function_and_no_tests_by_name(
-    tmp_path: Path, leg: Callable[..., Called]
+    tmp_path: Path, leg: Callable[..., Called], capfd: pytest.CaptureFixture[str]
 ) -> None:
     """The real mutmut: `weak`'s survivors and `untested`'s mutants, named."""
-    done = leg(plant(tmp_path, "calc", CALC, CALC_TESTS))
+    done = leg(plant(tmp_path, "calc", CALC, CALC_TESTS), capfd=capfd)
     assert done.returncode == RED
     assert (
         "audit:mutants: pkg.calc.weak: 2 mutant(s) survived\n"
@@ -127,15 +133,17 @@ def test_a_survivor_is_red_by_module_and_function_and_no_tests_by_name(
     )
 
 
-def test_a_timeout_is_red(tmp_path: Path, leg: Callable[..., Called]) -> None:
+def test_a_timeout_is_red(
+    tmp_path: Path, leg: Callable[..., Called], capfd: pytest.CaptureFixture[str]
+) -> None:
     """`i += 1` made `i -= 1` or `i = 1` never ends: red, as a timeout, by name."""
-    done = leg(plant(tmp_path, "spin", SPIN, SPIN_TESTS))
-    assert done.returncode == RED
+    status, out, err = leg(plant(tmp_path, "spin", SPIN, SPIN_TESTS), capfd=capfd)
+    assert status == RED
     assert (
         "audit:mutants: 2 mutant(s) timeout: their tests ran past the time limit\n"
         "  pkg.spin.x_spin__mutmut_4\n"
         "  pkg.spin.x_spin__mutmut_5\n"
-    ) in done.stderr
+    ) in err
 
 
 @pytest.mark.parametrize(
@@ -173,11 +181,15 @@ def test_a_timeout_is_red(tmp_path: Path, leg: Callable[..., Called]) -> None:
     ],
 )
 def test_a_pragma_that_is_not_the_reasoned_line_form_is_red(
-    tmp_path: Path, leg: Callable[..., Called], comment: str, message: str
+    tmp_path: Path,
+    leg: Callable[..., Called],
+    comment: str,
+    message: str,
+    capfd: pytest.CaptureFixture[str],
 ) -> None:
     """Before anything runs: the site, and why."""
     source = CALC.replace("    return a + b\n", f"    return a + b  {comment}\n")
-    done = leg(plant(tmp_path, "calc", source, CALC_TESTS))
+    done = leg(plant(tmp_path, "calc", source, CALC_TESTS), capfd=capfd)
     assert done.returncode == RED
     assert done.stderr == (
         f"audit:mutants: pkg/calc.py:6: {message}\n"
@@ -187,12 +199,12 @@ def test_a_pragma_that_is_not_the_reasoned_line_form_is_red(
 
 
 def test_no_configuration_skips_clean_by_name(
-    tmp_path: Path, leg: Callable[..., Called]
+    tmp_path: Path, leg: Callable[..., Called], capfd: pytest.CaptureFixture[str]
 ) -> None:
     """No [mutmut] tracked: 0, the skip named, and a skipped row for the totals."""
     summary = tmp_path / "summary"
     root = plant(tmp_path / "repo", "calc", CALC, CALC_TESTS, setup="")
-    done = leg(root)
+    done = leg(root, capfd=capfd)
     assert done.returncode == 0
     assert done.stdout == (
         "audit:mutants: python: no mutmut configuration tracked"
@@ -209,19 +221,23 @@ def test_no_configuration_skips_clean_by_name(
     ],
 )
 def test_adopted_says_whether_the_section_is_tracked(
-    tmp_path: Path, leg: Callable[..., Called], setup: str, said: str
+    tmp_path: Path,
+    leg: Callable[..., Called],
+    setup: str,
+    said: str,
+    capfd: pytest.CaptureFixture[str],
 ) -> None:
     """The adoption job's output: true only for a tracked [mutmut]."""
-    done = leg(plant(tmp_path, "calc", CALC, CALC_TESTS, setup), "adopted")
+    done = leg(plant(tmp_path, "calc", CALC, CALC_TESTS, setup), "adopted", capfd=capfd)
     assert done.returncode == 0
     assert done.stdout == said
 
 
 def test_an_unknown_argument_is_a_usage_error(
-    tmp_path: Path, leg: Callable[..., Called]
+    tmp_path: Path, leg: Callable[..., Called], capfd: pytest.CaptureFixture[str]
 ) -> None:
     """Only `adopted` is a verb."""
-    done = leg(tmp_path, "plan")
+    done = leg(tmp_path, "plan", capfd=capfd)
     assert done.returncode == USAGE
     assert done.stderr == "audit:mutants: usage: belt mutants-python [adopted]\n"
 

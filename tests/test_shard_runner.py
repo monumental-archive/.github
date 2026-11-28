@@ -179,7 +179,7 @@ class TestRunner:
         self.bin.mkdir()
         self.reports = self.base / "reports"
         self.ran = self.base / "ran"
-        stubs = (
+        status, out, err = (
             ("vitest", VITEST),
             ("cargo", NEXTEST),
             ("pytest", PYTEST),

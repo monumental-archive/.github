@@ -15,6 +15,7 @@ Every git call in this file passes a scrubbed `env=`: the rows run under
 the very hook they are about.
 """
 
+import contextlib
 import os
 import pathlib
 import re
@@ -28,7 +29,6 @@ import pytest
 from belt import decoded, typed_std
 from belt import git_decoy as gd
 from tests import support
-import contextlib
 
 _HERE = support.MISE
 
@@ -152,7 +152,7 @@ def snapshot(repo: pathlib.Path) -> tuple[bytes, str]:
 @pytest.mark.usefixtures("_stack")
 class TestTask:
     """The `test` task's body, run over a planted tree."""
-    
+
     @pytest.fixture
     def _stack(self, request: pytest.FixtureRequest) -> None:
         """Hold the row's cleanups, undone last first after it ends."""
@@ -247,19 +247,22 @@ class TestHelper:
         """
         return {**CLEAN, "HOME": str(self.work), "XDG_CONFIG_HOME": str(self.work)}
 
-    def leak(self, script: str) -> tuple[int, str]:
+    def leak(
+        self, script: str, *, capfd: pytest.CaptureFixture[str]
+    ) -> tuple[int, str]:
         """Call the helper in-process to run a script under the decoy (#1697).
 
         Returns:
             The helper's exit status and its standard error.
 
         """
-        done = support.call(
-            lambda: gd.main(["run", str(self.decoy), "--", BASH, "-c", script]),
-            env=self.leak_env(),
-            cwd=self.work,
-        )
-        return done.returncode, done.stderr
+        with pytest.MonkeyPatch.context() as patched:
+            for name, value in (self.leak_env()).items():
+                patched.setenv(name, value)
+            patched.chdir(self.work)
+            status = gd.main(["run", str(self.decoy), "--", BASH, "-c", script])
+        out, err = capfd.readouterr()
+        return status, err
 
     def test_the_script_contract(self) -> None:
         """Started as a process, `run` hands back its command's status."""
@@ -276,27 +279,35 @@ class TestHelper:
         )
         assert (r.returncode, r.stderr) == (3, "")
 
-    def test_plant_makes_the_decoy_and_exits_0(self) -> None:
+    def test_plant_makes_the_decoy_and_exits_0(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """`plant DIR` makes a repository there: the task's first call."""
         fresh = self.work / "fresh"
         fresh.mkdir()
-        done = support.call(
-            lambda: gd.main(["plant", str(fresh)]), env=self.leak_env(), cwd=self.work
-        )
-        assert (done.returncode, done.stderr) == (0, "")
+        with pytest.MonkeyPatch.context() as patched:
+            for name, value in (self.leak_env()).items():
+                patched.setenv(name, value)
+            patched.chdir(self.work)
+            status = gd.main(["plant", str(fresh)])
+        out, err = capfd.readouterr()
+        assert (status, err) == (0, "")
         assert (fresh / ".git").is_dir()
 
-    def test_run_with_no_command_is_a_usage_error(self) -> None:
+    def test_run_with_no_command_is_a_usage_error(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """`run DIR` and nothing to run is argparse's exit 2, by name."""
-        done = support.call(
-            lambda: gd.main(["run", str(self.decoy)]),
-            env=self.leak_env(),
-            cwd=self.work,
-        )
-        assert done.returncode == 2
-        assert "run: no command after the decoy" in done.stderr
+        with pytest.MonkeyPatch.context() as patched:
+            for name, value in (self.leak_env()).items():
+                patched.setenv(name, value)
+            patched.chdir(self.work)
+            status = gd.main(["run", str(self.decoy)])
+        out, err = capfd.readouterr()
+        assert status == 2
+        assert "run: no command after the decoy" in err
 
-    def test_each_change_is_named(self) -> None:
+    def test_each_change_is_named(self, capfd: pytest.CaptureFixture[str]) -> None:
         """Commit, branch, switch and stage each red with what changed."""
         rows = [
             (f"{COMMIT} -q --allow-empty -m leaked", ["new commit: leaked"]),
@@ -310,20 +321,24 @@ class TestHelper:
         ]
         for script, wanted in rows:
             self.setUp()
-            status, err = self.leak(script)
+            status, err = self.leak(script, capfd=capfd)
             assert status == 1, err
             assert gd.MESSAGE in err
             for line in wanted:
                 assert line in err
 
-    def test_no_git_passes_the_status_through(self) -> None:
+    def test_no_git_passes_the_status_through(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A run that leaves the decoy alone answers with its own status."""
-        assert self.leak("exit 0") == (0, "")
-        status, err = self.leak("exit 3")
+        assert self.leak("exit 0", capfd=capfd) == (0, "")
+        status, err = self.leak("exit 3", capfd=capfd)
         assert status == 3
         assert gd.MESSAGE not in err
 
-    def test_the_child_sees_the_decoy_and_no_other_git(self) -> None:
+    def test_the_child_sees_the_decoy_and_no_other_git(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """GIT_DIR and GIT_INDEX_FILE name the decoy; GIT_WORK_TREE is unset."""
         script = (
             'test "$GIT_DIR" = "$D/.git" '
@@ -331,5 +346,7 @@ class TestHelper:
             '&& test -z "${GIT_WORK_TREE+set}" '
             '|| { echo "env: $(env | grep ^GIT_)" >&2; exit 9; }'
         )
-        status, err = self.leak(script.replace("$D", str(self.decoy.resolve())))
+        status, err = self.leak(
+            script.replace("$D", str(self.decoy.resolve())), capfd=capfd
+        )
         assert (status, err) == (0, "")

@@ -9,6 +9,7 @@ decoded from the belt's config in a scratch repository, every git call
 with a scrubbed environment (#857). The last row is the canon itself.
 """
 
+import contextlib
 import os
 import shutil
 import subprocess
@@ -22,7 +23,6 @@ import pytest
 from belt import coverage_exclusions as ce
 from belt import decoded
 from tests import support
-import contextlib
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -81,22 +81,29 @@ QUOTED = [
 ]
 
 
-def helper(root: Path, *paths: str) -> support.Called:
+def helper(
+    root: Path, *paths: str, capfd: pytest.CaptureFixture[str]
+) -> tuple[int, str, str]:
     """Call the helper's `main` in this process over `paths`, from `root` (#1696).
 
     Returns:
         The status `main` returned and what it wrote to each stream.
 
     """
-    return support.call(
-        lambda: ce.main([]), cwd=root, stdin="".join(f"{path}\0" for path in paths)
-    )
+    with pytest.MonkeyPatch.context() as patched:
+        patched.chdir(root)
+        patched.setattr(
+            sys, "stdin", io.StringIO("".join(f"{path}\0" for path in paths))
+        )
+        status = ce.main([])
+    out, err = capfd.readouterr()
+    return status, out, err
 
 
 @pytest.mark.usefixtures("_stack")
 class TestMarkers:
     """The helper over one planted file at a time."""
-    
+
     @pytest.fixture
     def _stack(self, request: pytest.FixtureRequest) -> None:
         """Hold the row's cleanups, undone last first after it ends."""
@@ -118,10 +125,14 @@ class TestMarkers:
 
     @pytest.mark.parametrize("name,body,rule", MARKERS)
     def test_each_marker_is_red_by_file_line_and_rule(
-        self, name: object, body: object, rule: object
+        self,
+        name: object,
+        body: object,
+        rule: object,
+        capfd: pytest.CaptureFixture[str],
     ) -> None:
         """Every marker of every measured language is a finding, located."""
-        r = helper(self.plant(name, body), name)
+        r = helper(self.plant(name, body), name, capfd=capfd)
         assert r.returncode == 1, r.stderr
         line = next(
             i
@@ -134,20 +145,22 @@ class TestMarkers:
 
     @pytest.mark.parametrize("name,body", QUOTED)
     def test_a_quoted_marker_is_text_not_an_exclusion(
-        self, name: object, body: object
+        self, name: object, body: object, capfd: pytest.CaptureFixture[str]
     ) -> None:
         """A marker inside a string literal is not a finding, in any language."""
-        r = helper(self.plant(name, body), name)
+        r = helper(self.plant(name, body), name, capfd=capfd)
         assert r.returncode == 0, r.stderr
         assert r.stderr == ""
 
-    def test_other_languages_are_not_read(self) -> None:
+    def test_other_languages_are_not_read(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A marker in a file of a language the belt does not measure passes."""
-        r = helper(self.plant("notes.md", f"{PRAGMA} cover\n"), "notes.md")
-        assert r.returncode == 0, r.stderr
-        assert (
-            r.stdout == "lint:coverage-exclusions: 1 file(s), no coverage exclusions\n"
+        status, out, err = helper(
+            self.plant("notes.md", f"{PRAGMA} cover\n"), "notes.md", capfd=capfd
         )
+        assert status == 0, err
+        assert out == "lint:coverage-exclusions: 1 file(s), no coverage exclusions\n"
 
     def test_the_helper_runs_as_a_script(self) -> None:
         """The script contract: it reads stdin, reports, and exits 1 on a marker."""
@@ -180,7 +193,7 @@ def task_body() -> str:
 @pytest.mark.usefixtures("_stack")
 class TestTask:
     """The task body, in a scratch repository."""
-    
+
     @pytest.fixture
     def _stack(self, request: pytest.FixtureRequest) -> None:
         """Hold the row's cleanups, undone last first after it ends."""
@@ -258,7 +271,7 @@ class TestMissingSibling:
     Both rows fail before #1522: the `_SPEC is None` guard could never
     run, so a missing sibling gave a raw FileNotFoundError traceback.
     """
-    
+
     @pytest.fixture
     def _stack(self, request: pytest.FixtureRequest) -> None:
         """Hold the row's cleanups, undone last first after it ends."""
@@ -334,7 +347,9 @@ class TestMissingSibling:
 class TestCanon:
     """The canon holds its own rule."""
 
-    def test_the_canon_carries_no_coverage_exclusion(self) -> None:
+    def test_the_canon_carries_no_coverage_exclusion(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Every tracked source file in this repository is clean.
 
         The row that fails before #1522: seven `_SPEC is None` guards
@@ -344,5 +359,5 @@ class TestCanon:
         listing = support.tracked(
             root, ":!vendor/**", "*.py", "*.rs", "*.go", "*.ts", "*.js", **GIT_CONFIG
         )
-        r = helper(root, *listing)
-        assert r.returncode == 0, r.stderr
+        status, out, err = helper(root, *listing, capfd=capfd)
+        assert status == 0, err

@@ -176,8 +176,11 @@ def plant(root: Path, files: dict[str, str], untracked: dict[str, str]) -> None:
 
 
 def check(
-    files: dict[str, str], untracked: dict[str, str] | None = None
-) -> support.Called:
+    files: dict[str, str],
+    untracked: dict[str, str] | None = None,
+    *,
+    capfd: pytest.CaptureFixture[str],
+) -> tuple[int, str, str]:
     """Call the helper in-process with what the task body hands it (#1697).
 
     The body finds the tree's config and lock and pipes its tracked
@@ -201,18 +204,19 @@ def check(
         except RuntimeError:
             names = []  # the body's listing is empty here too
         listing = "".join(f"{name}\0" for name in names)
-        return support.call(
-            lambda: lock_platforms.main([
+        with pytest.MonkeyPatch.context() as patched:
+            patched.chdir(root)
+            patched.setattr(sys, "stdin", io.StringIO(listing))
+            status = lock_platforms.main([
                 "--defaults",
                 str(DEFAULTS),
                 "--config",
                 "mise.toml",
                 "--lock",
                 "mise.lock",
-            ]),
-            cwd=root,
-            stdin=listing,
-        )
+            ])
+        out, err = capfd.readouterr()
+        return status, out, err
 
 
 def tree(**overrides: str | None) -> dict[str, str]:
@@ -235,21 +239,32 @@ def tree(**overrides: str | None) -> dict[str, str]:
 class TestCase:
     """Assertions shared by the rows."""
 
-    def assert_red(self, files: dict[str, str], message: str = RED) -> None:
+    def assert_red(
+        self,
+        files: dict[str, str],
+        message: str = RED,
+        *,
+        capfd: pytest.CaptureFixture[str],
+    ) -> None:
         """Assert exit 1 with exactly `message` on stderr."""
-        done = check(files)
-        assert done.returncode == 1, done.stdout + done.stderr
-        assert done.stderr == message
-        assert done.stdout == ""
+        status, out, err = check(files, capfd=capfd)
+        assert status == 1, out + err
+        assert err == message
+        assert out == ""
 
     def assert_out(
-        self, files: dict[str, str], line: str, **kw: dict[str, str]
+        self,
+        files: dict[str, str],
+        line: str,
+        *,
+        capfd: pytest.CaptureFixture[str],
+        **kw: dict[str, str],
     ) -> None:
         """Assert exit 0 with exactly one stdout line and no stderr."""
-        done = check(files, **kw)
-        assert done.returncode == 0, done.stderr
-        assert done.stdout == f"{NAME}: {line}\n"
-        assert done.stderr == ""
+        status, out, err = check(files, **kw, capfd=capfd)
+        assert status == 0, err
+        assert out == f"{NAME}: {line}\n"
+        assert err == ""
 
     def assert_body_out(self, files: dict[str, str], line: str) -> None:
         """Assert the task body's own skip line: its subject is the body."""
@@ -258,12 +273,20 @@ class TestCase:
         assert done.stdout == f"{NAME}: {line}\n"
         assert done.stderr == ""
 
-    def assert_ok(self, files: dict[str, str], count: int, platforms: str) -> None:
+    def assert_ok(
+        self,
+        files: dict[str, str],
+        count: int,
+        platforms: str,
+        *,
+        capfd: pytest.CaptureFixture[str],
+    ) -> None:
         """Assert the green summary line."""
         self.assert_out(
             files,
             f"{count} configured entries with platform tables in mise.lock"
             f" cover {platforms}",
+            capfd=capfd,
         )
 
 
@@ -273,9 +296,9 @@ ALL = "linux-arm64,linux-x64,macos-arm64,macos-x64"
 class TestGuards(TestCase):
     """Each guard planted both directions against the baseline."""
 
-    def test_the_baseline_is_red(self) -> None:
+    def test_the_baseline_is_red(self, capfd: pytest.CaptureFixture[str]) -> None:
         """Every guard's input present: the v1.3.0 shape reds."""
-        self.assert_red(tree())
+        self.assert_red(tree(), capfd=capfd)
 
     def test_no_mise_config_skips(self) -> None:
         """No config: nothing installs, nothing to cover."""
@@ -298,76 +321,94 @@ class TestGuards(TestCase):
         done = lint(tree(lock=None), untracked={"mise.lock": LOCK})
         assert (0, f"{NAME}: no mise.lock, skipped\n") == (done.returncode, done.stdout)
 
-    def test_no_tracked_workflow_skips(self) -> None:
+    def test_no_tracked_workflow_skips(self, capfd: pytest.CaptureFixture[str]) -> None:
         """No workflows at all: no publish stub."""
-        self.assert_out(tree(stub=None), "no publish stub, skipped")
+        self.assert_out(tree(stub=None), "no publish stub, skipped", capfd=capfd)
 
-    def test_an_untracked_stub_is_not_read(self) -> None:
+    def test_an_untracked_stub_is_not_read(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Tracked files only: a stub on disk but not in git is not the stub."""
         self.assert_out(
             tree(stub=None),
             "no publish stub, skipped",
             untracked={STUB_PATH: RUST_BINARY},
+            capfd=capfd,
         )
 
-    def test_a_workflow_calling_something_else_skips(self) -> None:
+    def test_a_workflow_calling_something_else_skips(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Only a caller of publish.yml is the publish stub."""
         other = RUST_BINARY.replace("workflows/publish.yml", "workflows/release.yml")
-        self.assert_out(tree(stub=other), "no publish stub, skipped")
+        self.assert_out(tree(stub=other), "no publish stub, skipped", capfd=capfd)
 
-    def test_no_binary_class_skips(self) -> None:
+    def test_no_binary_class_skips(self, capfd: pytest.CaptureFixture[str]) -> None:
         """The canon's own shape: source-archive builds on no target runner."""
         self.assert_out(
             tree(stub=stub("      classes: source-archive\n")),
             f"{STUB_PATH} declares no binary class, skipped",
+            capfd=capfd,
         )
 
 
 class TestGreen(TestCase):
     """Shapes the lint must pass."""
 
-    def test_all_four_platforms_pass(self) -> None:
+    def test_all_four_platforms_pass(self, capfd: pytest.CaptureFixture[str]) -> None:
         """The fixed lock: edtf after #185."""
-        self.assert_ok(tree(lock=entry("node", "26.5.1", FOUR)), 1, ALL)
+        self.assert_ok(tree(lock=entry("node", "26.5.1", FOUR)), 1, ALL, capfd=capfd)
 
-    def test_a_tool_without_platform_tables_is_outside(self) -> None:
+    def test_a_tool_without_platform_tables_is_outside(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """cargo: and rust entries carry no tables; nothing to judge."""
         lock = entry("node", "26.5.1", FOUR) + entry("cargo:cargo-fuzz", "0.13.2", ())
-        self.assert_ok(tree(lock=lock), 1, ALL)
+        self.assert_ok(tree(lock=lock), 1, ALL, capfd=capfd)
 
-    def test_a_stale_lock_entry_is_not_installed(self) -> None:
+    def test_a_stale_lock_entry_is_not_installed(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """v1.3.0's lock carried nine unconfigured entries; the leg named none."""
         lock = entry("node", "26.5.1", FOUR) + entry("gitleaks", "8.30.1", THREE)
-        self.assert_ok(tree(lock=lock), 1, ALL)
+        self.assert_ok(tree(lock=lock), 1, ALL, capfd=capfd)
 
-    def test_an_os_restricted_tool_is_held_only_where_it_installs(self) -> None:
+    def test_an_os_restricted_tool_is_held_only_where_it_installs(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Edtf's icu is macos-only; its linux tables are not owed."""
         config = CONFIG + ICU
         lock = entry("node", "26.5.1", FOUR) + entry(
             "github:unicode-org/icu", "78.3", ("macos-arm64", "macos-x64")
         )
-        self.assert_ok(tree(config=config, lock=lock), 2, ALL)
+        self.assert_ok(tree(config=config, lock=lock), 2, ALL, capfd=capfd)
 
-    def test_a_declared_subset_is_all_that_is_owed(self) -> None:
+    def test_a_declared_subset_is_all_that_is_owed(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """binary-targets read from the stub override the canon default."""
         subset = stub(
             "      classes: rust-binary\n"
             '      binary-targets: "x86_64-unknown-linux-musl,aarch64-apple-darwin"\n'
         )
-        self.assert_ok(tree(stub=subset), 1, "linux-x64,macos-arm64")
+        self.assert_ok(tree(stub=subset), 1, "linux-x64,macos-arm64", capfd=capfd)
 
-    def test_the_canons_local_caller_is_read(self) -> None:
+    def test_the_canons_local_caller_is_read(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """self-publish.yml's `uses: ./.github/workflows/publish.yml` counts."""
         local = stub(
             "      classes: rust-binary\n", uses="./.github/workflows/publish.yml"
         )
-        self.assert_red(tree(stub=local))
+        self.assert_red(tree(stub=local), capfd=capfd)
 
 
 class TestRed(TestCase):
     """Planted defects red with the stated message."""
 
-    def test_an_os_restricted_tool_missing_its_own_platform_is_red(self) -> None:
+    def test_an_os_restricted_tool_missing_its_own_platform_is_red(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Os = ["macos"] still owes macos-x64."""
         config = "[tools]\n" + ICU
         lock = entry("github:unicode-org/icu", "78.3", ("macos-arm64",))
@@ -376,16 +417,22 @@ class TestRed(TestCase):
             RED.replace("node@26.5.1", "github:unicode-org/icu@78.3").replace(
                 "macos-x64 node", "macos-x64 github:unicode-org/icu"
             ),
+            capfd=capfd,
         )
 
-    def test_go_binary_reads_its_own_input(self) -> None:
+    def test_go_binary_reads_its_own_input(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """go-binary's default is go-targets', named as such."""
         self.assert_red(
             tree(stub=stub("      classes: go-binary\n")),
             RED.replace("rust-binary: binary-targets", "go-binary: go-targets"),
+            capfd=capfd,
         )
 
-    def test_every_missing_platform_gets_its_command(self) -> None:
+    def test_every_missing_platform_gets_its_command(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Two platforms missing: two resolve lines, sorted."""
         lock = entry("node", "26.5.1", ("linux-x64", "macos-arm64"))
         source = (
@@ -404,18 +451,21 @@ class TestRed(TestCase):
             "  and fails there, after the tag is minted (#810). Resolve them with:\n"
             "    mise lock --platform linux-arm64 node\n"
             "    mise lock --platform macos-x64 node\n",
+            capfd=capfd,
         )
 
 
 class TestUnreadable(TestCase):
     """A declaration that cannot be read is refused, never passed."""
 
-    def assert_refused(self, files: dict[str, str], detail: str) -> None:
+    def assert_refused(
+        self, files: dict[str, str], detail: str, *, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Assert exit 2 and the refusal naming `detail`."""
-        done = check(files)
-        assert done.returncode == 2, done.stdout
-        assert done.stdout == ""
-        first = done.stderr.splitlines()[0]
+        status, out, err = check(files, capfd=capfd)
+        assert status == 2, out
+        assert out == ""
+        first = err.splitlines()[0]
         assert first.startswith(f"{NAME}: cannot read the declared release targets"), (
             first
         )
@@ -449,7 +499,7 @@ class TestUnreadable(TestCase):
         assert lines[0].startswith(f"{NAME}: {said}"), done.stderr
         assert lines[1] == "  a file this cannot read is not one it may pass"
 
-    def test_a_block_scalar_is_refused(self) -> None:
+    def test_a_block_scalar_is_refused(self, capfd: pytest.CaptureFixture[str]) -> None:
         """A folded list would otherwise read as no targets."""
         folded = stub(
             "      classes: rust-binary\n"
@@ -457,35 +507,41 @@ class TestUnreadable(TestCase):
             "        x86_64-apple-darwin\n"
         )
         self.assert_refused(
-            tree(stub=folded), "'>-' is not a plain comma-separated scalar"
+            tree(stub=folded), "'>-' is not a plain comma-separated scalar", capfd=capfd
         )
 
-    def test_an_expression_is_refused(self) -> None:
+    def test_an_expression_is_refused(self, capfd: pytest.CaptureFixture[str]) -> None:
         """A value known only at run time cannot be checked here."""
         expr = stub("      classes: ${{ vars.CLASSES }}\n")
-        self.assert_refused(tree(stub=expr), "is not a plain comma-separated scalar")
+        self.assert_refused(
+            tree(stub=expr), "is not a plain comma-separated scalar", capfd=capfd
+        )
 
-    def test_an_unknown_target_is_refused(self) -> None:
+    def test_an_unknown_target_is_refused(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """No runner platform known: the build would refuse it too."""
         win = stub(
             "      classes: rust-binary\n      binary-targets: x86_64-pc-windows-msvc\n"
         )
         self.assert_refused(
-            tree(stub=win), "'x86_64-pc-windows-msvc' has no known runner platform"
+            tree(stub=win),
+            "'x86_64-pc-windows-msvc' has no known runner platform",
+            capfd=capfd,
         )
 
 
 class TestDefaults:
     """The canon's declared defaults, read from the real publish.yml."""
 
-    def test_every_default_target_maps(self) -> None:
+    def test_every_default_target_maps(self, capfd: pytest.CaptureFixture[str]) -> None:
         """Each canon default target has a platform key — all four, both classes."""
         lock = entry("node", "26.5.1", ("windows-x64",))
         both = stub("      classes: rust-binary,go-binary\n")
-        done = check(tree(lock=lock, stub=both))
-        assert done.returncode == 1, done.stderr
+        status, out, err = check(tree(lock=lock, stub=both), capfd=capfd)
+        assert status == 1, err
         for key in ALL.split(","):
-            assert f"  {key}: node@26.5.1\n" in done.stderr
+            assert f"  {key}: node@26.5.1\n" in err
 
 
 class TestReadDocuments:
@@ -540,7 +596,9 @@ class TestReadDocuments:
         ) == err
 
 
-def located(files: dict[str, str]) -> support.Called:
+def located(
+    files: dict[str, str], *, capfd: pytest.CaptureFixture[str]
+) -> tuple[int, str, str]:
     """Call the helper as the task body does: no --config, it finds them.
 
     Returns:
@@ -550,11 +608,12 @@ def located(files: dict[str, str]) -> support.Called:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         plant(root, files, {})
-        return support.call(
-            lambda: lock_platforms.main(["--defaults", str(DEFAULTS)]),
-            cwd=root,
-            stdin=f"{STUB_PATH}\0",
-        )
+        with pytest.MonkeyPatch.context() as patched:
+            patched.chdir(root)
+            patched.setattr(sys, "stdin", io.StringIO(f"{STUB_PATH}\0"))
+            status = lock_platforms.main(["--defaults", str(DEFAULTS)])
+        out, err = capfd.readouterr()
+        return status, out, err
 
 
 OK_LOCK = entry("node", "26.5.1", FOUR)
@@ -563,23 +622,31 @@ OK_LOCK = entry("node", "26.5.1", FOUR)
 class TestLocated:
     """The helper finds the tree's config and the lock beside it (#1911)."""
 
-    def assert_skip(self, files: dict[str, str], line: str) -> None:
+    def assert_skip(
+        self, files: dict[str, str], line: str, *, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Assert a skip, said on stdout, with nothing on stderr."""
-        done = located(files)
-        assert done.returncode == 0, done.stderr
-        assert done.stdout == f"{NAME}: {line}\n"
-        assert done.stderr == ""
+        status, out, err = located(files, capfd=capfd)
+        assert status == 0, err
+        assert out == f"{NAME}: {line}\n"
+        assert err == ""
 
-    def test_no_config_skips(self) -> None:
+    def test_no_config_skips(self, capfd: pytest.CaptureFixture[str]) -> None:
         """None of the three configs: a skip, the stub never read."""
-        self.assert_skip({STUB_PATH: RUST_BINARY}, "no mise config, skipped")
+        self.assert_skip(
+            {STUB_PATH: RUST_BINARY}, "no mise config, skipped", capfd=capfd
+        )
 
-    def test_no_lock_beside_the_config_skips(self) -> None:
+    def test_no_lock_beside_the_config_skips(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A lock beside another config is not this config's lock."""
         files = {STUB_PATH: RUST_BINARY, "mise/config.toml": CONFIG, "mise.lock": LOCK}
-        self.assert_skip(files, "no mise/mise.lock, skipped")
+        self.assert_skip(files, "no mise/mise.lock, skipped", capfd=capfd)
 
-    def test_each_config_is_found_in_order(self) -> None:
+    def test_each_config_is_found_in_order(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """mise/config.toml, then mise.toml, then .mise.toml; its lock beside."""
         ok = (
             "1 configured entries with platform tables in {} cover"
@@ -603,19 +670,23 @@ class TestLocated:
             ),
         }
         for row, (found, beside, line) in rows.items():
-            self.assert_skip({STUB_PATH: RUST_BINARY} | found | beside, line)
+            self.assert_skip(
+                {STUB_PATH: RUST_BINARY} | found | beside, line, capfd=capfd
+            )
 
-    def test_a_found_lock_is_named_in_the_red(self) -> None:
+    def test_a_found_lock_is_named_in_the_red(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """The nested lock short of a platform: red, the lock named."""
         files = {
             STUB_PATH: RUST_BINARY,
             "mise/config.toml": CONFIG,
             "mise/mise.lock": LOCK,
         }
-        done = located(files)
-        assert done.returncode == 1, done.stdout + done.stderr
-        assert done.stderr == RED.replace("mise.lock", "mise/mise.lock", 1)
-        assert done.stdout == ""
+        status, out, err = located(files, capfd=capfd)
+        assert status == 1, out + err
+        assert err == RED.replace("mise.lock", "mise/mise.lock", 1)
+        assert out == ""
 
 
 class TestScript:

@@ -12,6 +12,7 @@ is a branch of the TASK, not the helper, and a guard that skips when it
 should run looks like success.
 """
 
+import contextlib
 import io
 import os
 import subprocess
@@ -26,7 +27,6 @@ import pytest
 from belt import decoded
 from belt import embedded_shell as es
 from tests import support
-import contextlib
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -123,7 +123,7 @@ class Tree:
 @pytest.mark.usefixtures("_stack")
 class TestCeiling:
     """The Done-when rows of #1352, one guard branch each."""
-    
+
     @pytest.fixture
     def _stack(self, request: pytest.FixtureRequest) -> None:
         """Hold the row's cleanups, undone last first after it ends."""
@@ -276,10 +276,25 @@ def folded(name: str, lines: int, header: str = ">-") -> str:
     return f"- name: {name}\n  run: {header}\n{body}"
 
 
+WHAT_SHELLCHECK_READS_AND_HOW_ROWS = [
+    ("|", [False]),
+    ("|-", [False]),
+    ("|+", [False]),
+    ("|2", [False]),
+    ("|2-", [False]),
+    (">", [True]),
+    (">-", [True]),
+    (">+", [True]),
+    (">2", [True]),
+    ("| # zizmor: ignore[github-env]", [False]),
+    (">- # a note", [True]),
+]
+
+
 @pytest.mark.usefixtures("_stack")
 class TestHeaders:
     """Every block-scalar header is counted; shellcheck reads `|` and `|-`."""
-    
+
     @pytest.fixture
     def _stack(self, request: pytest.FixtureRequest) -> None:
         """Hold the row's cleanups, undone last first after it ends."""
@@ -321,31 +336,20 @@ class TestHeaders:
                 [run] = read_runs(workflow(folded("H", 16, header + comment)))
                 assert (run.style, es.weight(run.source)) == (style, 16)
 
-    def test_what_shellcheck_reads_and_how(self) -> None:
+    @pytest.mark.parametrize(("header", "folds"), WHAT_SHELLCHECK_READS_AND_HOW_ROWS)
+    def test_what_shellcheck_reads_and_how(
+        self, header: str, folds: list[object]
+    ) -> None:
         """Every literal header is read as written, every folded one folded.
 
         A comment after the indicator changes nothing about either.
         """
-        rows = [
-            ("|", [False]),
-            ("|-", [False]),
-            ("|+", [False]),
-            ("|2", [False]),
-            ("|2-", [False]),
-            (">", [True]),
-            (">-", [True]),
-            (">+", [True]),
-            (">2", [True]),
-            ("| # zizmor: ignore[github-env]", [False]),
-            (">- # a note", [True]),
-        ]
-        for header, folds in rows:
-            with self.subTest(header=header), TemporaryDirectory() as tmp:
-                p = Path(tmp) / "w.yml"
-                p.write_text(workflow(folded("H", 3, header)), encoding="utf-8")
-                read = [r.style == es.FOLDED for r in es.linted(p)]
-                assert read == folds
-                assert es.weight(next(es.runs(p)).source) == 3
+        with TemporaryDirectory() as tmp:
+            p = Path(tmp) / "w.yml"
+            p.write_text(workflow(folded("H", 3, header)), encoding="utf-8")
+            read = [r.style == es.FOLDED for r in es.linted(p)]
+            assert read == folds
+            assert es.weight(next(es.runs(p)).source) == 3
 
     def test_mint_doi_folded_block_is_seen(self) -> None:
         """The canon's one `>-` block is read and counted (3 lines)."""
@@ -372,10 +376,18 @@ def action(header: str, body: str) -> str:
     )
 
 
+A_FOLDED_BLOCK_IS_WEIGHED_BY_ITS_LINES_ROWS = [
+    ("a\nb", 2),
+    ("a\n\nb", 2),
+    ("a\n  b\nc", 3),
+    ("# c\na\nb", 2),
+]
+
+
 @pytest.mark.usefixtures("_stack")
 class TestFolded:
     """#1396: shellcheck reads a folded block as bash receives it."""
-    
+
     @pytest.fixture
     def _stack(self, request: pytest.FixtureRequest) -> None:
         """Hold the row's cleanups, undone last first after it ends."""
@@ -453,21 +465,19 @@ class TestFolded:
         assert n == 1
         assert out == action("| # keep", "if true; then echo x; fi")
 
-    def test_a_folded_block_is_weighed_by_its_lines(self) -> None:
+    @pytest.mark.parametrize(
+        ("body", "lines"), A_FOLDED_BLOCK_IS_WEIGHED_BY_ITS_LINES_ROWS
+    )
+    def test_a_folded_block_is_weighed_by_its_lines(
+        self, body: str, lines: int
+    ) -> None:
         """Folding joins lines; the ceiling counts the ones the file holds."""
-        rows = [
-            ("a\nb", 2),
-            ("a\n\nb", 2),
-            ("a\n  b\nc", 3),
-            ("# c\na\nb", 2),
-        ]
-        for body, lines in rows:
-            with self.subTest(body=body), TemporaryDirectory() as tmp:
-                p = Path(tmp) / "action.yml"
-                p.write_text(action(">", body) + "    - run: echo b\n", "utf-8")
-                found = list(es.runs(p))
-                assert es.weight(found[0].source) == lines
-                assert found[1].source == "echo b\n"
+        with TemporaryDirectory() as tmp:
+            p = Path(tmp) / "action.yml"
+            p.write_text(action(">", body) + "    - run: echo b\n", "utf-8")
+            found = list(es.runs(p))
+            assert es.weight(found[0].source) == lines
+            assert found[1].source == "echo b\n"
 
 
 @pytest.mark.usefixtures("_stack")
@@ -478,7 +488,7 @@ class TestParser:
     headers with a line regex, so an anchored header, a single-line
     value, a flow mapping and a quoted key each gave no block at all.
     """
-    
+
     @pytest.fixture
     def _stack(self, request: pytest.FixtureRequest) -> None:
         """Hold the row's cleanups, undone last first after it ends."""
@@ -569,21 +579,27 @@ class TestParser:
         assert es.rewrite(path) == 0
         assert path.read_text(encoding="utf-8") == text
 
-    def test_a_file_yq_cannot_parse_is_refused_by_name(self) -> None:
+    def test_a_file_yq_cannot_parse_is_refused_by_name(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Not YAML: exit 1 naming the file, never an empty clean run."""
         with TemporaryDirectory() as tmp:
             path = Path(tmp) / "w.yml"
             path.write_text("on: [push\n", encoding="utf-8")
-            done = support.call(lambda: es.main([str(path)]))
+            status = es.main([str(path)])
+            out, err = capfd.readouterr()
             debt = Path(tmp) / "debt.txt"
-            ceiling = support.call(
-                lambda: es.main(["--ceiling", str(debt), str(path)]),
-                env=support.env(MISE_TASK_NAME="lint:workflow-shell"),
-            )
-        assert done.returncode == 1
-        assert done.stderr.startswith(f"{TASK}: {path}: ")
-        assert ceiling.returncode == 1
-        assert ceiling.stderr.startswith(f"lint:workflow-shell: {path}: ")
+            with pytest.MonkeyPatch.context() as patched:
+                for name, value in (
+                    support.env(MISE_TASK_NAME="lint:workflow-shell")
+                ).items():
+                    patched.setenv(name, value)
+                status = es.main(["--ceiling", str(debt), str(path)])
+            out, err = capfd.readouterr()
+        assert status == 1
+        assert err.startswith(f"{TASK}: {path}: ")
+        assert status == 1
+        assert err.startswith(f"lint:workflow-shell: {path}: ")
 
     def test_fix_mode_rewrites_a_literal_block_byte_for_byte(self) -> None:
         """A commented `|2+` header with trailing blanks: only the body moves.
@@ -631,7 +647,7 @@ class TestParser:
 @pytest.mark.usefixtures("_stack")
 class TestOrgConfig:
     """The org's shellcheck settings are the ones applied (#696, #733)."""
-    
+
     @pytest.fixture
     def _stack(self, request: pytest.FixtureRequest) -> None:
         """Hold the row's cleanups, undone last first after it ends."""
@@ -746,7 +762,7 @@ def blank_after(first: str) -> str:
 @pytest.mark.usefixtures("_stack")
 class TestTrailingBlank:
     """#1431: blank lines after a block are YAML layout, not shell."""
-    
+
     @pytest.fixture
     def _stack(self, request: pytest.FixtureRequest) -> None:
         """Hold the row's cleanups, undone last first after it ends."""
@@ -798,34 +814,36 @@ class TestTrailingBlank:
         )
 
 
+MALFORMED_LINES_ROWS = [
+    ("w.yml\tBig\t16\n", "this line has 3 field(s)"),
+    ("w.yml\t\t16\t# #1\n", "this line has 4 field(s)"),
+    ("w.yml\tBig\t15\t# #1\n", "'15' is not a line count over the 15-line"),
+    ("w.yml\tBig\tmany\t# #1\n", "'many' is not a line count"),
+    # A non-ASCII digit: isdigit took it and int() raised (#1555).
+    ("w.yml\tBig\t\u00b2\t# #1\n", "'\u00b2' is not a line count"),
+    ("w.yml\tBig\t16\tsoon #1\n", "the note is a `#` comment naming the issue"),
+    ("w.yml\tBig\t16\t# later\n", "the note is a `#` comment naming the issue"),
+    (
+        "w.yml\tBig\t16\t# canon helper: #1352\n",
+        "a note naming #1352 says `unassigned`: name the issue that removes",
+    ),
+]
+
+
 class TestDebtFile:
     """Lines of the debt file that are not entries are red, by line."""
 
-    def test_malformed_lines(self) -> None:
+    @pytest.mark.parametrize(("line", "message"), MALFORMED_LINES_ROWS)
+    def test_malformed_lines(self, line: str, message: str) -> None:
         """Field count, count and note are each refused with their reason."""
-        rows = [
-            ("w.yml\tBig\t16\n", "this line has 3 field(s)"),
-            ("w.yml\t\t16\t# #1\n", "this line has 4 field(s)"),
-            ("w.yml\tBig\t15\t# #1\n", "'15' is not a line count over the 15-line"),
-            ("w.yml\tBig\tmany\t# #1\n", "'many' is not a line count"),
-            # A non-ASCII digit: isdigit took it and int() raised (#1555).
-            ("w.yml\tBig\t\u00b2\t# #1\n", "'\u00b2' is not a line count"),
-            ("w.yml\tBig\t16\tsoon #1\n", "the note is a `#` comment naming the issue"),
-            ("w.yml\tBig\t16\t# later\n", "the note is a `#` comment naming the issue"),
-            (
-                "w.yml\tBig\t16\t# canon helper: #1352\n",
-                "a note naming #1352 says `unassigned`: name the issue that removes",
-            ),
-        ]
-        for line, message in rows:
-            with self.subTest(line=line), TemporaryDirectory() as tmp:
-                debt = Path(tmp) / "debt.txt"
-                debt.write_text("# header\n\n" + line, encoding="utf-8")
-                entries, errors = es.read_debt(debt)
-                assert entries == NOTHING
-                assert len(errors) == 1
-                assert errors[0].startswith(f"{debt}:3: "), errors[0]
-                assert message in errors[0]
+        with TemporaryDirectory() as tmp:
+            debt = Path(tmp) / "debt.txt"
+            debt.write_text("# header\n\n" + line, encoding="utf-8")
+            entries, errors = es.read_debt(debt)
+            assert entries == NOTHING
+            assert len(errors) == 1
+            assert errors[0].startswith(f"{debt}:3: "), errors[0]
+            assert message in errors[0]
 
     def test_umbrella_with_unassigned_is_an_entry(self) -> None:
         """#1352 with `unassigned` reads; a longer number is another issue."""
@@ -977,7 +995,7 @@ def run_task(root: Path, name: str) -> subprocess.CompletedProcess[str]:
 @pytest.mark.usefixtures("_stack")
 class TestTask:
     """The task bodies, run as mise runs them, in a scratch repository."""
-    
+
     @pytest.fixture
     def _stack(self, request: pytest.FixtureRequest) -> None:
         """Hold the row's cleanups, undone last first after it ends."""
@@ -1275,7 +1293,7 @@ class TestTaskShellTask:
     The first row fails before #1544: on main the belt defines neither
     task, so decoding the body raises KeyError.
     """
-    
+
     @pytest.fixture
     def _stack(self, request: pytest.FixtureRequest) -> None:
         """Hold the row's cleanups, undone last first after it ends."""
@@ -1348,17 +1366,19 @@ class TestCli:
     the helper as a process.
     """
 
-    def test_exit_status(self) -> None:
+    def test_exit_status(self, capfd: pytest.CaptureFixture[str]) -> None:
         """Red is exit 1 with the finding on stderr; green is exit 0."""
         with TemporaryDirectory() as tmp:
             t = Tree(Path(tmp), workflow(step("Big", 16)), None)
             argv = ["--ceiling", str(t.debt), str(t.wf)]
-            red = support.call(lambda: es.main(argv))
+            status = es.main(argv)
+            out, err = capfd.readouterr()
             t.debt.write_text(t.entry("Big", 16), encoding="utf-8")
-            green = support.call(lambda: es.main(argv))
-        assert red.returncode == 1
-        assert "step 'Big' holds a run: block of 16 lines" in red.stderr
-        assert green.returncode == 0, green.stderr
+            status = es.main(argv)
+            out, err = capfd.readouterr()
+        assert status == 1
+        assert "step 'Big' holds a run: block of 16 lines" in err
+        assert status == 0, err
 
     def test_task_ceiling_exit_status(self) -> None:
         """Started as a process: `--task-ceiling` red, then green when listed.

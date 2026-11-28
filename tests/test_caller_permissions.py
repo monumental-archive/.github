@@ -169,7 +169,9 @@ class TestPlanted:
             return []
         return self.log.read_text(encoding="utf-8").splitlines()
 
-    def helper(self, *argv: str) -> support.Called:
+    def helper(
+        self, *argv: str, capfd: pytest.CaptureFixture[str]
+    ) -> tuple[int, str, str]:
         """Call the helper's main in the planted tree.
 
         Returns:
@@ -177,9 +179,13 @@ class TestPlanted:
 
         """
         args = list(argv)
-        return support.call(
-            lambda: caller_permissions.main(args), env=self.env, cwd=self.tree
-        )
+        with pytest.MonkeyPatch.context() as patched:
+            for name, value in self.env.items():
+                patched.setenv(name, value)
+            patched.chdir(self.tree)
+            status = caller_permissions.main(args)
+        out, err = capfd.readouterr()
+        return status, out, err
 
     def task(self) -> subprocess.CompletedProcess[str]:
         """Run the task body in the planted tree.
@@ -243,24 +249,26 @@ class TestTask(TestPlanted):
 class TestHelper(TestPlanted):
     """The helper's branches, called in this process."""
 
-    def test_stele_missing_is_red(self) -> None:
+    def test_stele_missing_is_red(self, capfd: pytest.CaptureFixture[str]) -> None:
         """No stele on PATH: red by name, nothing run."""
         rel = self.plant("ci.yml")
         self.env["PATH"] = str(self.tree)
-        done = self.helper(CANON, rel)
-        same(done.returncode, caller_permissions.EXIT_RED)
-        same(done.stdout, "")
+        status, out, err = self.helper(CANON, rel, capfd=capfd)
+        same(status, caller_permissions.EXIT_RED)
+        same(out, "")
         expected = ["lint:caller-permissions: stele missing from the belt"]
-        same(done.stderr.splitlines(), expected)
+        same(err.splitlines(), expected)
         same(self.logged(), [])
 
-    def test_a_short_grant_is_red_with_the_fix(self) -> None:
+    def test_a_short_grant_is_red_with_the_fix(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A FAIL from stele: its findings, its verdict, then the fix."""
         rel = self.plant("ci.yml")
         self.answer(FAIL, 1)
-        done = self.helper(CANON, rel)
-        same(done.returncode, caller_permissions.EXIT_RED)
-        same(done.stdout.splitlines(), ["lint:caller-permissions: stele: FAIL"])
+        status, out, err = self.helper(CANON, rel, capfd=capfd)
+        same(status, caller_permissions.EXIT_RED)
+        same(out.splitlines(), ["lint:caller-permissions: stele: FAIL"])
         expected = [
             "stub stele: walking",
             "lint:caller-permissions: .github/workflows/release.yml: caller-grant",
@@ -268,22 +276,24 @@ class TestHelper(TestPlanted):
             "  actual: absent",
             *FIX,
         ]
-        same(done.stderr.splitlines(), expected)
+        same(err.splitlines(), expected)
         same(self.logged(), [CALL])
 
-    def test_a_pass_is_quiet(self) -> None:
+    def test_a_pass_is_quiet(self, capfd: pytest.CaptureFixture[str]) -> None:
         """A PASS from stele: its report alone, exit 0."""
         rel = self.plant("ci.yml")
-        done = self.helper(CANON, rel)
-        same(done.returncode, 0, done.stderr)
-        same(done.stdout.splitlines(), ["lint:caller-permissions: stele: PASS"])
+        status, out, err = self.helper(CANON, rel, capfd=capfd)
+        same(status, 0, err)
+        same(out.splitlines(), ["lint:caller-permissions: stele: PASS"])
 
-    def test_a_bad_call_is_a_usage_error(self) -> None:
+    def test_a_bad_call_is_a_usage_error(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """No canon, an empty canon, or no workflow: exit 2 with the usage line."""
         usage = f"{TASK}: {caller_permissions.USAGE}"
         calls: list[list[str]] = [[], [CANON], ["", "ci.yml"]]
         for argv in calls:
-            done = self.helper(*argv)
-            same(done.returncode, caller_permissions.EXIT_ERROR)
-            same(done.stderr.splitlines(), [usage])
+            status, out, err = self.helper(*argv, capfd=capfd)
+            same(status, caller_permissions.EXIT_ERROR)
+            same(err.splitlines(), [usage])
         same(self.logged(), [])

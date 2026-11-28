@@ -130,7 +130,9 @@ class TestHelper:
             path.write_text(text, encoding="utf-8")
         return rel
 
-    def helper(self, *argv: str) -> support.Called:
+    def helper(
+        self, *argv: str, capfd: pytest.CaptureFixture[str]
+    ) -> tuple[int, str, str]:
         """Call the helper's main in the planted tree.
 
         Returns:
@@ -138,95 +140,117 @@ class TestHelper:
 
         """
         args = list(argv)
-        return support.call(
-            lambda: audit_scheduled.main(args), env=self.env, cwd=self.tree
-        )
+        with pytest.MonkeyPatch.context() as patched:
+            for name, value in self.env.items():
+                patched.setenv(name, value)
+            patched.chdir(self.tree)
+            status = audit_scheduled.main(args)
+        out, err = capfd.readouterr()
+        return status, out, err
 
-    def test_zero_belt_audits_is_red(self) -> None:
+    def test_zero_belt_audits_is_red(self, capfd: pytest.CaptureFixture[str]) -> None:
         """A belt config naming no audit task: the enumeration is broken."""
         self.config('[tasks."lint:x"]\nrun = "x"\n')
-        done = self.helper("--own", "")
-        same(done.returncode, audit_scheduled.EXIT_RED)
+        status, out, err = self.helper("--own", "", capfd=capfd)
+        same(status, audit_scheduled.EXIT_RED)
         broken = (
             "lint:audit-scheduled: zero belt audit tasks enumerated — the grep"
             " is broken"
         )
-        same(done.stderr.splitlines(), [broken])
-        same(done.stdout.splitlines(), [NONE_OWN])
+        same(err.splitlines(), [broken])
+        same(out.splitlines(), [NONE_OWN])
 
-    def test_a_prefix_name_is_not_its_longer_sibling(self) -> None:
+    def test_a_prefix_name_is_not_its_longer_sibling(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Running audit:fuzz-long does not schedule audit:fuzz."""
         self.config(CONFIG)
         rel = self.plant("x.yml", "      - run: mise run audit:fuzz-long\n")
-        done = self.helper("--own", "", rel)
-        same(done.returncode, audit_scheduled.EXIT_RED)
-        same(done.stderr.splitlines(), unscheduled(" audit:fuzz"))
+        status, out, err = self.helper("--own", "", rel, capfd=capfd)
+        same(status, audit_scheduled.EXIT_RED)
+        same(err.splitlines(), unscheduled(" audit:fuzz"))
 
-    def test_both_scheduled_at_a_line_end_and_before_a_blank(self) -> None:
+    def test_both_scheduled_at_a_line_end_and_before_a_blank(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A name at the line's end, and one followed by a blank, both count."""
         self.config(CONFIG)
         rel = self.plant(
             "x.yml", "run: mise run audit:fuzz\nrun: mise run audit:fuzz-long --x\n"
         )
-        done = self.helper("--own", "", rel)
-        same(done.returncode, 0, done.stderr)
+        status, out, err = self.helper("--own", "", rel, capfd=capfd)
+        same(status, 0, err)
         expected = [
             "lint:audit-scheduled: 2 belt audit task(s), every one scheduled",
             NONE_OWN,
         ]
-        same(done.stdout.splitlines(), expected)
+        same(out.splitlines(), expected)
 
-    def test_no_config_and_no_own_task(self) -> None:
+    def test_no_config_and_no_own_task(self, capfd: pytest.CaptureFixture[str]) -> None:
         """A consumer with no audit task of its own: one line, ok."""
-        done = self.helper("--own", "")
-        same(done.returncode, 0, done.stderr)
-        same(done.stdout.splitlines(), [NONE_OWN])
+        status, out, err = self.helper("--own", "", capfd=capfd)
+        same(status, 0, err)
+        same(out.splitlines(), [NONE_OWN])
 
-    def test_own_tasks_and_no_workflow_are_red(self) -> None:
+    def test_own_tasks_and_no_workflow_are_red(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Own tasks with no workflow at all: red, each task listed."""
-        done = self.helper("--own", "audit:custom\naudit:other\n")
-        same(done.returncode, audit_scheduled.EXIT_RED)
-        same(done.stderr.splitlines(), NO_FLOWS)
-        same(done.stdout, "")
+        status, out, err = self.helper(
+            "--own", "audit:custom\naudit:other\n", capfd=capfd
+        )
+        same(status, audit_scheduled.EXIT_RED)
+        same(err.splitlines(), NO_FLOWS)
+        same(out, "")
 
-    def test_a_red_belt_half_stays_red(self) -> None:
+    def test_a_red_belt_half_stays_red(self, capfd: pytest.CaptureFixture[str]) -> None:
         """The belt half red and own tasks collected: still red."""
         self.config(CONFIG)
         caller = f"    uses: {CANON}/.github/workflows/repo-own-audits.yml@x\n"
         rel = self.plant("x.yml", caller)
-        done = self.helper("--own", "audit:custom", "--canon", CANON, rel)
-        same(done.returncode, audit_scheduled.EXIT_RED)
-        same(done.stderr.splitlines(), unscheduled(" audit:fuzz audit:fuzz-long"))
+        status, out, err = self.helper(
+            "--own", "audit:custom", "--canon", CANON, rel, capfd=capfd
+        )
+        same(status, audit_scheduled.EXIT_RED)
+        same(err.splitlines(), unscheduled(" audit:fuzz audit:fuzz-long"))
         collected = (
             "lint:audit-scheduled: 1 repo-defined audit task(s), collected by"
             " repo-own-audits.yml"
         )
-        same(done.stdout.splitlines(), [collected])
+        same(out.splitlines(), [collected])
 
-    def test_own_tasks_each_run_by_a_workflow(self) -> None:
+    def test_own_tasks_each_run_by_a_workflow(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Each own task run directly: ok, counted."""
         one = self.plant("a.yml", "run: mise run audit:custom\n")
         two = self.plant("b.yaml", "run: mise run audit:other # weekly\n")
         own = "audit:custom\naudit:other"
-        done = self.helper("--own", own, "--canon", CANON, one, two)
-        same(done.returncode, 0, done.stderr)
+        status, out, err = self.helper(
+            "--own", own, "--canon", CANON, one, two, capfd=capfd
+        )
+        same(status, 0, err)
         each = (
             "lint:audit-scheduled: 2 repo-defined audit task(s), each run by a"
             " workflow here"
         )
-        same(done.stdout.splitlines(), [each])
+        same(out.splitlines(), [each])
 
-    def test_the_canon_collects_its_own_by_path(self) -> None:
+    def test_the_canon_collects_its_own_by_path(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """`./.github/workflows/repo-own-audits.yaml` collects in the canon."""
         caller = "    uses:\t./.github/workflows/repo-own-audits.yaml\n"
         rel = self.plant("own.yml", caller)
-        done = self.helper("--own", "audit:custom", "--canon", CANON, rel)
-        same(done.returncode, 0, done.stderr)
+        status, out, err = self.helper(
+            "--own", "audit:custom", "--canon", CANON, rel, capfd=capfd
+        )
+        same(status, 0, err)
         collected = (
             "lint:audit-scheduled: 1 repo-defined audit task(s), collected by"
             " repo-own-audits.yml"
         )
-        same(done.stdout.splitlines(), [collected])
+        same(out.splitlines(), [collected])
 
     def test_a_file_outside_the_workflows_schedules_nothing(self) -> None:
         """Through the body: a file the selection does not name schedules nothing."""
@@ -250,28 +274,34 @@ class TestHelper:
         same(done.stderr.splitlines(), unscheduled(" audit:fuzz"))
 
     @pytest.mark.parametrize("canon", ("", "/", "owner/", "/repo"))
-    def test_own_tasks_need_a_canon(self, canon: object) -> None:
+    def test_own_tasks_need_a_canon(
+        self, canon: object, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Own tasks and workflows with no canon to judge a caller by: exit 2."""
         rel = self.plant("a.yml", "run: mise run audit:custom\n")
         usage = (
             "lint:audit-scheduled: usage: --canon OWNER/REPO is needed to judge"
             " own tasks"
         )
-        done = self.helper("--own", "audit:custom", "--canon", canon, rel)
-        same(done.returncode, audit_scheduled.EXIT_ERROR)
-        same(done.stderr.splitlines(), [usage])
+        status, out, err = self.helper(
+            "--own", "audit:custom", "--canon", canon, rel, capfd=capfd
+        )
+        same(status, audit_scheduled.EXIT_ERROR)
+        same(err.splitlines(), [usage])
 
-    def test_not_utf8_is_an_error(self) -> None:
+    def test_not_utf8_is_an_error(self, capfd: pytest.CaptureFixture[str]) -> None:
         """A workflow that is not UTF-8 is refused by name, exit 2."""
         rel = self.plant("bad.yml", b"run: \xff\n")
-        done = self.helper("--own", "", rel)
-        same(done.returncode, audit_scheduled.EXIT_ERROR)
-        assert done.stderr.startswith(
+        status, out, err = self.helper("--own", "", rel, capfd=capfd)
+        same(status, audit_scheduled.EXIT_ERROR)
+        assert err.startswith(
             f"lint:audit-scheduled: {rel}: cannot be read as UTF-8:"
-        ), done.stderr
+        ), err
 
-    def test_no_own_flag_is_a_usage_error(self) -> None:
+    def test_no_own_flag_is_a_usage_error(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """No `--own`: argparse refuses, exit 2."""
-        done = self.helper()
-        same(done.returncode, audit_scheduled.EXIT_ERROR)
-        assert "--own" in done.stderr
+        status, out, err = self.helper(capfd=capfd)
+        same(status, audit_scheduled.EXIT_ERROR)
+        assert "--own" in err

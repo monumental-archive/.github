@@ -119,7 +119,9 @@ class TestNested:
             path.write_text(text, encoding="utf-8")
         return rel
 
-    def helper(self, *files: str) -> support.Called:
+    def helper(
+        self, *files: str, capfd: pytest.CaptureFixture[str]
+    ) -> tuple[int, str, str]:
         """Call the helper's main in the planted tree.
 
         Returns:
@@ -127,9 +129,13 @@ class TestNested:
 
         """
         argv = list(files)
-        return support.call(
-            lambda: nested_permissions.main(argv), env=self.env, cwd=self.tree
-        )
+        with pytest.MonkeyPatch.context() as patched:
+            for name, value in self.env.items():
+                patched.setenv(name, value)
+            patched.chdir(self.tree)
+            status = nested_permissions.main(argv)
+        out, err = capfd.readouterr()
+        return status, out, err
 
     def task(self) -> subprocess.CompletedProcess[str]:
         """Run the task body in the planted tree.
@@ -164,7 +170,9 @@ class TestNested:
         same(done.returncode, nested_permissions.EXIT_RED)
         same(done.stderr.splitlines(), red(f"{bad}:ci"))
 
-    def test_stated_permissions_are_clean(self) -> None:
+    def test_stated_permissions_are_clean(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Every uses: job states permissions; only files with one count."""
         one = self.plant("one.yml", "jobs:\n  ci:\n" + CALL + GRANT)
         two = self.plant(
@@ -172,43 +180,51 @@ class TestNested:
             "jobs:\n  a:\n" + GRANT + CALL + "  b:\n" + STEP + "  c:\n" + CALL + GRANT,
         )
         none = self.plant("none.yml", "jobs:\n  build:\n" + STEP)
-        done = self.helper(one, two, none)
-        same(done.returncode, 0, done.stderr)
-        same(done.stdout.splitlines(), ok(2))
-        same(done.stderr, "")
+        status, out, err = self.helper(one, two, none, capfd=capfd)
+        same(status, 0, err)
+        same(out.splitlines(), ok(2))
+        same(err, "")
 
-    def test_offenders_are_named_in_file_order(self) -> None:
+    def test_offenders_are_named_in_file_order(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """First, middle and last jobs offend: each named, file by file."""
         first = self.plant(
             "first.yml",
             "jobs:\n  a:\n" + CALL + "  b:\n" + CALL + GRANT + "  c:\n" + CALL,
         )
         second = self.plant("second.yml", "jobs:\n  m:\n" + STEP + "  n:\n" + CALL)
-        done = self.helper(first, second)
-        same(done.returncode, nested_permissions.EXIT_RED)
+        status, out, err = self.helper(first, second, capfd=capfd)
+        same(status, nested_permissions.EXIT_RED)
         same(
-            done.stderr.splitlines(),
+            err.splitlines(),
             red(f"{first}:a", f"{first}:c", f"{second}:n"),
         )
-        same(done.stdout, "")
+        same(out, "")
 
-    def test_keys_before_jobs_are_not_jobs(self) -> None:
+    def test_keys_before_jobs_are_not_jobs(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A two-space key above `jobs:` opens no job."""
         text = "on:\n  workflow_call:\n" + CALL + "jobs:\n  ci:\n" + CALL + GRANT
         rel = self.plant("wf.yml", text)
-        done = self.helper(rel)
-        same(done.returncode, 0, done.stderr)
-        same(done.stdout.splitlines(), ok(1))
+        status, out, err = self.helper(rel, capfd=capfd)
+        same(status, 0, err)
+        same(out.splitlines(), ok(1))
 
-    def test_a_second_jobs_line_closes_nothing(self) -> None:
+    def test_a_second_jobs_line_closes_nothing(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A repeated `jobs:` line leaves the open job open."""
         text = "jobs:\n  ci:\n" + CALL + "jobs:\n" + GRANT
         rel = self.plant("wf.yml", text)
-        done = self.helper(rel)
-        same(done.returncode, 0, done.stderr)
-        same(done.stdout.splitlines(), ok(1))
+        status, out, err = self.helper(rel, capfd=capfd)
+        same(status, 0, err)
+        same(out.splitlines(), ok(1))
 
-    def test_trailing_blanks_and_carriage_returns(self) -> None:
+    def test_trailing_blanks_and_carriage_returns(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Trailing blanks still open a job; a carriage return stays in its name.
 
         awk's first field keeps the carriage return, so its `:` is not
@@ -216,39 +232,41 @@ class TestNested:
         """
         blanks = self.plant("blanks.yml", "jobs: \t\n  ci:  \n" + CALL)
         crlf = self.plant("crlf.yml", "jobs:\r\n  ci:\r\n" + CALL)
-        done = self.helper(blanks, crlf)
-        same(done.returncode, nested_permissions.EXIT_RED)
-        same(done.stderr.splitlines(), red(f"{blanks}:ci", f"{crlf}:ci:\\r"))
+        status, out, err = self.helper(blanks, crlf, capfd=capfd)
+        same(status, nested_permissions.EXIT_RED)
+        same(err.splitlines(), red(f"{blanks}:ci", f"{crlf}:ci:\\r"))
 
-    def test_not_a_job_key(self) -> None:
+    def test_not_a_job_key(self, capfd: pytest.CaptureFixture[str]) -> None:
         """Deeper, shallower or valued keys open no job."""
         text = "jobs:\n  ci:\n" + GRANT + "  x: y\n   deep:\n" + CALL
         rel = self.plant("wf.yml", text)
-        done = self.helper(rel)
-        same(done.returncode, 0, done.stderr)
-        same(done.stdout.splitlines(), ok(1))
+        status, out, err = self.helper(rel, capfd=capfd)
+        same(status, 0, err)
+        same(out.splitlines(), ok(1))
 
-    def test_not_utf8_is_an_error(self) -> None:
+    def test_not_utf8_is_an_error(self, capfd: pytest.CaptureFixture[str]) -> None:
         """A workflow that is not UTF-8 is refused by name, exit 2."""
         rel = self.plant("bad.yml", b"jobs: \xff\n")
-        done = self.helper(rel)
-        same(done.returncode, nested_permissions.EXIT_ERROR)
-        assert done.stderr.startswith(
+        status, out, err = self.helper(rel, capfd=capfd)
+        same(status, nested_permissions.EXIT_ERROR)
+        assert err.startswith(
             f"lint:nested-permissions: {rel}: cannot be read as UTF-8:"
-        ), done.stderr
+        ), err
 
-    def test_missing_file_is_an_error(self) -> None:
+    def test_missing_file_is_an_error(self, capfd: pytest.CaptureFixture[str]) -> None:
         """A named workflow that does not exist is refused by name, exit 2."""
-        done = self.helper(".github/workflows/gone.yml")
-        same(done.returncode, nested_permissions.EXIT_ERROR)
-        assert done.stderr.startswith(
+        status, out, err = self.helper(".github/workflows/gone.yml", capfd=capfd)
+        same(status, nested_permissions.EXIT_ERROR)
+        assert err.startswith(
             "lint:nested-permissions: .github/workflows/gone.yml:"
             " cannot be read as UTF-8:"
-        ), done.stderr
+        ), err
 
-    def test_no_workflows_is_a_usage_error(self) -> None:
+    def test_no_workflows_is_a_usage_error(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """No workflow named: exit 2 with the usage line."""
-        done = self.helper()
-        same(done.returncode, nested_permissions.EXIT_ERROR)
+        status, out, err = self.helper(capfd=capfd)
+        same(status, nested_permissions.EXIT_ERROR)
         usage = "lint:nested-permissions: usage: belt nested-permissions WORKFLOW..."
-        same(done.stderr.splitlines(), [usage])
+        same(err.splitlines(), [usage])

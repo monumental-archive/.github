@@ -246,7 +246,9 @@ class TestColdAttested:
             names.append(rel)
         return names
 
-    def helper(self, *files: str) -> support.Called:
+    def helper(
+        self, *files: str, capfd: pytest.CaptureFixture[str]
+    ) -> tuple[int, str, str]:
         """Call the helper's main in the planted tree.
 
         Returns:
@@ -254,9 +256,13 @@ class TestColdAttested:
 
         """
         argv = list(files)
-        return support.call(
-            lambda: cold_attested.main(argv), env=self.env, cwd=self.tree
-        )
+        with pytest.MonkeyPatch.context() as patched:
+            for name, value in self.env.items():
+                patched.setenv(name, value)
+            patched.chdir(self.tree)
+            status = cold_attested.main(argv)
+        out, err = capfd.readouterr()
+        return status, out, err
 
     def task(self) -> subprocess.CompletedProcess[str]:
         """Run the task body in the planted tree.
@@ -314,40 +320,42 @@ class TestColdAttested:
             red((f"{WF}/a.yaml:6", cold_attested.NO_MARKER)),
         )
 
-    def test_cases(self) -> None:
+    def test_cases(self, capfd: pytest.CaptureFixture[str]) -> None:
         """Every row of CASES, through the helper's main."""
         for name, (files, status, out, err) in CASES.items():
             for old in (self.tree / WF).iterdir():
                 old.unlink()
-            done = self.helper(*self.plant(files))
-            same(done.returncode, status, done.stderr)
-            same(done.stdout.splitlines(), out)
-            same(done.stderr.splitlines(), err)
+            status, out, err = self.helper(*self.plant(files), capfd=capfd)
+            same(status, status, err)
+            same(out.splitlines(), out)
+            same(err.splitlines(), err)
 
-    def test_no_workflow_is_a_usage_error(self) -> None:
+    def test_no_workflow_is_a_usage_error(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Called with nothing to read: exit 2, saying how to call it."""
-        done = self.helper()
-        same(done.returncode, cold_attested.EXIT_ERROR)
+        status, out, err = self.helper(capfd=capfd)
+        same(status, cold_attested.EXIT_ERROR)
         same(
-            done.stderr.splitlines(),
+            err.splitlines(),
             [f"{TASK}: usage: cold_attested.py WORKFLOW..."],
         )
 
-    def test_a_missing_workflow_is_a_read_error(self) -> None:
+    def test_a_missing_workflow_is_a_read_error(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A named file that is not there: exit 2, naming it."""
-        done = self.helper(f"{WF}/gone.yml")
-        same(done.returncode, cold_attested.EXIT_ERROR)
-        same(done.stdout, "")
-        assert done.stderr.startswith(
-            f"{TASK}: {WF}/gone.yml: cannot be read as UTF-8: "
-        ), done.stderr
+        status, out, err = self.helper(f"{WF}/gone.yml", capfd=capfd)
+        same(status, cold_attested.EXIT_ERROR)
+        same(out, "")
+        assert err.startswith(f"{TASK}: {WF}/gone.yml: cannot be read as UTF-8: "), err
 
-    def test_a_workflow_not_utf8_is_a_read_error(self) -> None:
+    def test_a_workflow_not_utf8_is_a_read_error(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Bytes that are not UTF-8: exit 2, naming the file."""
         (self.tree / WF / "a.yml").write_bytes(b"on: push\n# \xe9\n")
-        done = self.helper(f"{WF}/a.yml")
-        same(done.returncode, cold_attested.EXIT_ERROR)
-        same(done.stdout, "")
-        assert done.stderr.startswith(
-            f"{TASK}: {WF}/a.yml: cannot be read as UTF-8: "
-        ), done.stderr
+        status, out, err = self.helper(f"{WF}/a.yml", capfd=capfd)
+        same(status, cold_attested.EXIT_ERROR)
+        same(out, "")
+        assert err.startswith(f"{TASK}: {WF}/a.yml: cannot be read as UTF-8: "), err

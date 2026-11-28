@@ -28,6 +28,7 @@ one run, the record, zizmor's 11; a clean run, 0. Against
 `origin/main` the `Records` and `Task` record rows fail.
 """
 
+import contextlib
 import copy
 import io
 import json
@@ -44,7 +45,6 @@ import pytest
 from belt import decoded
 from belt import zizmor_signer as signer
 from tests import support
-import contextlib
 
 HERE = support.MISE
 
@@ -603,14 +603,16 @@ jobs:
 @pytest.mark.usefixtures("_stack")
 class TestPinnedZizmor:
     """The belt's pinned zizmor, `--offline`, on a planted workflow."""
-    
+
     @pytest.fixture
     def _stack(self, request: pytest.FixtureRequest) -> None:
         """Hold the row's cleanups, undone last first after it ends."""
         self.stack = contextlib.ExitStack()
         request.addfinalizer(self.stack.close)
 
-    def judged(self, workflow: str) -> tuple[int, list[object], str]:
+    def judged(
+        self, workflow: str, *, capfd: pytest.CaptureFixture[str]
+    ) -> tuple[int, list[object], str]:
         """Run the CLI over the belt's zizmor on one planted workflow.
 
         Returns:
@@ -625,23 +627,28 @@ class TestPinnedZizmor:
         (tmp / ".github" / "workflows" / "a.yml").write_text(workflow, encoding="utf-8")
         file = tmp / "findings.jsonl"
         argv = ["--signer-workflow", SIGNER_WORKFLOW, "--offline", *ARGS]
-        done = support.call(
-            lambda: signer.main(argv),
-            env=support.env(
-                GH_TOKEN=STANDIN,
-                MISE_TASK_NAME=TASK,
-                ORG_FINDINGS=str(file),
-                PYTHONUTF8="1",
-            ),
-            cwd=tmp,
-        )
+        with pytest.MonkeyPatch.context() as patched:
+            for name, value in (
+                support.env(
+                    GH_TOKEN=STANDIN,
+                    MISE_TASK_NAME=TASK,
+                    ORG_FINDINGS=str(file),
+                    PYTHONUTF8="1",
+                )
+            ).items():
+                patched.setenv(name, value)
+            patched.chdir(tmp)
+            status = signer.main(argv)
+        out, err = capfd.readouterr()
         lines = file.read_text(encoding="utf-8").splitlines() if file.exists() else []
         got: list[object] = [decoded.load_json(line) for line in lines]
-        return done.returncode, got, done.stderr
+        return status, got, err
 
-    def test_an_unpinned_action_is_the_record(self) -> None:
+    def test_an_unpinned_action_is_the_record(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """One unpinned `uses:`: the record read back, zizmor's 14."""
-        status, got, err = self.judged(WORKFLOW)
+        status, got, err = self.judged(WORKFLOW, capfd=capfd)
         assert status == 14, err
         path = ".github/workflows/a.yml"
         want: list[object] = [
@@ -663,10 +670,12 @@ class TestPinnedZizmor:
         ]
         assert want == got
 
-    def test_two_of_one_audit_in_one_file_are_two_messages(self) -> None:
+    def test_two_of_one_audit_in_one_file_are_two_messages(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Two unpinned `uses:` in one file: two records, two messages."""
         two = WORKFLOW + "      - uses: actions/setup-node@v4\n"
-        status, got, err = self.judged(two)
+        status, got, err = self.judged(two, capfd=capfd)
         assert status == 14, err
         messages = [decoded.as_object(r, "a record")["message"] for r in got]
         want: list[object] = [
@@ -689,7 +698,7 @@ sys.exit(int(os.environ["STUB_RC"]))
 @pytest.mark.usefixtures("_stack")
 class TestTask:
     """audit:actions' own body over a stub zizmor, in a planted tree."""
-    
+
     @pytest.fixture
     def _stack(self, request: pytest.FixtureRequest) -> None:
         """Hold the row's cleanups, undone last first after it ends."""

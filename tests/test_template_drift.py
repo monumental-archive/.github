@@ -173,7 +173,9 @@ class TestPlanted:
         self.git("add", "--", STUB)
         return STUB
 
-    def helper(self, *argv: str, now: int = T0) -> support.Called:
+    def helper(
+        self, *argv: str, now: int = T0, capfd: pytest.CaptureFixture[str]
+    ) -> tuple[int, str, str]:
         """Call the helper's main in the planted tree at a given time.
 
         Returns:
@@ -181,9 +183,13 @@ class TestPlanted:
 
         """
         args = list(argv)
-        return support.call(
-            lambda: template_drift.main(args, now), env=self.env, cwd=self.tree
-        )
+        with pytest.MonkeyPatch.context() as patched:
+            for name, value in self.env.items():
+                patched.setenv(name, value)
+            patched.chdir(self.tree)
+            status = template_drift.main(args, now)
+        out, err = capfd.readouterr()
+        return status, out, err
 
     def task(self) -> subprocess.CompletedProcess[str]:
         """Run the task body in the planted tree.
@@ -238,133 +244,149 @@ class TestPins(TestPlanted):
         )
         same(done.stdout.splitlines(), [ok])
 
-    def test_no_org_pin_is_skipped_by_name(self) -> None:
+    def test_no_org_pin_is_skipped_by_name(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Templates that pin no canon SHA: skipped, by name."""
         rel = self.plant(template())
-        done = self.helper(CANON, rel)
-        same(done.returncode, 0, done.stderr)
+        status, out, err = self.helper(CANON, rel, capfd=capfd)
+        same(status, 0, err)
         skipped = ["audit:template-pins: no org pins in templates, skipped"]
-        same(done.stdout.splitlines(), skipped)
+        same(out.splitlines(), skipped)
 
-    def test_a_short_pin_is_no_pin(self) -> None:
+    def test_a_short_pin_is_no_pin(self, capfd: pytest.CaptureFixture[str]) -> None:
         """A pin that is not 40 hex is not read as one."""
         rel = self.plant(template(self.pin[:12]))
-        done = self.helper(CANON, rel)
-        same(done.returncode, 0, done.stderr)
+        status, out, err = self.helper(CANON, rel, capfd=capfd)
+        same(status, 0, err)
         skipped = ["audit:template-pins: no org pins in templates, skipped"]
-        same(done.stdout.splitlines(), skipped)
+        same(out.splitlines(), skipped)
 
-    def test_two_shas_are_red(self) -> None:
+    def test_two_shas_are_red(self, capfd: pytest.CaptureFixture[str]) -> None:
         """Two distinct pinned SHAs: red, naming the lint that missed it."""
         other = self.commit("mise/b.sh")
         rel = self.plant(template(self.pin, other, self.pin))
-        done = self.helper(CANON, rel)
-        same(done.returncode, template_drift.EXIT_RED)
+        status, out, err = self.helper(CANON, rel, capfd=capfd)
+        same(status, template_drift.EXIT_RED)
         expected = [
             (
                 "audit:template-pins: templates pin more than one SHA"
                 " (lint:template-pins should have failed)"
             )
         ]
-        same(done.stderr.splitlines(), expected)
+        same(err.splitlines(), expected)
 
-    def test_a_sha_not_in_the_clone_is_red(self) -> None:
+    def test_a_sha_not_in_the_clone_is_red(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A pin the clone lacks: red, naming a shallow clone."""
         absent = "b" * 40
         rel = self.plant(template(absent))
-        done = self.helper(CANON, rel)
-        same(done.returncode, template_drift.EXIT_RED)
+        status, out, err = self.helper(CANON, rel, capfd=capfd)
+        same(status, template_drift.EXIT_RED)
         expected = [
             (
                 "audit:template-pins: pinned SHA bbbbbbbb not in local history"
                 " (shallow clone?)"
             )
         ]
-        same(done.stderr.splitlines(), expected)
+        same(err.splitlines(), expected)
 
 
 class TestDrift(TestPlanted):
     """Commits since the pin, and the post-release window."""
 
-    def test_drift_with_an_untagged_pin_is_red(self) -> None:
+    def test_drift_with_an_untagged_pin_is_red(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Commits since an untagged pin touching either path: red, listed."""
         self.commit("docs/a.md")
         self.commit(".github/workflows/ci.yml")
         self.commit("mise/b.sh")
         rel = self.plant(template(self.pin))
-        done = self.helper(CANON, rel)
-        same(done.returncode, template_drift.EXIT_RED)
+        status, out, err = self.helper(CANON, rel, capfd=capfd)
+        same(status, template_drift.EXIT_RED)
         head = f"audit:template-pins: pin {self.pin[:8]} misses shipped canon changes:"
-        same(done.stderr.splitlines(), [head, *self.log(self.pin), *TAIL])
+        same(err.splitlines(), [head, *self.log(self.pin), *TAIL])
         same(len(self.log(self.pin)), 2)
 
-    def test_inside_the_window_from_the_next_tag(self) -> None:
+    def test_inside_the_window_from_the_next_tag(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Drift within 24h of the next tag in VERSION order: reported, ok."""
         self.git("tag", "v1.9.0", self.pin)
         self.commit("mise/b.sh", tag="v1.10.0")
         self.commit("mise/c.sh", tag="v1.11.0")
         rel = self.plant(template(self.pin))
         now = T0 + DAY + 5 * 3600 + 59
-        done = self.helper(CANON, rel, now=now)
-        same(done.returncode, 0, done.stderr)
-        same(done.stdout.splitlines(), window("v1.9.0", 5, "v1.10.0"))
+        status, out, err = self.helper(CANON, rel, now=now, capfd=capfd)
+        same(status, 0, err)
+        same(out.splitlines(), window("v1.9.0", 5, "v1.10.0"))
 
-    def test_past_the_window_is_red(self) -> None:
+    def test_past_the_window_is_red(self, capfd: pytest.CaptureFixture[str]) -> None:
         """Drift a full day after the next tag: red, every commit listed."""
         self.git("tag", "v1.0.0", self.pin)
         self.commit("mise/b.sh", tag="v1.1.0")
         rel = self.plant(template(self.pin))
-        done = self.helper(CANON, rel, now=T0 + 2 * DAY)
-        same(done.returncode, template_drift.EXIT_RED)
+        status, out, err = self.helper(CANON, rel, now=T0 + 2 * DAY, capfd=capfd)
+        same(status, template_drift.EXIT_RED)
         head = f"audit:template-pins: pin {self.pin[:8]} misses shipped canon changes:"
-        same(done.stderr.splitlines(), [head, *self.log(self.pin), *TAIL])
+        same(err.splitlines(), [head, *self.log(self.pin), *TAIL])
 
-    def test_newest_tag_measures_from_its_own(self) -> None:
+    def test_newest_tag_measures_from_its_own(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A pin on the newest tag, with drift after it: the pin's own tag dates it."""
         self.git("tag", "v1.0.0", self.pin)
         self.commit("mise/b.sh")
         rel = self.plant(template(self.pin))
-        done = self.helper(CANON, rel, now=T0 + 3 * 3600)
-        same(done.returncode, 0, done.stderr)
-        same(done.stdout.splitlines(), window("v1.0.0", 3, "v1.0.0"))
+        status, out, err = self.helper(CANON, rel, now=T0 + 3 * 3600, capfd=capfd)
+        same(status, 0, err)
+        same(out.splitlines(), window("v1.0.0", 3, "v1.0.0"))
 
-    def test_a_negative_age_truncates_toward_zero(self) -> None:
+    def test_a_negative_age_truncates_toward_zero(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A tag dated after `now`: its hours truncate as bash's `/` does."""
         self.git("tag", "v1.0.0", self.pin)
         self.commit("mise/b.sh", tag="v1.1.0")
         rel = self.plant(template(self.pin))
-        done = self.helper(CANON, rel, now=T0 + DAY - 5400)
-        same(done.returncode, 0, done.stderr)
-        same(done.stdout.splitlines(), window("v1.0.0", -1, "v1.1.0"))
+        status, out, err = self.helper(CANON, rel, now=T0 + DAY - 5400, capfd=capfd)
+        same(status, 0, err)
+        same(out.splitlines(), window("v1.0.0", -1, "v1.1.0"))
 
-    def test_a_failed_git_call_is_an_error(self) -> None:
+    def test_a_failed_git_call_is_an_error(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """HEAD unborn: the diff fails, and that is no empty drift."""
         rel = self.plant(template(self.pin))
         self.git("checkout", "-q", "--orphan", "unborn")
-        done = self.helper(CANON, rel)
-        same(done.returncode, template_drift.EXIT_ERROR)
-        assert done.stderr.startswith(
+        status, out, err = self.helper(CANON, rel, capfd=capfd)
+        same(status, template_drift.EXIT_ERROR)
+        assert err.startswith(
             f"audit:template-pins: git diff --name-only {self.pin}..HEAD --"
             " .github/workflows/ mise/ failed (128):"
-        ), done.stderr
+        ), err
 
-    def test_not_utf8_is_an_error(self) -> None:
+    def test_not_utf8_is_an_error(self, capfd: pytest.CaptureFixture[str]) -> None:
         """A template that is not UTF-8 is refused by name, exit 2."""
         rel = self.plant(b"jobs: \xff\n")
-        done = self.helper(CANON, rel)
-        same(done.returncode, template_drift.EXIT_ERROR)
-        assert done.stderr.startswith(
+        status, out, err = self.helper(CANON, rel, capfd=capfd)
+        same(status, template_drift.EXIT_ERROR)
+        assert err.startswith(
             f"audit:template-pins: {rel}: cannot be read as UTF-8:"
-        ), done.stderr
+        ), err
 
-    def test_a_bad_call_is_a_usage_error(self) -> None:
+    def test_a_bad_call_is_a_usage_error(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """No canon, half a canon, or no template: exit 2 with the usage line."""
         usage = "audit:template-pins: usage: belt template-drift OWNER/REPO TEMPLATE..."
         calls: list[list[str]] = [[], [CANON], ["/repo", STUB], ["owner/", STUB]]
         for argv in calls:
-            done = self.helper(*argv)
-            same(done.returncode, template_drift.EXIT_ERROR)
-            same(done.stderr.splitlines(), [usage])
+            status, out, err = self.helper(*argv, capfd=capfd)
+            same(status, template_drift.EXIT_ERROR)
+            same(err.splitlines(), [usage])
 
     def test_version_order(self) -> None:
         """Digit runs order as numbers: v1.10.0 after v1.9.0."""

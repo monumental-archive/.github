@@ -84,8 +84,12 @@ class Bounded(unittest.TestCase):
 
 
 def call(
-    argv: list[str], files: dict[str, str], env: dict[str, str]
-) -> support.Called:
+    argv: list[str],
+    files: dict[str, str],
+    env: dict[str, str],
+    *,
+    capfd: pytest.CaptureFixture[str],
+) -> tuple[int, str, str]:
     """Plant `files` in a scratch directory and call main from it.
 
     `env` adds to the environment a child would have had (`support.env`);
@@ -103,9 +107,13 @@ def call(
         try:
             # The profile's label is the task that runs it (#1934).
             task = {"MISE_TASK_NAME": pp.LABELS.get(argv[0], "")} if argv else {}
-            return support.call(
-                lambda: pp.main(argv), env=support.env(**(task | env)), cwd=scratch
-            )
+            with pytest.MonkeyPatch.context() as patched:
+                for name, value in (support.env(**(task | env))).items():
+                    patched.setenv(name, value)
+                patched.chdir(scratch)
+                status = pp.main(argv)
+            out, err = capfd.readouterr()
+            return status, out, err
         finally:
             settings.load_profile(before)
             for index, name in enumerate(argv[1:]):
@@ -115,69 +123,93 @@ def call(
 class TestGate:
     """The gate profile over planted files."""
 
-    def test_a_passing_file_holds(self) -> None:
+    def test_a_passing_file_holds(self, capfd: pytest.CaptureFixture[str]) -> None:
         """One property that holds: exit 0, the test and the count."""
-        done = call(["gate", "prop_ok.py"], {"prop_ok.py": HOLDS}, {})
-        assert done == support.Called(
+        status, out, err = call(
+            ["gate", "prop_ok.py"], {"prop_ok.py": HOLDS}, {}, capfd=capfd
+        )
+        assert (status, out, err) == (
             0,
             "prop_ok.py: prop_0_prop_ok.Holds.test_double_is_even ... ok\n"
             "test:python-properties: 1 test(s) in 1 file(s) held\n",
             "",
         )
 
-    def test_a_failing_property_is_red_with_its_example(self) -> None:
+    def test_a_failing_property_is_red_with_its_example(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A property that fails: red, the shrunk example printed."""
-        done = call(["gate", "prop_bad.py"], {"prop_bad.py": FAILS}, {})
-        assert done.returncode == 1
-        assert "prop_0_prop_bad.Fails.test_small ... FAIL\n" in done.stdout
-        assert "AssertionError: 10 not less than 10" in done.stderr
-        assert "    n=10,\n" in done.stderr
+        status, out, err = call(
+            ["gate", "prop_bad.py"], {"prop_bad.py": FAILS}, {}, capfd=capfd
+        )
+        assert status == 1
+        assert "prop_0_prop_bad.Fails.test_small ... FAIL\n" in out
+        assert "AssertionError: 10 not less than 10" in err
+        assert "    n=10,\n" in err
 
-    def test_a_file_with_no_property_is_refused(self) -> None:
+    def test_a_file_with_no_property_is_refused(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A prop_*.py holding no @given test: red, named."""
-        done = call(["gate", "prop_none.py"], {"prop_none.py": NO_PROPERTY}, {})
-        assert done.returncode == 1
-        assert done.stderr == (
+        status, out, err = call(
+            ["gate", "prop_none.py"], {"prop_none.py": NO_PROPERTY}, {}, capfd=capfd
+        )
+        assert status == 1
+        assert err == (
             "test:python-properties: prop_none.py: holds no Hypothesis test"
             " (no @given)\n"
         )
 
-    def test_a_test_restating_a_bound_is_refused(self) -> None:
+    def test_a_test_restating_a_bound_is_refused(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """@settings(max_examples=…) on a test: red, the bound named."""
-        done = call(["gate", "prop_own.py"], {"prop_own.py": OWN_BOUNDS}, {})
-        assert done.returncode == 1
-        assert done.stderr == (
+        status, out, err = call(
+            ["gate", "prop_own.py"], {"prop_own.py": OWN_BOUNDS}, {}, capfd=capfd
+        )
+        assert status == 1
+        assert err == (
             "test:python-properties: prop_own.py: prop_0_prop_own.Bounded.test_few"
             " sets its own bounds (max_examples=3); the belt's profile owns them\n"
         )
 
-    def test_a_file_that_cannot_be_imported_is_refused(self) -> None:
+    def test_a_file_that_cannot_be_imported_is_refused(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """An import error is the file's own report, by name."""
-        done = call(
-            ["gate", "prop_broken.py"], {"prop_broken.py": "import nowhere\n"}, {}
+        status, out, err = call(
+            ["gate", "prop_broken.py"],
+            {"prop_broken.py": "import nowhere\n"},
+            {},
+            capfd=capfd,
         )
-        assert done.returncode == 1
-        assert done.stderr.startswith(
+        assert status == 1
+        assert err.startswith(
             "test:python-properties: prop_broken.py: could not be imported\n"
-        ), done.stderr
+        ), err
 
 
 class TestAudit:
     """The audit profile: its seed printed first, a given one honoured."""
 
-    def test_the_audit_prints_its_seed_and_honours_a_given_one(self) -> None:
+    def test_the_audit_prints_its_seed_and_honours_a_given_one(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """ORG_PROPERTY_SEED reproduces a run; the seed comes first."""
-        done = call(
-            ["audit", "prop_bad.py"], {"prop_bad.py": FAILS}, {"ORG_PROPERTY_SEED": "7"}
+        status, out, err = call(
+            ["audit", "prop_bad.py"],
+            {"prop_bad.py": FAILS},
+            {"ORG_PROPERTY_SEED": "7"},
+            capfd=capfd,
         )
-        assert done.returncode == 1
-        assert done.stdout.startswith(
+        assert status == 1
+        assert out.startswith(
             "audit:python-properties: seed 7 (reproduce: ORG_PROPERTY_SEED=7)\n"
-        ), done.stdout
+        ), out
         assert (
             "audit:python-properties: seed 7 — commit each falsifying example above"
             " as an @example row with its fix\n"
-        ) in done.stderr
+        ) in err
 
 
 # A usage error under the gate's task, as python-properties.sh runs it.
@@ -208,12 +240,15 @@ class TestUsage:
             ),
         )
     )
-    def test_a_usage_error_is_two(self, argv: list[str]) -> None:
+    def test_a_usage_error_is_two(
+        self, argv: list[str], capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """R: exit 2 with the usage line, and nothing run."""
         with pytest.MonkeyPatch.context() as patched:
             support.name_task(patched, GATE)
-            done = support.call(lambda: pp.main(argv))
-        assert done == support.Called(2, "", USAGE)
+            status = pp.main(argv)
+            out, err = capfd.readouterr()
+        assert (status, out, err) == (2, "", USAGE)
 
 
 NAME = st.from_regex(

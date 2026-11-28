@@ -169,7 +169,9 @@ def canon_name() -> str:
 CANON_NAME = canon_name()
 
 
-def fixed(workflow: str) -> tuple[support.Called, str]:
+def fixed(
+    workflow: str, *, capfd: pytest.CaptureFixture[str]
+) -> tuple[support.Called, str]:
     """Call the fixer in-process on one planted gate caller (#1697).
 
     fix:gate-stub's body hands the helper the canon's name and the
@@ -184,10 +186,10 @@ def fixed(workflow: str) -> tuple[support.Called, str]:
         flows.mkdir(parents=True)
         caller = flows / "gate.yml"
         caller.write_text(workflow, encoding="utf-8")
-        done = support.call(
-            lambda: gate_stub_fix.main([CANON_NAME, ".github/workflows/gate.yml"]),
-            cwd=tmp,
-        )
+        with pytest.MonkeyPatch.context() as patched:
+            patched.chdir(tmp)
+            status = gate_stub_fix.main([CANON_NAME, ".github/workflows/gate.yml"])
+        out, err = capfd.readouterr()
         return done, caller.read_text(encoding="utf-8")
 
 
@@ -330,9 +332,11 @@ class TestRed:
 class TestFix:
     """fix:gate-stub, the lint's write-mode sibling (#1617)."""
 
-    def assert_rewritten(self, workflow: str) -> None:
+    def assert_rewritten(
+        self, workflow: str, *, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Assert the fixer makes the stub the canon's, which the lint passes."""
-        done, after = fixed(workflow)
+        done, after = fixed(workflow, capfd=capfd)
         assert done.returncode == 0, done.stderr
         assert done.stdout == (
             "fix:gate-stub: rewrote the concurrency lines in"
@@ -363,36 +367,52 @@ class TestFix:
         assert done.returncode == 0, done.stderr
         assert after == STUB
 
-    def test_the_pre_1617_stub_is_rewritten_and_then_passes(self) -> None:
+    def test_the_pre_1617_stub_is_rewritten_and_then_passes(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """The stub every repository carries today becomes the canon's."""
-        self.assert_rewritten(planted(GROUP, PRE_1617_GROUP))
+        self.assert_rewritten(planted(GROUP, PRE_1617_GROUP), capfd=capfd)
 
-    def test_the_pre_1195_stub_is_rewritten_and_then_passes(self) -> None:
+    def test_the_pre_1195_stub_is_rewritten_and_then_passes(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Both lines wrong: both rewritten, nothing else touched."""
-        self.assert_rewritten(planted(GROUP, OLD_GROUP).replace(CANCEL, OLD_CANCEL))
+        self.assert_rewritten(
+            planted(GROUP, OLD_GROUP).replace(CANCEL, OLD_CANCEL), capfd=capfd
+        )
 
-    def test_a_missing_cancel_line_is_written(self) -> None:
+    def test_a_missing_cancel_line_is_written(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A block without the cancel line gets it at the block's end."""
-        self.assert_rewritten(planted(CANCEL, ""))
+        self.assert_rewritten(planted(CANCEL, ""), capfd=capfd)
 
-    def test_a_trailing_comment_is_kept(self) -> None:
+    def test_a_trailing_comment_is_kept(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """The rewrite keeps a comment on the line it rewrites."""
-        done, after = fixed(planted(GROUP, PRE_1617_GROUP.rstrip("\n") + " # x\n"))
+        done, after = fixed(
+            planted(GROUP, PRE_1617_GROUP.rstrip("\n") + " # x\n"), capfd=capfd
+        )
         assert done.returncode == 0, done.stderr
         assert after == STUB.replace(GROUP, GROUP.rstrip("\n") + " # x\n")
 
-    def test_a_conforming_stub_is_left_byte_for_byte(self) -> None:
+    def test_a_conforming_stub_is_left_byte_for_byte(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """The canon's stub and gate are no-ops."""
         for workflow in (STUB, GATE):
-            done, after = fixed(workflow)
+            done, after = fixed(workflow, capfd=capfd)
             assert done.returncode == 0, done.stderr
             assert done.stdout == "fix:gate-stub: ok\n"
             assert after == workflow
 
-    def test_a_stub_with_no_concurrency_block_is_refused_by_name(self) -> None:
+    def test_a_stub_with_no_concurrency_block_is_refused_by_name(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """No block is never given one silently."""
         workflow = planted("concurrency:\n" + GROUP + CANCEL, "")
-        done, after = fixed(workflow)
+        done, after = fixed(workflow, capfd=capfd)
         assert done.returncode == 1, done.stdout
         assert after == workflow
         assert done.stdout == ""
@@ -401,12 +421,14 @@ class TestFix:
         ), done.stderr
         assert done.stderr.endswith("  in: .github/workflows/gate.yml\n"), done.stderr
 
-    def test_a_workflow_that_is_not_a_gate_caller_is_not_touched(self) -> None:
+    def test_a_workflow_that_is_not_a_gate_caller_is_not_touched(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Only a caller of ci.yml is the fixer's."""
         other = planted(
             "uses: monumental-archive/.github/.github/workflows/ci.yml@",
             "uses: monumental-archive/.github/.github/workflows/slsa.yml@",
         ).replace(GROUP, OLD_GROUP)
-        done, after = fixed(other)
+        done, after = fixed(other, capfd=capfd)
         assert done.returncode == 0, done.stderr
         assert after == other

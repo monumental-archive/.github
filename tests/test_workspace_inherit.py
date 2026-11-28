@@ -25,7 +25,6 @@ two `publish` rows are why publish gets no verdict at all.
 Run through the gate as `mise run test`, which `ci` collects.
 """
 
-import functools
 import io
 import json
 import subprocess
@@ -530,7 +529,7 @@ class TwoRoots:
         )
         self.env["PATH"] = f"{bindir}:{self.env.get('PATH', '')}"
 
-    def main(self) -> support.Called:
+    def main(self, *, capfd: pytest.CaptureFixture[str]) -> tuple[int, str, str]:
         """Run the helper over both roots, in this process.
 
         Returns:
@@ -540,9 +539,13 @@ class TwoRoots:
         roots = ["Cargo.toml", "fuzz/Cargo.toml"]
         with pytest.MonkeyPatch.context() as patched:
             patched.setattr(wi, "CARGO", str(self.cargo))
-            return support.call(
-                functools.partial(wi.main, roots), env=self.env, cwd=self.tree
-            )
+            with pytest.MonkeyPatch.context() as patched:
+                for name, value in self.env.items():
+                    patched.setenv(name, value)
+                patched.chdir(self.tree)
+                status, out, err = wi.main(roots)
+            out, err = capfd.readouterr()
+            return status, out, err
 
     def task(self) -> subprocess.CompletedProcess[str]:
         """Run the task's own body in the tree, as mise does.
@@ -575,18 +578,22 @@ class TwoRoots:
 class TestEveryRoot:
     """Each workspace in the tree is judged, past a red one (#2004)."""
 
-    def test_a_key_no_member_of_the_second_root_takes_is_red(self, tmp_path: Path) -> None:
+    def test_a_key_no_member_of_the_second_root_takes_is_red(
+        self, tmp_path: Path, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """fuzz/Cargo.toml's `edition`: nonzero, naming the key and the root."""
         planted = TwoRoots(tmp_path)
-        done = planted.main()
-        assert (done.returncode, done.stdout) == (1, TOP_GREEN)
-        assert done.stderr.startswith(INERT_IN_FUZZ), done.stderr
+        status, out, err = planted.main(capfd=capfd)
+        assert (status, out) == (1, TOP_GREEN)
+        assert err.startswith(INERT_IN_FUZZ), err
         declared = f"  Declared in {planted.tree}/fuzz/Cargo.toml under"
-        assert declared in done.stderr
+        assert declared in err
 
-    def test_a_failing_cargo_is_red_with_its_text_and_the_rest_judged(self, tmp_path: Path) -> None:
+    def test_a_failing_cargo_is_red_with_its_text_and_the_rest_judged(
+        self, tmp_path: Path, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Fetch refused for the top root: cargo's words; fuzz still judged."""
-        done = TwoRoots(tmp_path, fetch_fails="Cargo.toml").main()
+        done = TwoRoots(tmp_path, fetch_fails="Cargo.toml").main(capfd=capfd)
         assert (done.returncode, done.stdout) == (1, "")
         assert (
             f"{TASK}: Cargo.toml: cargo fetch failed\n"
@@ -594,11 +601,12 @@ class TestEveryRoot:
         ) in done.stderr
         assert INERT_IN_FUZZ in done.stderr
 
-    def test_no_root_is_a_usage_error(self) -> None:
+    def test_no_root_is_a_usage_error(self, capfd: pytest.CaptureFixture[str]) -> None:
         """The task always passes one; none at all is refused, exit 2."""
         none: list[str] = []
-        done = support.call(functools.partial(wi.main, none))
-        assert (done.returncode, done.stdout, done.stderr) == (
+        status, out, err = wi.main(none)
+        out, err = capfd.readouterr()
+        assert (status, out, err) == (
             2,
             "",
             "usage: belt workspace-inherit <root Cargo.toml>...\n",

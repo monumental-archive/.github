@@ -316,7 +316,12 @@ class TestPreviousRelease:
             (self.sql / name).write_text("")
 
     def helper(
-        self, args: list[str], env: dict[str, str], *, script: bool = False
+        self,
+        args: list[str],
+        env: dict[str, str],
+        *,
+        script: bool = False,
+        capfd: pytest.CaptureFixture[str],
     ) -> Done:
         """Run the helper on `args` in the row's directory.
 
@@ -336,13 +341,20 @@ class TestPreviousRelease:
 
         with pytest.MonkeyPatch.context() as patched:
             patched.setattr(previous_release, "GH", str(self.gh))
-            return support.call(call, env=support.env(**env), cwd=self.root)
+            with pytest.MonkeyPatch.context() as patched:
+                for name, value in (support.env(**env)).items():
+                    patched.setenv(name, value)
+                patched.chdir(self.root)
+                status = call()
+            out, err = capfd.readouterr()
+            return status, out, err
 
     def previous(
         self,
         mode: str,
         *extra: str,
         version: str = "1.2.0",
+        capfd: pytest.CaptureFixture[str],
         **stubs: str,
     ) -> Done:
         """Run the helper at `version` for CRATE.
@@ -353,7 +365,7 @@ class TestPreviousRelease:
         """
         env = {**self.env, **{f"STUB_{k.upper()}": v for k, v in stubs.items()}}
         args = [mode, "--repo", "acme/demo", "--version", version]
-        return self.helper([*args, "--crate-dir", self.CRATE, *extra], env)
+        return self.helper([*args, "--crate-dir", self.CRATE, *extra], env, capfd=capfd)
 
     def gh_calls(self) -> list[str]:
         """Each gh invocation, its arguments joined by spaces.
@@ -371,27 +383,29 @@ class TestControlFileRefusal(TestPreviousRelease):
     @pytest.mark.parametrize(
         "releases,latest", (([], ""), ([release("release-1")], "release-1"))
     )
-    def test_no_previous_release(self, releases: object, latest: object) -> None:
+    def test_no_previous_release(
+        self, releases: object, latest: object, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """No release at all, or none carrying this extension's tarballs."""
         self.forge(releases, latest)
         self.graph("demo_ext--1.0.0--1.1.0.sql")
-        result = self.previous("guard")
-        assert result.returncode == 0, result.stderr
-        assert result.stdout == (
+        status, out, err = self.previous("guard", capfd=capfd)
+        assert status == 0, err
+        assert out == (
             "::notice::no previous release; first publish needs no upgrade path\n"
         )
 
-    def test_a_rerun(self) -> None:
+    def test_a_rerun(self, capfd: pytest.CaptureFixture[str]) -> None:
         """A release already carries THIS version: nothing to upgrade from."""
         self.forge([release("v1.2.0", "demo_ext-1.2.0-pg18-linux-arm64.tar.gz")])
-        result = self.previous("guard")
-        assert result.returncode == 0, result.stderr
-        assert (
-            result.stdout == "::notice::re-run of 1.2.0; upgrade path not applicable\n"
-        )
+        status, out, err = self.previous("guard", capfd=capfd)
+        assert status == 0, err
+        assert out == "::notice::re-run of 1.2.0; upgrade path not applicable\n"
         assert len(self.gh_calls()) == 1
 
-    def test_the_extensions_first_publish(self) -> None:
+    def test_the_extensions_first_publish(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A previous release that shipped no tarball of this extension (#87).
 
         One meaning of first publish now (#1592): no version in the graph
@@ -400,10 +414,10 @@ class TestControlFileRefusal(TestPreviousRelease):
         """
         self.forge([release("v1.1.0", "demo-cli.tar.gz")], "v1.1.0")
         self.graph("demo_ext--1.0.0--1.1.0.sql")
-        result = self.previous("guard")
-        assert result.returncode == 0, result.stderr
+        status, out, err = self.previous("guard", capfd=capfd)
+        assert status == 0, err
         assert (
-            result.stdout
+            out
             == "::notice::no previous release; first publish needs no upgrade path\n"
         )
         assert self.gh_calls()[0] == (
@@ -412,37 +426,45 @@ class TestControlFileRefusal(TestPreviousRelease):
             ' | "\\(.tag)\\t\\(.asset)"'
         )
 
-    def test_a_missing_upgrade_path_is_refused(self) -> None:
+    def test_a_missing_upgrade_path_is_refused(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Shipped before, no sql/<ext>--prev--new.sql: stranded, refused."""
         self.forge([release("v1.1.0", DEMO_CELL)], "v1.1.0")
         self.graph("demo_ext--1.0.0--1.1.0.sql")
-        result = self.previous("guard")
-        assert result.returncode == 1
-        assert result.stderr == (
+        status, out, err = self.previous("guard", capfd=capfd)
+        assert status == 1
+        assert err == (
             "::error::previous-release: no upgrade path"
             " crates/demo-ext/sql/demo_ext--1.1.0--1.2.0.sql"
             " from published 1.1.0 (v1.1.0) — existing installations would be"
             " stranded\n"
         )
 
-    def test_a_present_upgrade_path_passes(self) -> None:
+    def test_a_present_upgrade_path_passes(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """The derived script is there: the release may proceed."""
         self.forge([release("v1.1.0", DEMO_CELL)], "v1.1.0")
         self.graph("demo_ext--1.0.0--1.1.0.sql", "demo_ext--1.1.0--1.2.0.sql")
-        result = self.previous("guard")
-        assert result.returncode == 0, result.stderr
-        assert result.stdout == "::notice::upgrade path 1.1.0 -> 1.2.0 present\n"
+        status, out, err = self.previous("guard", capfd=capfd)
+        assert status == 0, err
+        assert out == "::notice::upgrade path 1.1.0 -> 1.2.0 present\n"
 
-    def test_a_failed_listing_read_is_red(self) -> None:
+    def test_a_failed_listing_read_is_red(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Gh failing on the listing is a red with gh's own words, never a pass.
 
         The script row: gh's words are on the child's own stderr.
         """
         args = ["guard", "--repo", "acme/demo", "--version", "1.2.0"]
-        result = self.helper([*args, "--crate-dir", self.CRATE], self.env, script=True)
-        assert result.returncode == 1
-        assert result.stdout == ""
-        assert result.stderr == "HTTP 502\n"
+        status, out, err = self.helper(
+            [*args, "--crate-dir", self.CRATE], self.env, script=True, capfd=capfd
+        )
+        assert status == 1
+        assert out == ""
+        assert err == "HTTP 502\n"
 
 
 class TestPreviousTarball(TestPreviousRelease):
@@ -450,7 +472,7 @@ class TestPreviousTarball(TestPreviousRelease):
 
     CELL = ("--pg", "18", "--arch", "arm64")
 
-    def fetch(self, **stubs: str) -> Done:
+    def fetch(self, *, capfd: pytest.CaptureFixture[str], **stubs: str) -> Done:
         """Fetch for pg18/arm64 into the row's directory.
 
         Returns:
@@ -463,30 +485,31 @@ class TestPreviousTarball(TestPreviousRelease):
             "--dest",
             str(self.root / "prevroot"),
         )
-        return self.previous("fetch", *self.CELL, *dest, **stubs)
+        return self.previous("fetch", *self.CELL, *dest, **stubs, capfd=capfd)
 
-    def test_no_previous_release_or_a_rerun_skips(self) -> None:
+    def test_no_previous_release_or_a_rerun_skips(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """No release, none of this extension, or this version: said why."""
         rerun = release("v1.2.0", "demo_ext-1.2.0-pg18-linux-arm64.tar.gz")
         for releases in ([], [release("release-1")], [rerun]):
             self.forge(releases)
             self.graph("demo_ext--1.0.0--1.1.0.sql")
-            result = self.fetch()
-            assert result.returncode == 0
-            assert result.stdout == ""
-            assert (
-                result.stderr
-                == "::notice::no previous release; upgrade execution skipped\n"
-            )
+            status, out, err = self.fetch(capfd=capfd)
+            assert status == 0
+            assert out == ""
+            assert err == "::notice::no previous release; upgrade execution skipped\n"
 
-    def test_no_tarball_for_this_cell_skips(self) -> None:
+    def test_no_tarball_for_this_cell_skips(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """The predecessor shipped no tarball of this pg and arch."""
         self.forge([release("v1.1.0", "demo_ext-1.1.0-pg17-linux-arm64.tar.gz")])
         self.graph("demo_ext--1.0.0--1.1.0.sql")
-        result = self.fetch()
-        assert result.returncode == 0
-        assert result.stdout == ""
-        assert result.stderr == (
+        status, out, err = self.fetch(capfd=capfd)
+        assert status == 0
+        assert out == ""
+        assert err == (
             "::notice::v1.1.0 shipped no demo_ext-1.1.0-pg18-linux-arm64.tar.gz;"
             " upgrade execution skipped\n"
         )
@@ -511,25 +534,27 @@ class TestPreviousTarball(TestPreviousRelease):
         shutil.rmtree(self.root / "pkgroot")
         return tarball
 
-    def test_the_tarball_is_extracted_and_the_version_printed(self) -> None:
+    def test_the_tarball_is_extracted_and_the_version_printed(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """The cell's tarball lands under DEST, and stdout is the version."""
         self.forge([release("v1.1.0", DEMO_CELL)])
         self.graph("demo_ext--1.0.0--1.1.0.sql")
-        result = self.fetch(tarball=str(self.tarball()))
-        assert result.returncode == 0, result.stderr
-        assert result.stdout == "1.1.0\n"
+        status, out, err = self.fetch(tarball=str(self.tarball()), capfd=capfd)
+        assert status == 0, err
+        assert out == "1.1.0\n"
         extracted = self.root / "prevroot" / "pkgroot" / "usr" / "lib" / "demo_ext.so"
         assert extracted.read_bytes() == b"\x7fELF"
 
-    def test_a_corrupt_tarball_is_red(self) -> None:
+    def test_a_corrupt_tarball_is_red(self, capfd: pytest.CaptureFixture[str]) -> None:
         """Tar failing is tar's own red, and no version is printed."""
         self.forge([release("v1.1.0", DEMO_CELL)])
         self.graph("demo_ext--1.0.0--1.1.0.sql")
         tarball = self.root / "asset.tar.gz"
         tarball.write_bytes(b"not a tarball")
-        result = self.fetch(tarball=str(tarball))
-        assert result.returncode != 0
-        assert result.stdout == ""
+        status, out, err = self.fetch(tarball=str(tarball), capfd=capfd)
+        assert status != 0
+        assert out == ""
 
 
 # --------------------------------------------------------------------
@@ -558,7 +583,7 @@ class TestOnePredecessor(TestPreviousRelease):
         names = (TESTDATA / f"edtf-sql-{sql_at}.txt").read_text().split()
         self.graph(*names, *extra)
 
-    def predecessor(self, version: str) -> Done:
+    def predecessor(self, version: str, *, capfd: pytest.CaptureFixture[str]) -> Done:
         """Ask the helper for edtf_postgres's predecessor of `version`.
 
         Returns:
@@ -567,57 +592,71 @@ class TestOnePredecessor(TestPreviousRelease):
         """
         control = f"{self.CRATE}/edtf_postgres.control"
         args = ["predecessor", "--repo", "acme/demo", "--version", version]
-        return self.helper([*args, "--control", control], self.env)
+        return self.helper([*args, "--control", control], self.env, capfd=capfd)
 
-    def test_an_imported_tag_scheme_yields_the_published_predecessor(self) -> None:
+    def test_an_imported_tag_scheme_yields_the_published_predecessor(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """At import, 1.2.3 sits on `edtf-postgres-v1.2.3` (main: none)."""
         self.edtf("edtf-releases.json", "v1.2.3", "edtf-postgres-v1.2.3")
-        result = self.predecessor("1.3.0")
-        assert result.returncode == 0, result.stderr
-        assert result.stdout == "1.2.3\tedtf-postgres-v1.2.3\n"
+        status, out, err = self.predecessor("1.3.0", capfd=capfd)
+        assert status == 0, err
+        assert out == "1.2.3\tedtf-postgres-v1.2.3\n"
 
-    def test_a_burned_head_yields_the_next_installable_version(self) -> None:
+    def test_a_burned_head_yields_the_next_installable_version(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """At v1.3.1 the graph's next head, 1.3.0, burned: 1.2.3 it is."""
         self.edtf("edtf-releases.json", "v1.3.1", "edtf-postgres-v1.2.3")
-        result = self.predecessor("1.3.1")
-        assert result.returncode == 0, result.stderr
-        assert result.stdout == "1.2.3\tedtf-postgres-v1.2.3\n"
+        status, out, err = self.predecessor("1.3.1", capfd=capfd)
+        assert status == 0, err
+        assert out == "1.2.3\tedtf-postgres-v1.2.3\n"
 
-    def test_an_older_release_marked_latest_yields_the_newest(self) -> None:
+    def test_an_older_release_marked_latest_yields_the_newest(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A maintenance release v1.3.4 published last: 1.3.5 is still newest."""
         self.edtf("edtf-releases-v1.3.5.json", "v1.3.5", "v1.3.4")
-        result = self.predecessor("1.3.6")
-        assert result.returncode == 0, result.stderr
-        assert result.stdout == "1.3.5\tv1.3.5\n"
+        status, out, err = self.predecessor("1.3.6", capfd=capfd)
+        assert status == 0, err
+        assert out == "1.3.5\tv1.3.5\n"
 
-    def test_an_empty_graph_yields_nothing(self) -> None:
+    def test_an_empty_graph_yields_nothing(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """No upgrade script at all: first publish, whatever is published."""
         self.env["STUB_LISTING"] = str(TESTDATA / "edtf-releases-v1.3.5.json")
         self.graph("README.md")
-        result = self.predecessor("1.3.6")
-        assert result.returncode == 0, result.stderr
-        assert result.stdout == ""
+        status, out, err = self.predecessor("1.3.6", capfd=capfd)
+        assert status == 0, err
+        assert out == ""
 
-    def test_the_guard_refuses_from_the_imported_predecessor(self) -> None:
+    def test_the_guard_refuses_from_the_imported_predecessor(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """No 1.2.3--1.3.0 path: refused, naming the release that carries 1.2.3."""
         self.edtf("edtf-releases.json", "v1.2.3", "edtf-postgres-v1.2.3")
-        result = self.previous("guard", version="1.3.0")
-        assert result.returncode == 1, result.stderr
-        assert result.stderr == (
+        status, out, err = self.previous("guard", version="1.3.0", capfd=capfd)
+        assert status == 1, err
+        assert err == (
             "::error::previous-release: no upgrade path"
             " crates/edtf-postgres/sql/edtf_postgres--1.2.3--1.3.0.sql from"
             " published 1.2.3 (edtf-postgres-v1.2.3) — existing installations"
             " would be stranded\n"
         )
 
-    def test_the_guard_checks_past_a_burned_head(self) -> None:
+    def test_the_guard_checks_past_a_burned_head(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """At v1.3.1 the path is from 1.2.3, and it is there."""
         self.edtf("edtf-releases.json", "v1.3.1", "edtf-postgres-v1.2.3")
-        result = self.previous("guard", version="1.3.1")
-        assert result.returncode == 0, result.stderr
-        assert result.stdout == "::notice::upgrade path 1.2.3 -> 1.3.1 present\n"
+        status, out, err = self.previous("guard", version="1.3.1", capfd=capfd)
+        assert status == 0, err
+        assert out == "::notice::upgrade path 1.2.3 -> 1.3.1 present\n"
 
-    def test_the_guard_checks_from_the_newest_not_the_latest(self) -> None:
+    def test_the_guard_checks_from_the_newest_not_the_latest(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Latest is v1.3.4; the path owed is from 1.3.5, and it is there."""
         self.edtf(
             "edtf-releases-v1.3.5.json",
@@ -625,11 +664,13 @@ class TestOnePredecessor(TestPreviousRelease):
             "v1.3.4",
             "edtf_postgres--1.3.5--1.3.6.sql",
         )
-        result = self.previous("guard", version="1.3.6")
-        assert result.returncode == 0, result.stderr
-        assert result.stdout == "::notice::upgrade path 1.3.5 -> 1.3.6 present\n"
+        status, out, err = self.previous("guard", version="1.3.6", capfd=capfd)
+        assert status == 0, err
+        assert out == "::notice::upgrade path 1.3.5 -> 1.3.6 present\n"
 
-    def test_the_fetch_downloads_the_imported_predecessor(self) -> None:
+    def test_the_fetch_downloads_the_imported_predecessor(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """The upgrade execution starts from 1.2.3, off its own release."""
         self.edtf("edtf-releases.json", "v1.3.1", "edtf-postgres-v1.2.3")
         tarball = self.root / "asset.tar.gz"
@@ -638,9 +679,11 @@ class TestOnePredecessor(TestPreviousRelease):
         dest: tuple[str, ...] = ("--tarball", str(self.root / "prev.tar.gz"))
         dest += ("--dest", str(self.root / "prevroot"))
         cell = ("--pg", "18", "--arch", "arm64", *dest)
-        result = self.previous("fetch", *cell, version="1.3.1", tarball=str(tarball))
-        assert result.returncode == 0, result.stderr
-        assert result.stdout == "1.2.3\n"
+        status, out, err = self.previous(
+            "fetch", *cell, version="1.3.1", tarball=str(tarball), capfd=capfd
+        )
+        assert status == 0, err
+        assert out == "1.2.3\n"
         assert (
             "release download edtf-postgres-v1.2.3 --repo acme/demo --pattern"
             " edtf_postgres-1.2.3-pg18-linux-arm64.tar.gz --output"
@@ -669,7 +712,7 @@ class TestOlderLine(TestPreviousRelease):
         )
         self.graph("demo_ext--1.2.3--1.2.4.sql", "demo_ext--1.2.4--1.3.0.sql")
 
-    def predecessor(self, version: str) -> Done:
+    def predecessor(self, version: str, *, capfd: pytest.CaptureFixture[str]) -> Done:
         """Ask the helper for demo_ext's predecessor of `version`.
 
         Returns:
@@ -678,7 +721,7 @@ class TestOlderLine(TestPreviousRelease):
         """
         control = f"{self.CRATE}/demo_ext.control"
         args = ["predecessor", "--repo", "acme/demo", "--version", version]
-        return self.helper([*args, "--control", control], self.env)
+        return self.helper([*args, "--control", control], self.env, capfd=capfd)
 
     @pytest.mark.parametrize(
         "version,want",
@@ -688,14 +731,16 @@ class TestOlderLine(TestPreviousRelease):
         ),
     )
     def test_each_line_yields_its_own_predecessor(
-        self, version: object, want: object
+        self, version: object, want: object, capfd: pytest.CaptureFixture[str]
     ) -> None:
         """1.2.5 comes from 1.2.4 on v1.2.4; 1.3.1 from 1.3.0 on v1.3.0."""
-        result = self.predecessor(version)
+        result = self.predecessor(version, capfd=capfd)
         assert result.returncode == 0, result.stderr
         assert want == result.stdout
 
-    def test_the_record_names_what_the_forge_carries(self) -> None:
+    def test_the_record_names_what_the_forge_carries(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """`record`: the carried versions written, the predecessor printed.
 
         1.2.3 is in the graph but on no release, so it is not recorded;
@@ -704,19 +749,23 @@ class TestOlderLine(TestPreviousRelease):
         out = self.root / ".pgrx-installable"
         control = f"{self.CRATE}/demo_ext.control"
         args = ["record", "--repo", "acme/demo", "--version", "1.3.1"]
-        result = self.helper([*args, "--out", str(out), control], self.env)
-        assert result.returncode == 0, result.stderr
-        assert result.stdout == "demo_ext\t1.3.0\tv1.3.0\n"
+        status, out, err = self.helper(
+            [*args, "--out", str(out), control], self.env, capfd=capfd
+        )
+        assert status == 0, err
+        assert out == "demo_ext\t1.3.0\tv1.3.0\n"
         written = out.read_text(encoding="utf-8")
         assert written.startswith("# pgrx installable versions"), written
         assert written.endswith("# derived: v1.3.1\ndemo_ext 1.3.0 1.2.4\n"), written
 
-    def test_the_guard_owes_no_downgrade_path(self) -> None:
+    def test_the_guard_owes_no_downgrade_path(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Releasing 1.2.5 with 1.2.4--1.2.5 present passes; 1.3.0 is not asked."""
         self.graph("demo_ext--1.2.4--1.2.5.sql")
-        result = self.previous("guard", version="1.2.5")
-        assert result.returncode == 0, result.stdout
-        assert result.stdout == "::notice::upgrade path 1.2.4 -> 1.2.5 present\n"
+        status, out, err = self.previous("guard", version="1.2.5", capfd=capfd)
+        assert status == 0, out
+        assert out == "::notice::upgrade path 1.2.4 -> 1.2.5 present\n"
 
 
 class TestNoSiteAsksForTheLatestRelease:

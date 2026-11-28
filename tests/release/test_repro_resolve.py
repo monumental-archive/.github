@@ -101,6 +101,7 @@ class TestReadTheLatestRelease:
         checksums: str | None = CHECKSUMS,
         manifest: str | None = None,
         script: bool = False,
+        capfd: pytest.CaptureFixture[str],
     ) -> tuple[subprocess.CompletedProcess[str] | support.Called, str]:
         """Run the helper against a latest release in the given state.
 
@@ -142,13 +143,20 @@ class TestReadTheLatestRelease:
             def call() -> int:
                 return repro_resolve.main([])
 
-            done = support.call(call, env=env, cwd=self.work)
+            with pytest.MonkeyPatch.context() as patched:
+                for name, value in env.items():
+                    patched.setenv(name, value)
+                patched.chdir(self.work)
+                status = call()
+            out, err = capfd.readouterr()
         return done, output.read_text(encoding="utf-8")
 
-    def test_typed_release_hands_its_manifest_on(self) -> None:
+    def test_typed_release_hands_its_manifest_on(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """stele#185: a typed manifest scopes the population."""
         manifest = json.dumps(TYPED, indent=2) + "\n\n"
-        done, out = self.resolve(manifest=manifest)
+        done, out = self.resolve(manifest=manifest, capfd=capfd)
         assert done.returncode == 0, done.stdout + done.stderr
         assert out == (
             f"checksums<<CHECKSUMS_EOF\n{CHECKSUMS}CHECKSUMS_EOF\n"
@@ -160,9 +168,11 @@ class TestReadTheLatestRelease:
             " population\n::notice::proving v1.2.3 reproduces\n"
         )
 
-    def test_schema_one_manifest_is_not_handed_on(self) -> None:
+    def test_schema_one_manifest_is_not_handed_on(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """An untyped manifest would seal CANNOT_JUDGE (exit 4): withheld."""
-        done, out = self.resolve(manifest=dumps({"schema": 1}))
+        done, out = self.resolve(manifest=dumps({"schema": 1}), capfd=capfd)
         assert done.returncode == 0, done.stdout + done.stderr
         assert "manifest<<MANIFEST_EOF\n\nMANIFEST_EOF\n" in out
         assert (
@@ -170,31 +180,39 @@ class TestReadTheLatestRelease:
             " subject it published\n"
         ) in done.stdout
 
-    def test_entries_with_no_name_are_not_typing(self) -> None:
+    def test_entries_with_no_name_are_not_typing(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A first entry with no name answers nothing either."""
-        done, out = self.resolve(manifest=dumps({"entries": [{"type": "x"}]}))
+        done, out = self.resolve(
+            manifest=dumps({"entries": [{"type": "x"}]}), capfd=capfd
+        )
         assert done.returncode == 0, done.stdout + done.stderr
         assert "manifest<<MANIFEST_EOF\n\nMANIFEST_EOF\n" in out
 
-    def test_no_manifest_judges_the_whole_release(self) -> None:
+    def test_no_manifest_judges_the_whole_release(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A release older than the manifest keeps the whole-set comparison."""
-        done, out = self.resolve()
+        done, out = self.resolve(capfd=capfd)
         assert done.returncode == 0, done.stdout + done.stderr
         assert "manifest<<MANIFEST_EOF\n\nMANIFEST_EOF\n" in out
         assert "carries no per-class typing" in done.stdout
 
-    def test_latest_release_that_is_not_a_v_release(self) -> None:
+    def test_latest_release_that_is_not_a_v_release(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Refused by name, nothing written."""
-        done, out = self.resolve("nightly")
+        done, out = self.resolve("nightly", capfd=capfd)
         assert done.returncode == 1, done.stdout + done.stderr
         assert done.stderr == (
             "::error::repro-resolve: latest release tag nightly is not a v* release\n"
         )
         assert out == ""
 
-    def test_empty_checksums(self) -> None:
+    def test_empty_checksums(self, capfd: pytest.CaptureFixture[str]) -> None:
         """Nothing to prove against is refused."""
-        done, out = self.resolve(checksums="")
+        done, out = self.resolve(checksums="", capfd=capfd)
         assert done.returncode == 1, done.stdout + done.stderr
         assert done.stderr == (
             "::error::repro-resolve: release v1.2.3 has no checksums.txt — nothing"
@@ -202,19 +220,21 @@ class TestReadTheLatestRelease:
         )
         assert out == ""
 
-    def test_absent_checksums_fails_with_gh(self) -> None:
+    def test_absent_checksums_fails_with_gh(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A release with no checksums asset fails the download, as gh does.
 
         The script row: gh's message is on the child's own stderr.
         """
-        done, out = self.resolve(checksums=None, script=True)
+        done, out = self.resolve(checksums=None, script=True, capfd=capfd)
         assert done.returncode == 1, done.stdout + done.stderr
         assert "release asset not found" in done.stderr
         assert out == ""
 
-    def test_manifest_that_is_not_json(self) -> None:
+    def test_manifest_that_is_not_json(self, capfd: pytest.CaptureFixture[str]) -> None:
         """A manifest that cannot be read refuses rather than guessing."""
-        done, out = self.resolve(manifest="{")
+        done, out = self.resolve(manifest="{", capfd=capfd)
         assert done.returncode == 1, done.stdout + done.stderr
         assert done.stderr.startswith(
             "::error::repro-resolve: evidence-manifest.json is not JSON:"
@@ -222,12 +242,14 @@ class TestReadTheLatestRelease:
         assert out == ""
 
     @pytest.mark.parametrize("entries", (True, {"": None}, "abc"))
-    def test_manifest_whose_entries_are_not_a_list(self, entries: object) -> None:
+    def test_manifest_whose_entries_are_not_a_list(
+        self, entries: object, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Refused by name (#1556's shrunk examples), nothing written.
 
         `true` died with a TypeError and `{"": null}` with a KeyError.
         """
-        done, out = self.resolve(manifest=dumps({"entries": entries}))
+        done, out = self.resolve(manifest=dumps({"entries": entries}), capfd=capfd)
         assert done.returncode == 1, done.stdout + done.stderr
         assert done.stderr == (
             "::error::repro-resolve: evidence-manifest.json is not an"

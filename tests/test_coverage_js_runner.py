@@ -138,7 +138,7 @@ class TestLocked:
 @pytest.mark.usefixtures("_stack")
 class TestMain:
     """The runner line for a planted tree's package.json (#1659)."""
-    
+
     @pytest.fixture
     def _stack(self, request: pytest.FixtureRequest) -> None:
         """Hold the row's cleanups, undone last first after it ends."""
@@ -212,7 +212,7 @@ FLAGS = [
 @pytest.mark.usefixtures("_stack")
 class TestMeasuredRun:
     """`--measured-run`: the vitest run on `measured`'s line (#2105)."""
-    
+
     @pytest.fixture
     def _stack(self, request: pytest.FixtureRequest) -> None:
         """Hold the row's cleanups, undone last first after it ends."""
@@ -220,7 +220,10 @@ class TestMeasuredRun:
         request.addfinalizer(self.stack.close)
 
     def call(
-        self, *command: str, files: dict[str, str] | None = None
+        self,
+        *command: str,
+        files: dict[str, str] | None = None,
+        capfd: pytest.CaptureFixture[str],
     ) -> tuple[int, str, str]:
         """Call main in a scratch tree of a pnpm vitest tree with v8.
 
@@ -238,12 +241,17 @@ class TestMeasuredRun:
         for name, text in planted.items():
             (Path(tmp.name) / name).write_text(text, encoding="utf-8")
         argv = ["--measured-run", "/run/typescript", *planted, "--", *command]
-        done = support.call(lambda: cj.main(argv), cwd=tmp.name)
-        return done.returncode, done.stdout, done.stderr
+        with pytest.MonkeyPatch.context() as patched:
+            patched.chdir(tmp.name)
+            status = cj.main(argv)
+        out, err = capfd.readouterr()
+        return status, out, err
 
-    def test_a_launched_run_gains_the_flags(self) -> None:
+    def test_a_launched_run_gains_the_flags(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """`pnpm exec vitest run x`: the five flags, NUL-separated."""
-        status, out, err = self.call("pnpm", "exec", "vitest", "run", "x")
+        status, out, err = self.call("pnpm", "exec", "vitest", "run", "x", capfd=capfd)
         assert (status, err) == (0, "")
         want = ["pnpm", "exec", "vitest", "run", "x", *FLAGS]
         assert "".join(f"{w}\0" for w in want) == out
@@ -265,28 +273,41 @@ class TestMeasuredRun:
             [],
         ),
     )
-    def test_what_is_not_a_run_is_unchanged(self, command: object) -> None:
+    def test_what_is_not_a_run_is_unchanged(
+        self, command: object, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Another subcommand, another launcher, or no vitest: nothing."""
-        assert self.call(*command) == (0, "", "")
+        assert self.call(*command, capfd=capfd) == (0, "", "")
 
-    def test_a_tree_the_leg_reports_on_is_unchanged(self) -> None:
+    def test_a_tree_the_leg_reports_on_is_unchanged(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """No provider pinned: the leg names it; measured adds nothing."""
         lock = "lockfileVersion: '9.0'\npackages:\n  vitest@4.1.12:\n"
-        assert self.call("vitest", "run", files={"pnpm-lock.yaml": lock}) == (0, "", "")
+        assert self.call(
+            "vitest", "run", files={"pnpm-lock.yaml": lock}, capfd=capfd
+        ) == (0, "", "")
 
-    def test_a_coverage_flag_of_its_own_is_refused(self) -> None:
+    def test_a_coverage_flag_of_its_own_is_refused(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """The leg owns the coverage flags: exit 1, named."""
-        status, out, err = self.call("vitest", "run", "--coverage.enabled=false")
+        status, out, err = self.call(
+            "vitest", "run", "--coverage.enabled=false", capfd=capfd
+        )
         assert (status, out) == (1, "")
         assert err.startswith(
             "measured: --coverage.enabled=false is on the vitest run"
         ), err
 
-    def test_no_separator_is_a_usage_error(self) -> None:
+    def test_no_separator_is_a_usage_error(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """The command follows `--`; without it nothing is read."""
-        done = support.call(lambda: cj.main(["--measured-run", "/d"]))
-        assert done.returncode == 2
-        assert "usage" in done.stderr
+        status = cj.main(["--measured-run", "/d"])
+        out, err = capfd.readouterr()
+        assert status == 2
+        assert "usage" in err
 
 
 class TestScript:

@@ -14,7 +14,6 @@ import gzip
 import hashlib
 import io
 import os
-import subprocess
 import sys
 import tarfile
 from dataclasses import dataclass
@@ -107,6 +106,7 @@ def run_helper(
     repo: str = "monumental-archive/edtf",
     *,
     fail: bool = False,
+    capfd: pytest.CaptureFixture[str],
 ) -> Run:
     """Call the command with two planted builds and a tracked count.
 
@@ -135,14 +135,18 @@ def run_helper(
             STUB_TRACKED=str(tracked),
             STUB_FAIL="1" if fail else "",
         )
-        result = support.call(
-            lambda: source_archive.main([]), env=env, cwd=work, command=COMMAND
-        )
+        with pytest.MonkeyPatch.context() as patched:
+            for name, value in env.items():
+                patched.setenv(name, value)
+            patched.chdir(work)
+            patched.setattr(sys, "argv", [COMMAND])
+            status = source_archive.main([])
+        out, err = capfd.readouterr()
         dist = work / "dist"
         return Run(
-            result.returncode,
-            result.stdout,
-            result.stderr,
+            status,
+            out,
+            err,
             log.read_text().splitlines() if log.exists() else [],
             sorted(p.name for p in dist.iterdir()) if dist.is_dir() else [],
         )
@@ -179,13 +183,15 @@ class TestBuildStepIsTheHelper:
 class TestBuilds:
     """Two equal builds of the tagged tree pass."""
 
-    def test_two_equal_builds_ship_one_archive(self) -> None:
+    def test_two_equal_builds_ship_one_archive(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Both builds archive the tag under the release's prefix."""
         data = tarball(5)
-        run = run_helper((data, data), tracked=5)
-        assert run.returncode == 0, run.stdout + run.stderr
+        status, out, err = run_helper((data, data), tracked=5, capfd=capfd)
+        assert status == 0, out + err
         base = f"edtf-{VERSION}"
-        assert f"::notice::{base}.tar.gz: 5 entries, digest {sha(data)}\n" == run.stdout
+        assert f"::notice::{base}.tar.gz: 5 entries, digest {sha(data)}\n" == out
         shipped: list[str] = [f"{base}.tar.gz"]
         assert shipped == run.shipped
         archives = [x for x in run.git if x.startswith("archive")]
@@ -195,62 +201,76 @@ class TestBuilds:
         ) == archives[0]
         assert archives[1].endswith(f"/{base}.check.tar.gz v{VERSION}")
 
-    def test_a_dot_repository_gets_a_visible_name(self) -> None:
+    def test_a_dot_repository_gets_a_visible_name(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """The .github repository's asset is github-<version>.tar.gz."""
         data = tarball(2)
-        run = run_helper((data, data), tracked=2, repo="monumental-archive/.github")
-        assert run.returncode == 0, run.stdout + run.stderr
+        status, out, err = run_helper(
+            (data, data), tracked=2, repo="monumental-archive/.github", capfd=capfd
+        )
+        assert status == 0, out + err
         shipped: list[str] = [f"github-{VERSION}.tar.gz"]
         assert shipped == run.shipped
 
-    def test_more_than_half_the_tracked_files_is_enough(self) -> None:
+    def test_more_than_half_the_tracked_files_is_enough(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Four entries for seven tracked files: 4 > 7 // 2."""
         data = tarball(4)
-        run = run_helper((data, data), tracked=7)
-        assert run.returncode == 0, run.stdout + run.stderr
+        status, out, err = run_helper((data, data), tracked=7, capfd=capfd)
+        assert status == 0, out + err
 
 
 class TestRefuses:
     """One row per refusal, each message asserted."""
 
-    def test_two_builds_that_differ_are_refused(self) -> None:
+    def test_two_builds_that_differ_are_refused(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """The archive is not reproducible, so nothing can check it."""
         a, b = tarball(5), tarball(5, salt="x")
-        run = run_helper((a, b), tracked=5)
-        assert run.returncode == 1
+        status, out, err = run_helper((a, b), tracked=5, capfd=capfd)
+        assert status == 1
         assert (
             f"::error::source-archive: source archive is not deterministic"
             f" ({sha(a)} vs {sha(b)})\n"
-        ) == run.stderr
+        ) == err
         assert "ls-files" not in run.git
 
-    def test_half_the_tracked_files_is_refused(self) -> None:
+    def test_half_the_tracked_files_is_refused(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Three entries for seven tracked files: 3 <= 7 // 2."""
         data = tarball(3)
-        run = run_helper((data, data), tracked=7)
-        assert run.returncode == 1
+        status, out, err = run_helper((data, data), tracked=7, capfd=capfd)
+        assert status == 1
         assert (
-            run.stderr
+            err
             == "::error::source-archive: archive lists 3 entries for 7 tracked files\n"
         )
 
-    def test_an_empty_archive_is_refused(self) -> None:
+    def test_an_empty_archive_is_refused(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """No entries at all is a truncated stream."""
         data = tarball(0)
-        run = run_helper((data, data), tracked=4)
-        assert run.returncode == 1
+        status, out, err = run_helper((data, data), tracked=4, capfd=capfd)
+        assert status == 1
         assert (
-            run.stderr
+            err
             == "::error::source-archive: archive lists 0 entries for 4 tracked files\n"
         )
 
-    def test_a_failing_git_fails_the_step_with_its_status(self) -> None:
+    def test_a_failing_git_fails_the_step_with_its_status(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A tag git cannot archive: git's status and message.
 
         git's message is its own stderr, which the call reads.
         """
         data = tarball(1)
-        run = run_helper((data, data), tracked=1, fail=True)
-        assert run.returncode == 128
-        assert run.stderr == "fatal: not a valid object\n"
-        assert run.stdout == ""
+        status, out, err = run_helper((data, data), tracked=1, fail=True, capfd=capfd)
+        assert status == 128
+        assert err == "fatal: not a valid object\n"
+        assert out == ""

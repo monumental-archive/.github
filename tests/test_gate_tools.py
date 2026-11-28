@@ -799,7 +799,9 @@ class TestTable:
                 patched.setattr(here, "PACKAGE", belt_dir / "belt")
                 support.patch_dict(patched, _SOURCES, clear=True)
                 support.patch_dict(patched, _CODE, clear=True)
-                wraps = expand('"${ORG_PYTHON}" -I "${ORG_CANON_DIR}/belt" wraps', set())
+                wraps = expand(
+                    '"${ORG_PYTHON}" -I "${ORG_CANON_DIR}/belt" wraps', set()
+                )
                 assert first_call(wraps, ["hadolint"]) == 1
 
     def test_the_belt_helpers_that_run_belt_scripts(self) -> None:
@@ -817,7 +819,9 @@ class TestTable:
             }
             assert {"clippy-ladder.sh", "pgrx-env.sh"} <= reached
             command = helper.removesuffix(".py").replace("_", "-")
-            lines = expand(f'"${{ORG_PYTHON}}" -I "${{ORG_CANON_DIR}}/belt" {command}', set())
+            lines = expand(
+                f'"${{ORG_PYTHON}}" -I "${{ORG_CANON_DIR}}/belt" {command}', set()
+            )
             assert first_call(lines, ["jq"]) is not None
         none: list[str] = []
         assert none == python_code("testing_adoption.py").scripts
@@ -1031,44 +1035,52 @@ class TestHelper:
         assert out == gate_tools.disable_env(["aqua:hadolint/hadolint", "zizmor"])
 
     @pytest.mark.parametrize("tree", ["go", "canon"])
-    def test_the_disable_mode(self, tree: str, tmp_path: Path) -> None:
+    def test_the_disable_mode(
+        self, tree: str, tmp_path: Path, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A Go tree leaves hadolint out; the canon leaves nothing out."""
         root = git_tree({**WORKFLOW, "go.mod": "module x\n"}) if tree == "go" else CANON
         env_file = tmp_path / "env"
         env_file.write_text("")
-        done = support.call(
-            lambda: gate_tools.main(["--root", str(root), "disable"]),
-            env=clean_env() | {"GITHUB_ENV": str(env_file)},
-            command=STEP,
-        )
-        assert done.returncode == 0, done.stderr
+        with pytest.MonkeyPatch.context() as patched:
+            for name, value in (clean_env() | {"GITHUB_ENV": str(env_file)}).items():
+                patched.setenv(name, value)
+            patched.setattr(sys, "argv", [STEP])
+            status = gate_tools.main(["--root", str(root), "disable"])
+        out, err = capfd.readouterr()
+        assert status == 0, err
         written = env_file.read_text()
-        assert "gate-tools: aqua:golangci/golangci-lint: needed" in done.stdout
+        assert "gate-tools: aqua:golangci/golangci-lint: needed" in out
         if tree == "go":
             assert "aqua:hadolint/hadolint" in written
             assert "golangci" not in written
         else:
             assert written == ""
 
-    def test_the_helper_refuses_a_table_out_of_step(self, tmp_path: Path) -> None:
+    def test_the_helper_refuses_a_table_out_of_step(
+        self, tmp_path: Path, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A belt key with no row is refused by name, not left out."""
         text = (BELT / "gate-tools.toml").read_text("utf-8")
         stub = text.replace('[tools."aqua:hadolint/hadolint"]', "[x]")
-        table = support.belt(tmp_path, stubs={"gate-tools.toml": stub}) / "gate-tools.toml"
-        done = support.call(
-            lambda: gate_tools.main(["--table", str(table), "list"]),
-            env=support.env(),
-            cwd=CANON,
-            command=STEP,
+        table = (
+            support.belt(tmp_path, stubs={"gate-tools.toml": stub}) / "gate-tools.toml"
         )
-        assert done.returncode == 1
-        assert f"::error::{STEP}: aqua:hadolint/hadolint is in one of" in done.stderr
+        with pytest.MonkeyPatch.context() as patched:
+            for name, value in (support.env()).items():
+                patched.setenv(name, value)
+            patched.chdir(CANON)
+            patched.setattr(sys, "argv", [STEP])
+            status = gate_tools.main(["--table", str(table), "list"])
+        out, err = capfd.readouterr()
+        assert status == 1
+        assert f"::error::{STEP}: aqua:hadolint/hadolint is in one of" in err
 
 
 @pytest.mark.usefixtures("_stack")
 class TestRefusals:
     """A table or belt config of the wrong shape is refused by name."""
-    
+
     @pytest.fixture
     def _stack(self, request: pytest.FixtureRequest) -> None:
         """Hold the row's cleanups, undone last first after it ends."""

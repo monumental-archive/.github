@@ -117,7 +117,12 @@ class TestCitation:
         self.plant(".badge-states", source(".badge-states"))
         self.plant("CITATION.cff", citation)
 
-    def helper(self, *files: str, untracked: tuple[str, ...] = ()) -> support.Called:
+    def helper(
+        self,
+        *files: str,
+        untracked: tuple[str, ...] = (),
+        capfd: pytest.CaptureFixture[str],
+    ) -> tuple[int, str, str]:
         """Call the helper's main in the planted tree, tracking what is in it.
 
         `untracked` are planted files git is not to track.
@@ -130,9 +135,13 @@ class TestCitation:
         if untracked:
             self.git("rm", "-q", "--cached", "--", *untracked)
         argv = list(files)
-        return support.call(
-            lambda: citation_check.main(argv), env=self.env, cwd=self.tree
-        )
+        with pytest.MonkeyPatch.context() as patched:
+            for name, value in self.env.items():
+                patched.setenv(name, value)
+            patched.chdir(self.tree)
+            status = citation_check.main(argv)
+        out, err = capfd.readouterr()
+        return status, out, err
 
     def task(self, *tracked: str) -> subprocess.CompletedProcess[str]:
         """Run the task body in the planted tree, git tracking some files.
@@ -195,49 +204,55 @@ class TestCitation:
         same(done.stderr.splitlines(), want)
         same(done.stdout, "")
 
-    def test_agreeing_citation_is_ok(self) -> None:
+    def test_agreeing_citation_is_ok(self, capfd: pytest.CaptureFixture[str]) -> None:
         """The canon's own citation against its own sources: ok."""
         self.sources(source("CITATION.cff"))
-        done = self.helper()
-        same(done.returncode, 0, done.stderr)
+        status, out, err = self.helper(capfd=capfd)
+        same(status, 0, err)
         want = ["lint:citation: CITATION.cff agrees with REUSE.toml"]
-        same(done.stdout.splitlines(), want)
+        same(out.splitlines(), want)
 
-    def test_no_reuse_is_red(self) -> None:
+    def test_no_reuse_is_red(self, capfd: pytest.CaptureFixture[str]) -> None:
         """A citation with no source: red, by name."""
         self.plant("CITATION.cff", source("CITATION.cff"))
-        done = self.helper()
-        same(done.returncode, citation_check.EXIT_RED)
+        status, out, err = self.helper(capfd=capfd)
+        same(status, citation_check.EXIT_RED)
         want = [
             (
                 "lint:citation: CITATION.cff exists but REUSE.toml (its source of"
                 " truth) does not"
             )
         ]
-        same(done.stderr.splitlines(), want)
+        same(err.splitlines(), want)
 
-    def test_an_untracked_citation_is_no_citation(self) -> None:
+    def test_an_untracked_citation_is_no_citation(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """CITATION.cff on disk and not in git: the tree has none (#2013)."""
         self.sources(source("CITATION.cff"))
         rel = self.plant(".github/workflows/wf.yml", "on: push\n")
-        done = self.helper(rel, untracked=("CITATION.cff",))
-        same(done.returncode, 0, done.stderr)
-        same(done.stdout.splitlines(), SKIPPED)
+        status, out, err = self.helper(rel, untracked=("CITATION.cff",), capfd=capfd)
+        same(status, 0, err)
+        same(out.splitlines(), SKIPPED)
 
-    def test_an_untracked_reuse_is_no_source(self) -> None:
+    def test_an_untracked_reuse_is_no_source(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """REUSE.toml on disk and not in git: the citation has no source."""
         self.sources(source("CITATION.cff"))
-        done = self.helper(untracked=("REUSE.toml",))
-        same(done.returncode, citation_check.EXIT_RED)
+        status, out, err = self.helper(untracked=("REUSE.toml",), capfd=capfd)
+        same(status, citation_check.EXIT_RED)
         want = [
             (
                 "lint:citation: CITATION.cff exists but REUSE.toml (its source of"
                 " truth) does not"
             )
         ]
-        same(done.stderr.splitlines(), want)
+        same(err.splitlines(), want)
 
-    def test_no_minting_request_is_skipped(self) -> None:
+    def test_no_minting_request_is_skipped(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """No request, or one only in a comment: skipped by name."""
         rows = {
             "none": "on: push\n",
@@ -246,18 +261,20 @@ class TestCitation:
         }
         for row, text in rows.items():
             rel = self.plant(".github/workflows/wf.yml", text)
-            done = self.helper(rel)
-            same(done.returncode, 0, done.stderr)
-            same(done.stdout.splitlines(), SKIPPED)
-            same(done.stderr, "")
+            status, out, err = self.helper(rel, capfd=capfd)
+            same(status, 0, err)
+            same(out.splitlines(), SKIPPED)
+            same(err, "")
 
-    def test_minting_without_a_citation_is_red(self) -> None:
+    def test_minting_without_a_citation_is_red(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Each workflow requesting a DOI named, in order, then the remedy."""
         one = self.plant(".github/workflows/a.yml", MINT)
         clean = self.plant(".github/workflows/b.yml", "on: push\n")
         two = self.plant(".github/workflows/c.yaml", "mint-doi:\ttrue")
-        done = self.helper(one, clean, two)
-        same(done.returncode, citation_check.EXIT_RED)
+        status, out, err = self.helper(one, clean, two, capfd=capfd)
+        same(status, citation_check.EXIT_RED)
         want = [
             (
                 "lint:citation: mint-doi: true with no CITATION.cff — a citable repo"
@@ -267,14 +284,12 @@ class TestCitation:
             f"  {two}",
             "  run fix:citation (REUSE.toml is the source), commit the render",
         ]
-        same(done.stderr.splitlines(), want)
-        same(done.stdout, "")
+        same(err.splitlines(), want)
+        same(out, "")
 
-    def test_not_utf8_is_an_error(self) -> None:
+    def test_not_utf8_is_an_error(self, capfd: pytest.CaptureFixture[str]) -> None:
         """A workflow that is not UTF-8 is refused by name, exit 2."""
         rel = self.plant(".github/workflows/bad.yml", b"on: \xff\n")
-        done = self.helper(rel)
-        same(done.returncode, citation_check.EXIT_ERROR)
-        assert done.stderr.startswith(f"{TASK}: {rel}: cannot be read as UTF-8:"), (
-            done.stderr
-        )
+        status, out, err = self.helper(rel, capfd=capfd)
+        same(status, citation_check.EXIT_ERROR)
+        assert err.startswith(f"{TASK}: {rel}: cannot be read as UTF-8:"), err

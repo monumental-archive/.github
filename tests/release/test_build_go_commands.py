@@ -78,7 +78,13 @@ class Run:
     staged: list[str]
 
 
-def run_helper(mains: str, broken: str = "", *, script: bool = False) -> Run:
+def run_helper(
+    mains: str,
+    broken: str = "",
+    *,
+    script: bool = False,
+    capfd: pytest.CaptureFixture[str],
+) -> Run:
     """Run the helper on a module whose `go list` prints `mains`.
 
     In this process unless `script`, which starts it by its path.
@@ -116,12 +122,17 @@ def run_helper(mains: str, broken: str = "", *, script: bool = False) -> Run:
             def call() -> int:
                 return build_go_commands.main([])
 
-            result = support.call(call, env=env, cwd=work)
+            with pytest.MonkeyPatch.context() as patched:
+                for name, value in env.items():
+                    patched.setenv(name, value)
+                patched.chdir(work)
+                status = call()
+            out, err = capfd.readouterr()
         staged = work / "staged"
         return Run(
-            result.returncode,
-            result.stdout,
-            result.stderr,
+            status,
+            out,
+            err,
             log.read_text().splitlines() if log.exists() else [],
             sorted(p.name for p in staged.iterdir()) if staged.is_dir() else [],
         )
@@ -156,10 +167,14 @@ class TestBuildStepIsTheHelper:
 class TestBuilds:
     """Every main package becomes one staged binary."""
 
-    def test_two_commands_build_two_binaries(self) -> None:
+    def test_two_commands_build_two_binaries(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Each named by its import path's last element."""
-        run = run_helper("example.com/m/cmd/stele\nexample.com/m/cmd/probe\n")
-        assert run.returncode == 0, run.stdout + run.stderr
+        status, out, err = run_helper(
+            "example.com/m/cmd/stele\nexample.com/m/cmd/probe\n", capfd=capfd
+        )
+        assert status == 0, out + err
         staged: list[str] = ["probe", "stele"]
         assert staged == run.staged
         go: list[str] = [
@@ -168,12 +183,14 @@ class TestBuilds:
             "build -o staged/probe example.com/m/cmd/probe",
         ]
         assert go == run.go
-        assert run.stdout == ""
+        assert out == ""
 
-    def test_the_blank_lines_of_go_list_are_no_package(self) -> None:
+    def test_the_blank_lines_of_go_list_are_no_package(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Non-main packages print an empty line each."""
-        run = run_helper("\n\nexample.com/m\n\n")
-        assert run.returncode == 0, run.stdout + run.stderr
+        status, out, err = run_helper("\n\nexample.com/m\n\n", capfd=capfd)
+        assert status == 0, out + err
         staged: list[str] = ["m"]
         assert staged == run.staged
 
@@ -181,21 +198,27 @@ class TestBuilds:
 class TestRefuses:
     """One row per refusal, each message asserted."""
 
-    def test_a_module_with_no_main_package_is_refused(self) -> None:
+    def test_a_module_with_no_main_package_is_refused(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A library is the wrong class."""
-        run = run_helper("\n\n")
-        assert run.returncode == 1
-        assert run.stderr == (
+        status, out, err = run_helper("\n\n", capfd=capfd)
+        assert status == 1
+        assert err == (
             "::error::build-go-commands: no main packages in this module —"
             " go-binary is the wrong class\n"
         )
         assert run.staged == NOTHING
 
-    def test_two_commands_with_one_binary_name_are_refused(self) -> None:
+    def test_two_commands_with_one_binary_name_are_refused(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """The second would overwrite the first; it is never built."""
-        run = run_helper("example.com/m/cmd/tool\nexample.com/m/internal/tool\n")
-        assert run.returncode == 1
-        assert run.stderr == (
+        status, out, err = run_helper(
+            "example.com/m/cmd/tool\nexample.com/m/internal/tool\n", capfd=capfd
+        )
+        assert status == 1
+        assert err == (
             "::error::build-go-commands: two main packages both build a binary"
             " named tool\n"
         )
@@ -203,17 +226,20 @@ class TestRefuses:
         assert staged == run.staged
         assert "build -o staged/tool example.com/m/internal/tool" not in run.go
 
-    def test_a_failing_build_fails_the_step_with_its_status(self) -> None:
+    def test_a_failing_build_fails_the_step_with_its_status(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """The failing build's status and message; none after it is built.
 
         The script row: go's message is on the child's own stderr.
         """
-        run = run_helper(
+        status, out, err = run_helper(
             "example.com/m/cmd/a\nexample.com/m/cmd/b\n",
             broken="example.com/m/cmd/a",
             script=True,
+            capfd=capfd,
         )
-        assert run.returncode == 1
-        assert run.stderr == "example.com/m/cmd/a: undefined: x\n"
-        assert run.stdout == ""
+        assert status == 1
+        assert err == "example.com/m/cmd/a: undefined: x\n"
+        assert out == ""
         assert run.staged == NOTHING

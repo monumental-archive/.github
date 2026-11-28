@@ -117,6 +117,7 @@ class TestAttachAndPublish:
         manifest: dict[str, object] | None = None,
         dry_run: str = "false",
         script: bool = False,
+        capfd: pytest.CaptureFixture[str],
     ) -> tuple[subprocess.CompletedProcess[str] | support.Called, list[list[str]]]:
         """Run the helper against a release in the given state.
 
@@ -162,14 +163,23 @@ class TestAttachAndPublish:
             def call() -> int:
                 return attach_publish.main([])
 
-            done = support.call(call, env=env, cwd=self.work)
+            with pytest.MonkeyPatch.context() as patched:
+                for name, value in env.items():
+                    patched.setenv(name, value)
+                patched.chdir(self.work)
+                status = call()
+            out, err = capfd.readouterr()
         lines = log.read_text(encoding="utf-8").splitlines() if log.is_file() else []
         return done, [line.split("\0")[:-1] for line in lines]
 
-    def test_identical_published_release_converges(self) -> None:
+    def test_identical_published_release_converges(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """#316, #586: a resume converges on the build subjects alone."""
         resigned = REBUILT.replace("cccc", "dddd")  # a fresh signature
-        done, calls = self.publish("false", published=resigned, manifest=TYPED)
+        done, calls = self.publish(
+            "false", published=resigned, manifest=TYPED, capfd=capfd
+        )
         assert done.returncode == 0, done.stdout + done.stderr
         assert done.stdout == (
             f"::notice::{TAG} already published; build subjects verified"
@@ -178,20 +188,26 @@ class TestAttachAndPublish:
         assert "release upload" not in subcommands(calls)
         assert "release edit" not in subcommands(calls)
 
-    def test_untyped_release_with_identical_checksums_converges(self) -> None:
+    def test_untyped_release_with_identical_checksums_converges(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A schema-1 release converges on its whole set, uploading nothing (#330)."""
-        done, calls = self.publish("false", manifest={"schema": 1})
+        done, calls = self.publish("false", manifest={"schema": 1}, capfd=capfd)
         assert done.returncode == 0, done.stdout + done.stderr
         assert "converging" in done.stdout
         assert "release upload" not in subcommands(calls)
 
-    def test_checksums_differ_without_typing(self) -> None:
+    def test_checksums_differ_without_typing(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """No manifest: any differing asset refuses the resume.
 
         The script row: `diff`'s lines are on the child's own stdout.
         """
         resigned = REBUILT.replace("cccc", "dddd")
-        done, calls = self.publish("false", published=resigned, script=True)
+        done, calls = self.publish(
+            "false", published=resigned, script=True, capfd=capfd
+        )
         assert done.returncode == 1, done.stdout + done.stderr
         assert "-dddd  attestations.intoto.jsonl" in done.stdout
         assert "+cccc  attestations.intoto.jsonl" in done.stdout
@@ -202,10 +218,14 @@ class TestAttachAndPublish:
         ), done.stderr
         assert "release upload" not in subcommands(calls)
 
-    def test_typed_build_subjects_differ(self) -> None:
+    def test_typed_build_subjects_differ(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """stele#156: a differing build subject refuses, by name."""
         rebuilt_other = REBUILT.replace("aaaa", "ffff")
-        done, _ = self.publish("false", published=rebuilt_other, manifest=TYPED)
+        done, _ = self.publish(
+            "false", published=rebuilt_other, manifest=TYPED, capfd=capfd
+        )
         assert done.returncode == 1, done.stdout + done.stderr
         assert done.stderr == (
             f"::error::attach_publish.py: {TAG} is published and immutable but these"
@@ -214,23 +234,27 @@ class TestAttachAndPublish:
             " not a resume\n"
         )
 
-    def test_typed_build_subject_missing_from_the_release(self) -> None:
+    def test_typed_build_subject_missing_from_the_release(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A build subject the published list lacks is a difference."""
         partial = "bbbb  sbom.spdx.json\ncccc  attestations.intoto.jsonl\n"
-        done, _ = self.publish("false", published=partial, manifest=TYPED)
+        done, _ = self.publish("false", published=partial, manifest=TYPED, capfd=capfd)
         assert done.returncode == 1, done.stdout + done.stderr
         assert "differ from the published bytes: tool-1.2.3" in done.stderr
 
-    def test_manifest_that_is_not_json(self) -> None:
+    def test_manifest_that_is_not_json(self, capfd: pytest.CaptureFixture[str]) -> None:
         """A manifest that cannot be read refuses rather than guessing."""
         (self.fixtures / "evidence-manifest.json").write_text("{", encoding="utf-8")
-        done, _ = self.publish("false")
+        done, _ = self.publish("false", capfd=capfd)
         assert done.returncode == 1, done.stdout + done.stderr
         assert done.stderr.startswith(
             "::error::attach_publish.py: published-manifest.json is not JSON:"
         ), done.stderr
 
-    def test_manifest_whose_entries_are_not_a_list(self) -> None:
+    def test_manifest_whose_entries_are_not_a_list(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """`{"entries": true}` refuses by name (#1556's shrunk example).
 
         It died with a TypeError before: the entries were iterated
@@ -239,7 +263,7 @@ class TestAttachAndPublish:
         (self.fixtures / "evidence-manifest.json").write_text(
             '{"entries": true}', encoding="utf-8"
         )
-        done, _ = self.publish("false")
+        done, _ = self.publish("false", capfd=capfd)
         assert done.returncode == 1, done.stdout + done.stderr
         assert done.stderr == (
             "::error::attach_publish.py: published-manifest.json is not an evidence"
@@ -247,9 +271,11 @@ class TestAttachAndPublish:
             " its entries are not a list\n"
         )
 
-    def test_draft_uploads_and_publishes(self) -> None:
+    def test_draft_uploads_and_publishes(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A draft takes every asset, then is published."""
-        done, calls = self.publish("true")
+        done, calls = self.publish("true", capfd=capfd)
         assert done.returncode == 0, done.stdout + done.stderr
         assert done.stdout == f"::notice::published {TAG}\n"
         want: list[str] = ["release view", "release upload", "release edit"]
@@ -264,9 +290,11 @@ class TestAttachAndPublish:
         edit: list[str] = ["release", "edit", TAG, "--draft=false", "--repo", REPO]
         assert calls[2] == edit
 
-    def test_rehearsal_stays_a_draft_and_records_it(self) -> None:
+    def test_rehearsal_stays_a_draft_and_records_it(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """#597: a rehearsal uploads, keeps the draft, and says why."""
-        done, calls = self.publish("true", dry_run="true")
+        done, calls = self.publish("true", dry_run="true", capfd=capfd)
         assert done.returncode == 0, done.stdout + done.stderr
         assert done.stdout.endswith(
             f"::warning::rehearsal: {TAG} left as a draft, nothing published\n"
@@ -279,9 +307,11 @@ class TestAttachAndPublish:
         assert "rehearsal" in notes
         assert "https://github.com/example/project/actions/runs/42" in notes
 
-    def test_a_failing_gh_fails_the_step(self) -> None:
+    def test_a_failing_gh_fails_the_step(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A release that cannot be read stops the step with gh's status."""
         (self.bindir / "gh").write_text("#!/usr/bin/env bash\nexit 4\n", "utf-8")
-        done, _ = self.publish("true")
+        done, _ = self.publish("true", capfd=capfd)
         assert done.returncode == 4, done.stdout + done.stderr
         assert done.stdout == ""

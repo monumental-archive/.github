@@ -102,7 +102,9 @@ class TestHarness:
             STUB_LIST="[]",
         )
 
-    def run_helper(self, **env: str) -> support.Called:
+    def run_helper(
+        self, *, capfd: pytest.CaptureFixture[str], **env: str
+    ) -> tuple[int, str, str]:
         """Write the report and call the helper's main in this process.
 
         The process's environment is the row's for the call (the stub gh
@@ -120,9 +122,12 @@ class TestHarness:
         # the finding writer names the script (#1934).
         with pytest.MonkeyPatch.context() as patched:
             patched.setattr(sys, "argv", [str(HELPER), *argv])
-            return support.call(
-                lambda: certificate_issues.main(argv), env={**self.env, **env}
-            )
+            with pytest.MonkeyPatch.context() as patched:
+                for name, value in ({**self.env, **env}).items():
+                    patched.setenv(name, value)
+                status = certificate_issues.main(argv)
+            out, err = capfd.readouterr()
+            return status, out, err
 
     def run_script(self, **env: str) -> subprocess.CompletedProcess[str]:
         """Write the report and start the helper as the workflow does.
@@ -162,22 +167,22 @@ class TestHarness:
 class TestFindings(TestHarness):
     """One row per guard branch of certificate_issues.py."""
 
-    def test_no_findings_files_nothing(self) -> None:
+    def test_no_findings_files_nothing(self, capfd: pytest.CaptureFixture[str]) -> None:
         """The real report, no findings: exit 0, gh never called."""
-        proc = self.run_helper()
-        assert proc.returncode == 0, proc.stderr
+        status, out, err = self.run_helper(capfd=capfd)
+        assert status == 0, err
         assert self.gh_calls() == list[list[str]]()
-        assert proc.stdout.strip() == "findings: 0 certificate(s) did not reconcile"
+        assert out.strip() == "findings: 0 certificate(s) did not reconcile"
 
-    def test_one_issue_per_certificate(self) -> None:
+    def test_one_issue_per_certificate(self, capfd: pytest.CaptureFixture[str]) -> None:
         """Two conditions of one certificate and one of another: two issues."""
         self.doc["findings"] = [
             finding(448200001, "foreign", f"called {OTHER}"),
             finding(448200001, "chain", "no candidate pins the signer at the digest"),
             finding(448199999, "run", "the forge answers 404 for run 1"),
         ]
-        proc = self.run_helper()
-        assert proc.returncode == 0, proc.stderr
+        status, out, err = self.run_helper(capfd=capfd)
+        assert status == 0, err
         calls = self.gh_calls()
         pairs = [["issue", "list"], ["issue", "create"]] * 2
         heads = [c[:2] for c in calls]
@@ -200,10 +205,12 @@ class TestFindings(TestHarness):
         chain = "- **chain**: no candidate pins the signer at the digest (CT index"
         assert chain in text
         filed = "findings: CT index 448200001: filed (foreign, chain)"
-        assert filed in proc.stdout
-        assert "findings: 2 certificate(s) did not reconcile" in proc.stdout
+        assert filed in out
+        assert "findings: 2 certificate(s) did not reconcile" in out
 
-    def test_one_condition_twice_is_one_line(self) -> None:
+    def test_one_condition_twice_is_one_line(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Two findings of one condition: one line, both reasons (#1557).
 
         prop_certificate_issues.py's shrunk example was two findings with no
@@ -213,8 +220,8 @@ class TestFindings(TestHarness):
             finding(448200001, "chain", "no candidate pins the signer"),
             finding(448200001, "chain", "the digest is\nnot the release's"),
         ]
-        proc = self.run_helper()
-        assert proc.returncode == 0, proc.stderr
+        status, out, err = self.run_helper(capfd=capfd)
+        assert status == 0, err
         calls = self.gh_calls()
         assert calls[1][5] == f"{PREFIX} 448200001 did not reconcile (chain)"
         text = calls[1][7]
@@ -222,120 +229,128 @@ class TestFindings(TestHarness):
         assert "- **chain**: no candidate pins the signer (CT index" in text
         assert "; the digest is not the release's (CT index" in text
 
-    def test_already_filed_is_not_filed_again(self) -> None:
+    def test_already_filed_is_not_filed_again(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """An issue for the index, open or closed: no second one."""
         self.doc["findings"] = [finding(448200001, "run", "gone")]
         listing = [
             {"number": 5, "title": f"{PREFIX} 4482000010 did not reconcile (run)"},
             {"number": 6, "title": f"{PREFIX} 448200001 did not reconcile (run)"},
         ]
-        proc = self.run_helper(STUB_LIST=json.dumps(listing))
-        assert proc.returncode == 0, proc.stderr
+        status, out, err = self.run_helper(STUB_LIST=json.dumps(listing), capfd=capfd)
+        assert status == 0, err
         searched: list[list[str]] = [search(448200001)]
         assert self.gh_calls() == searched
-        assert "findings: CT index 448200001: already filed as #6" in proc.stdout
+        assert "findings: CT index 448200001: already filed as #6" in out
 
-    def test_a_longer_index_is_not_this_one(self) -> None:
+    def test_a_longer_index_is_not_this_one(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A title for CT index 4482000010 does not dedupe CT index 448200001."""
         self.doc["findings"] = [finding(448200001, "run", "gone")]
         listing = [
             {"number": 5, "title": f"{PREFIX} 4482000010 did not reconcile (run)"},
         ]
-        proc = self.run_helper(STUB_LIST=json.dumps(listing))
-        assert proc.returncode == 0, proc.stderr
+        status, out, err = self.run_helper(STUB_LIST=json.dumps(listing), capfd=capfd)
+        assert status == 0, err
         create: list[str] = ["issue", "create"]
         assert self.gh_calls()[1][:2] == create
 
-    def test_search_failure_saves_nothing(self) -> None:
+    def test_search_failure_saves_nothing(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """The dedupe search failing: exit 2 by name, nothing created."""
         self.doc["findings"] = [finding(448200001, "run", "gone")]
-        proc = self.run_helper(STUB_LIST_FAIL="1")
-        assert proc.returncode == 2
+        status, out, err = self.run_helper(STUB_LIST_FAIL="1", capfd=capfd)
+        assert status == 2
         searched: list[list[str]] = [search(448200001)]
         assert self.gh_calls() == searched
-        assert proc.stderr.strip() == (
+        assert err.strip() == (
             "certificate_issues.py:"
             " gh issue list failed (exit 1): HTTP 502: Bad Gateway;"
             " the checkpoint is not saved"
         )
 
-    def test_create_failure_saves_nothing(self) -> None:
+    def test_create_failure_saves_nothing(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """An issue that cannot be created: exit 2 by name."""
         self.doc["findings"] = [finding(448200001, "run", "gone")]
-        proc = self.run_helper(STUB_CREATE_FAIL="1")
-        assert proc.returncode == 2
-        assert proc.stderr.strip() == (
+        status, out, err = self.run_helper(STUB_CREATE_FAIL="1", capfd=capfd)
+        assert status == 2
+        assert err.strip() == (
             "certificate_issues.py:"
             " gh issue create failed (exit 1): HTTP 403: Resource not"
             " accessible by integration; the checkpoint is not saved"
         )
 
-    def test_no_report(self) -> None:
+    def test_no_report(self, capfd: pytest.CaptureFixture[str]) -> None:
         """Stele refused before judging (empty stdout): exit 2 by name."""
         self.write_report = False
         self.report.write_text("", encoding="utf-8")
-        proc = self.run_helper()
-        assert proc.returncode == 2
+        status, out, err = self.run_helper(capfd=capfd)
+        assert status == 2
         assert self.gh_calls() == list[list[str]]()
-        assert proc.stderr.strip() == (
+        assert err.strip() == (
             "certificate_issues.py:"
             " stele wrote no report: it refused before judging (its reason"
             " is in its own step); the checkpoint is not saved"
         )
 
-    def test_report_not_json(self) -> None:
+    def test_report_not_json(self, capfd: pytest.CaptureFixture[str]) -> None:
         """A report that is not JSON: exit 2 by name."""
         self.write_report = False
         text = "stele assert: the run could not see enough\n"
         self.report.write_text(text, encoding="utf-8")
-        proc = self.run_helper()
-        assert proc.returncode == 2
+        status, out, err = self.run_helper(capfd=capfd)
+        assert status == 2
         prefix = "certificate_issues.py: stele's report is not JSON: "
-        assert proc.stderr.startswith(prefix)
+        assert err.startswith(prefix)
 
-    def test_report_not_utf8(self) -> None:
+    def test_report_not_utf8(self, capfd: pytest.CaptureFixture[str]) -> None:
         """A report that is not UTF-8: exit 2 by name, never a traceback.
 
         prop_certificate_issues.py's shrunk example (#1557): the one byte 0x80.
         """
         self.write_report = False
         self.report.write_bytes(b"\x80")
-        proc = self.run_helper()
-        assert proc.returncode == 2, proc.stderr
-        assert proc.stderr.startswith(
-            "certificate_issues.py: stele's report is not JSON: "
-        )
+        status, out, err = self.run_helper(capfd=capfd)
+        assert status == 2, err
+        assert err.startswith("certificate_issues.py: stele's report is not JSON: ")
 
-    def test_report_nested_past_the_parser(self) -> None:
+    def test_report_nested_past_the_parser(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """JSON nested past the parser's depth: exit 2 by name (#1557)."""
         self.write_report = False
         self.report.write_bytes(b"[" * 100_000)
-        proc = self.run_helper()
-        assert proc.returncode == 2, proc.stderr
-        assert proc.stderr.startswith(
-            "certificate_issues.py: stele's report is not JSON: "
-        )
+        status, out, err = self.run_helper(capfd=capfd)
+        assert status == 2, err
+        assert err.startswith("certificate_issues.py: stele's report is not JSON: ")
 
-    def test_report_from_another_target(self) -> None:
+    def test_report_from_another_target(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Another verb's report: exit 2 by name, nothing filed."""
         self.doc["target"] = "assert tags"
-        proc = self.run_helper()
-        assert proc.returncode == 2
-        assert proc.stderr.strip() == (
+        status, out, err = self.run_helper(capfd=capfd)
+        assert status == 2
+        assert err.strip() == (
             "certificate_issues.py:"
             " the report is not stele's assert signer-certificates report;"
             " the checkpoint is not saved"
         )
 
-    def test_subject_not_a_ct_index(self) -> None:
+    def test_subject_not_a_ct_index(self, capfd: pytest.CaptureFixture[str]) -> None:
         """A finding whose subject is not a CT index: exit 2, nothing filed."""
         self.doc["findings"] = [
             {"subject": "population", "assertion": "run", "detail": "x"}
         ]
-        proc = self.run_helper()
-        assert proc.returncode == 2
+        status, out, err = self.run_helper(capfd=capfd)
+        assert status == 2
         assert self.gh_calls() == list[list[str]]()
-        assert proc.stderr.strip() == (
+        assert err.strip() == (
             "certificate_issues.py:"
             " a finding's subject is not a CT index: 'population';"
             " the checkpoint is not saved"
@@ -358,7 +373,9 @@ class TestFindings(TestHarness):
 class TestDecoded(TestHarness):
     """Each document certificate_issues.py reads is decoded where it is read (#1683)."""
 
-    def test_a_search_answer_that_is_not_a_list_of_issues(self) -> None:
+    def test_a_search_answer_that_is_not_a_list_of_issues(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Each wrong shape of the search's answer: exit 2 by name."""
         self.doc["findings"] = [finding(448200001, "run", "gone")]
         title = json.dumps(f"{PREFIX} 448200001 did not reconcile (run)")
@@ -371,44 +388,48 @@ class TestDecoded(TestHarness):
             ),
         }
         for answer, why in rows.items():
-            proc = self.run_helper(STUB_LIST=answer)
-            assert proc.returncode == 2
-            assert proc.stderr.strip() == (
+            status, out, err = self.run_helper(STUB_LIST=answer, capfd=capfd)
+            assert status == 2
+            assert err.strip() == (
                 "certificate_issues.py:"
                 " gh issue list answered something that is not a list"
                 f" of issues: {why}; the checkpoint is not saved"
             )
 
-    def test_a_search_answer_that_is_not_json(self) -> None:
+    def test_a_search_answer_that_is_not_json(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A search answer that is not strict JSON: exit 2 by name."""
         self.doc["findings"] = [finding(448200001, "run", "gone")]
-        proc = self.run_helper(STUB_LIST='{"a": 1, "a": 2}')
-        assert proc.returncode == 2
-        assert proc.stderr.strip() == (
+        status, out, err = self.run_helper(STUB_LIST='{"a": 1, "a": 2}', capfd=capfd)
+        assert status == 2
+        assert err.strip() == (
             "certificate_issues.py: gh issue list answered something that is not JSON:"
             ' duplicate key "a"; the checkpoint is not saved'
         )
 
-    def test_findings_that_are_not_a_list(self) -> None:
+    def test_findings_that_are_not_a_list(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Findings of another kind, falsy or not: exit 2 by name (#1683)."""
         values: tuple[object, ...] = ("", 0, dict[str, object](), "ab")
         for value in values:
             self.doc["findings"] = value
-            proc = self.run_helper()
-            assert proc.returncode == 2
-            assert proc.stderr.strip() == (
+            status, out, err = self.run_helper(capfd=capfd)
+            assert status == 2
+            assert err.strip() == (
                 "certificate_issues.py:"
                 f" the report's findings are not a list: {value!r};"
                 " the checkpoint is not saved"
             )
 
-    def test_report_with_a_key_twice(self) -> None:
+    def test_report_with_a_key_twice(self, capfd: pytest.CaptureFixture[str]) -> None:
         """A report that is not strict JSON is not JSON here: exit 2 by name."""
         self.write_report = False
         self.report.write_text('{"target": "x", "target": "y"}', encoding="utf-8")
-        proc = self.run_helper()
-        assert proc.returncode == 2
-        assert proc.stderr.strip() == (
+        status, out, err = self.run_helper(capfd=capfd)
+        assert status == 2
+        assert err.strip() == (
             "certificate_issues.py:"
             ' stele\'s report is not JSON: duplicate key "target";'
             " the checkpoint is not saved"

@@ -72,18 +72,25 @@ def test_each_pragma_is_judged(comment: str, refused: str | None) -> None:
 
 
 def test_a_pragma_in_a_string_is_not_a_site(
-    tmp_path: Path, call_main: Callable[..., Called], as_task: Callable[[str], None]
+    tmp_path: Path,
+    call_main: Callable[..., Called],
+    as_task: Callable[[str], None],
+    capfd: pytest.CaptureFixture[str],
 ) -> None:
     """A fixture's planted pragma text is string, not comment."""
     as_task(TASK)
     path = tmp_path / "f.py"
     path.write_text('X = "# pragma: no mutate block"\n', encoding="utf-8")
-    done = call_main(lambda: mp.main([str(path)]))
-    assert (done.returncode, done.stderr) == (0, "")
+    status = mp.main([str(path)])
+    out, err = capfd.readouterr()
+    assert (status, err) == (0, "")
 
 
 def test_invalid_utf8_is_named_and_the_rest_read(
-    tmp_path: Path, call_main: Callable[..., Called], as_task: Callable[[str], None]
+    tmp_path: Path,
+    call_main: Callable[..., Called],
+    as_task: Callable[[str], None],
+    capfd: pytest.CaptureFixture[str],
 ) -> None:
     """The shrunk example: a CR, then a truncated UTF-8 sequence."""
     as_task(TASK)
@@ -91,7 +98,8 @@ def test_invalid_utf8_is_named_and_the_rest_read(
     bad.write_bytes(b"\r\xc2\x80")
     good = tmp_path / "good.py"
     good.write_text("x = 1  # pragma: no mutate\n", encoding="utf-8")
-    done = call_main(lambda: mp.main([str(bad), str(good)]))
-    assert done.returncode == 1
-    assert done.stderr.startswith(f"{TASK}: {bad}: could not tokenize:")
-    assert done.stderr.endswith(f"{TASK}: {good}:1: {NO_REASON}\n{WHY}")
+    status = mp.main([str(bad), str(good)])
+    out, err = capfd.readouterr()
+    assert status == 1
+    assert err.startswith(f"{TASK}: {bad}: could not tokenize:")
+    assert err.endswith(f"{TASK}: {good}:1: {NO_REASON}\n{WHY}")

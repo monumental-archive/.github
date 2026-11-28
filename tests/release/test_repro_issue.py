@@ -73,7 +73,12 @@ class TestFileAnIssue:
         self.bindir = bindir
 
     def file(
-        self, outcome: str, manifest: str = "{}", *, script: bool = False
+        self,
+        outcome: str,
+        manifest: str = "{}",
+        *,
+        script: bool = False,
+        capfd: pytest.CaptureFixture[str],
     ) -> tuple[str, str]:
         """Run the helper with the compare step's `outcome`.
 
@@ -112,8 +117,12 @@ class TestFileAnIssue:
             def call() -> int:
                 return repro_issue.main([])
 
-            proc = support.call(call, env=env)
-        assert proc.returncode == 0, proc.stdout + proc.stderr
+            with pytest.MonkeyPatch.context() as patched:
+                for name, value in env.items():
+                    patched.setenv(name, value)
+                status = call()
+            out, err = capfd.readouterr()
+        assert status == 0, out + err
         args = args_file.read_text(encoding="utf-8").split("\0")[:-1]
         create: list[str] = ["issue", "create", "--repo", "monumental-archive/lab"]
         assert args[:4] == create
@@ -122,32 +131,40 @@ class TestFileAnIssue:
         assert len(args) == 8, args
         return args[5], args[7]
 
-    def test_failure_is_a_verdict_and_files_as_before(self) -> None:
+    def test_failure_is_a_verdict_and_files_as_before(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A comparison that ran and failed keeps its title and body.
 
         The script row: the helper started as the step starts it.
         """
-        title, body = self.file("failure", script=True)
+        title, body = self.file("failure", script=True, capfd=capfd)
         assert title == VERDICT_TITLE
         assert body == VERDICT_BODY
 
-    def test_skipped_files_could_not_be_compared(self) -> None:
+    def test_skipped_files_could_not_be_compared(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """release-lab#305: the install died, the compare never ran."""
-        title, body = self.file("skipped")
+        title, body = self.file("skipped", capfd=capfd)
         assert title == NO_VERDICT_TITLE
         assert body == NO_VERDICT_BODY.format(outcome="skipped")
         self.assert_no_verdict_words(title, body)
 
-    def test_cancelled_files_could_not_be_compared(self) -> None:
+    def test_cancelled_files_could_not_be_compared(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A cancelled comparison reached no verdict either."""
-        title, body = self.file("cancelled")
+        title, body = self.file("cancelled", capfd=capfd)
         assert title == NO_VERDICT_TITLE
         assert body == NO_VERDICT_BODY.format(outcome="cancelled")
         self.assert_no_verdict_words(title, body)
 
-    def test_untyped_release_names_the_unscoped_population(self) -> None:
+    def test_untyped_release_names_the_unscoped_population(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """No typed manifest: the verdict says it judged the whole release."""
-        title, body = self.file("failure", manifest=" \n")
+        title, body = self.file("failure", manifest=" \n", capfd=capfd)
         assert title == VERDICT_TITLE
         assert body == VERDICT_BODY.replace(
             "the pgrx-extension artifacts v0.28.1 published",
