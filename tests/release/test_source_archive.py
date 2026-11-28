@@ -160,7 +160,7 @@ def run_helper(
             def call() -> int:
                 return source_archive.main()
 
-            result = hermetic.call_main(call, env=env, cwd=work)
+            result = hermetic.call(call, env=env, cwd=work)
         dist = work / "dist"
         return Run(
             result.returncode,

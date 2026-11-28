@@ -113,7 +113,7 @@ class TestBoundary:
 
         """
         argv = list(files)
-        return hermetic.call_main(
+        return hermetic.call(
             lambda: capability_boundary.main(argv), env=self.env, cwd=self.tree
         )
 

@@ -42,7 +42,7 @@ from tests import hermetic
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from tests.conftest import Called
+    from tests.hermetic import Called
 
 # The stand-ins, one Python script per runner. Each reads its fixture
 # from the environment and writes what its `run` ran to STUB_RAN.

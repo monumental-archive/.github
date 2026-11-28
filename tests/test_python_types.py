@@ -325,7 +325,7 @@ def seams(text: str) -> hermetic.Called:
     """
     with tempfile.TemporaryDirectory() as tmp:
         (Path(tmp) / "a.py").write_text(text, encoding="utf-8")
-        return hermetic.call_main(lambda: python_types_seams.main(["a.py"]), cwd=tmp)
+        return hermetic.call(lambda: python_types_seams.main(["a.py"]), cwd=tmp)
 
 
 def roots(*files: str) -> hermetic.Called:
@@ -339,7 +339,7 @@ def roots(*files: str) -> hermetic.Called:
         for name in files:
             (Path(tmp) / name).parent.mkdir(parents=True, exist_ok=True)
             (Path(tmp) / name).write_text("X = 1\n", encoding="utf-8")
-        return hermetic.call_main(
+        return hermetic.call(
             lambda: python_roots.main([str(BELT), *files]), cwd=tmp
         )
 
@@ -395,7 +395,7 @@ class TestTheHelpers:
 
     def test_too_few_arguments_is_a_usage_error(self) -> None:
         """No belt or no file: exit 2 with the usage."""
-        done = hermetic.call_main(lambda: python_roots.main([str(BELT)]))
+        done = hermetic.call(lambda: python_roots.main([str(BELT)]))
         assert (2, f"{TASK}: usage: python_roots.py <belt-dir> <file>...\n") == (
             done.returncode,
             done.stderr,

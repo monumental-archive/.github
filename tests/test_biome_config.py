@@ -827,7 +827,7 @@ class TestRunTest:
             path.write_text(json.dumps(content), encoding="utf-8")
             paths.append(path)
         out = tree / "generated.json"
-        done = hermetic.call_main(
+        done = hermetic.call(
             lambda: biome_config.main([
                 *("--org", str(ORG_FILE), "--domains", str(DOMAINS_FILE)),
                 *("--nursery", str(NURSERY_FILE), "--out", str(out)),
@@ -968,7 +968,7 @@ def generate_main(tree: Path, out: Path, *extra: str) -> hermetic.Called:
         The finished call.
 
     """
-    return hermetic.call_main(
+    return hermetic.call(
         lambda: biome_config.main([
             *("--org", str(ORG_FILE), "--domains", str(DOMAINS_FILE)),
             *("--nursery", str(NURSERY_FILE), "--out", str(out)),

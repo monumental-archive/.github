@@ -225,7 +225,7 @@ class TestMeasuredRun:
         for name, text in planted.items():
             (Path(tmp.name) / name).write_text(text, encoding="utf-8")
         argv = ["--measured-run", "/run/typescript", *planted, "--", *command]
-        done = hermetic.call_main(lambda: cj.main(argv), cwd=tmp.name)
+        done = hermetic.call(lambda: cj.main(argv), cwd=tmp.name)
         return done.returncode, done.stdout, done.stderr
 
     def test_a_launched_run_gains_the_flags(self) -> None:
@@ -271,7 +271,7 @@ class TestMeasuredRun:
 
     def test_no_separator_is_a_usage_error(self) -> None:
         """The command follows `--`; without it nothing is read."""
-        done = hermetic.call_main(lambda: cj.main(["--measured-run", "/d"]))
+        done = hermetic.call(lambda: cj.main(["--measured-run", "/d"]))
         assert done.returncode == 2
         assert "usage" in done.stderr
 

@@ -141,7 +141,7 @@ class TestPlanted:
 
         """
         args = list(argv)
-        return hermetic.call_main(
+        return hermetic.call(
             lambda: runner_pin.main(args), env=self.env, cwd=self.tree
         )
 

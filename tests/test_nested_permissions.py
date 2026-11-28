@@ -124,7 +124,7 @@ class TestNested:
 
         """
         argv = list(files)
-        return hermetic.call_main(
+        return hermetic.call(
             lambda: nested_permissions.main(argv), env=self.env, cwd=self.tree
         )
 

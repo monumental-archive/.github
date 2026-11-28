@@ -971,7 +971,7 @@ def call(argv: list[str]) -> hermetic.Called:
         The status `main` returned and what it wrote to each stream.
 
     """
-    return hermetic.call_main(
+    return hermetic.call(
         lambda: mutants_typescript.main(["--label", LABEL, *argv])
     )
 

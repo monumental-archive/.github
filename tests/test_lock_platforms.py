@@ -201,7 +201,7 @@ def check(
         except RuntimeError:
             names = []  # the body's listing is empty here too
         listing = "".join(f"{name}\0" for name in names)
-        return hermetic.call_main(
+        return hermetic.call(
             lambda: lock_platforms.main([
                 "--defaults",
                 str(DEFAULTS),
@@ -550,7 +550,7 @@ def located(files: dict[str, str]) -> hermetic.Called:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         plant(root, files, {})
-        return hermetic.call_main(
+        return hermetic.call(
             lambda: lock_platforms.main(["--defaults", str(DEFAULTS)]),
             cwd=root,
             stdin=f"{STUB_PATH}\0",

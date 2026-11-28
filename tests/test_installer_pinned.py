@@ -113,7 +113,7 @@ class TestPinned:
 
         """
         argv = list(files)
-        return hermetic.call_main(
+        return hermetic.call(
             lambda: installer_pinned.main(argv), env=self.env, cwd=self.tree
         )
 

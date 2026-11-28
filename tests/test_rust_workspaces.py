@@ -132,7 +132,7 @@ class Planted:
 
         """
         with mock.patch.object(rust_workspaces, "CARGO", str(self.cargo)):
-            return hermetic.call_main(
+            return hermetic.call(
                 lambda: rust_workspaces.main(["roots"]), env=self.env, cwd=self.tree
             )
 
@@ -205,7 +205,7 @@ class TestRoots:
         planted = Planted(self)
         outside = planted.base / "plain"
         outside.mkdir()
-        done = hermetic.call_main(
+        done = hermetic.call(
             lambda: rust_workspaces.main(["roots"]), env=planted.env, cwd=outside
         )
         assert (done.returncode, done.stdout) == (1, "")
@@ -217,7 +217,7 @@ class TestRoots:
         planted = Planted(self)
         roots: list[str] = ["Cargo.toml", "fuzz/Cargo.toml"]
         with mock.patch.object(rust_workspaces, "CARGO", str(planted.cargo)):
-            done = hermetic.call_main(
+            done = hermetic.call(
                 lambda: 0 if rust_workspaces.resolved() == roots else 3,
                 env=planted.env,
                 cwd=planted.tree,
@@ -225,7 +225,7 @@ class TestRoots:
         assert (done.returncode, done.stderr) == (0, "")
         refused = Planted(self, "outside")
         with mock.patch.object(rust_workspaces, "CARGO", str(refused.cargo)):
-            done = hermetic.call_main(
+            done = hermetic.call(
                 lambda: 0 if rust_workspaces.resolved() is None else 3,
                 env=refused.env,
                 cwd=refused.tree,
@@ -234,7 +234,7 @@ class TestRoots:
         assert "belongs to a workspace outside this tree" in done.stderr
         outside = planted.base / "plain"
         outside.mkdir()
-        done = hermetic.call_main(
+        done = hermetic.call(
             lambda: 0 if rust_workspaces.resolved() is None else 3,
             env=planted.env,
             cwd=outside,
@@ -247,7 +247,7 @@ class TestRoots:
         argvs: list[list[str]] = [[], ["root"], ["roots", "x"]]
         for argv in argvs:
             with self.subTest(argv=argv):
-                done = hermetic.call_main(functools.partial(rust_workspaces.main, argv))
+                done = hermetic.call(functools.partial(rust_workspaces.main, argv))
                 assert (done.returncode, done.stdout, done.stderr) == (
                     2,
                     "",

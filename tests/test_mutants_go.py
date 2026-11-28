@@ -851,7 +851,7 @@ def call(argv: list[str]) -> hermetic.Called:
         The status `main` returned and what it wrote to each stream.
 
     """
-    return hermetic.call_main(lambda: mutants_go.main(argv))
+    return hermetic.call(lambda: mutants_go.main(argv))
 
 
 class TestMain:

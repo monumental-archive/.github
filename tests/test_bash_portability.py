@@ -134,7 +134,7 @@ class TestPlanted:
 
         """
         args = list(argv)
-        return hermetic.call_main(
+        return hermetic.call(
             lambda: bash_portability.main(args), env=self.env, cwd=self.tree
         )
 

@@ -136,7 +136,7 @@ class TestHelper:
 
         """
         args = list(argv)
-        return hermetic.call_main(
+        return hermetic.call(
             lambda: audit_scheduled.main(args), env=self.env, cwd=self.tree
         )
 

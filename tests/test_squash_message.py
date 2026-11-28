@@ -181,7 +181,7 @@ class TestStepHarness:
 
         """
         with mock.patch.object(sys, "argv", [STEP]):
-            return hermetic.call_main(
+            return hermetic.call(
                 lambda: squash_message.main([]),
                 env=self.step_env(title, body, verdict),
             )

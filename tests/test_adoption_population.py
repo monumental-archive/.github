@@ -87,7 +87,7 @@ def run_main(doc: object, *argv: str) -> tuple[int, str, str]:
         The exit code, stdout and stderr.
 
     """
-    done = hermetic.call_main(
+    done = hermetic.call(
         lambda: ap.main(list(argv) or [CANON]),
         env=hermetic.env(MISE_TASK_NAME=TASK),
         stdin=doc if isinstance(doc, str) else json.dumps(doc),
@@ -332,7 +332,7 @@ class TestMain:
 
     def test_an_empty_canon_name_is_refused(self) -> None:
         """An identity read that failed leaves an empty name: refused."""
-        done = hermetic.call_main(
+        done = hermetic.call(
             lambda: ap.main([""]), env=hermetic.env(MISE_TASK_NAME=TASK)
         )
         assert (done.returncode, done.stdout) == (2, "")

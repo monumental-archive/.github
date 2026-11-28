@@ -127,7 +127,7 @@ class TestCitation:
         if untracked:
             self.git("rm", "-q", "--cached", "--", *untracked)
         argv = list(files)
-        return hermetic.call_main(
+        return hermetic.call(
             lambda: citation_check.main(argv), env=self.env, cwd=self.tree
         )
 

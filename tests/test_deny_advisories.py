@@ -74,7 +74,7 @@ def lint(text: str | None) -> hermetic.Called:
         path = Path(tmp) / "deny.toml"
         path.write_text(text or "", encoding="utf-8")
         env = hermetic.env(MISE_TASK_NAME="lint:deny", ORG_FINDINGS="")
-        return hermetic.call_main(
+        return hermetic.call(
             lambda: da.main(["deny_advisories.py", "deny.toml"]), env=env, cwd=tmp
         )
 
@@ -152,7 +152,7 @@ class TestDenyAdvisories:
             path.write_text(text, encoding="utf-8")
             records = Path(tmp) / "findings.jsonl"
             env = hermetic.env(MISE_TASK_NAME="lint:deny", ORG_FINDINGS=str(records))
-            done = hermetic.call_main(
+            done = hermetic.call(
                 lambda: da.main(["deny_advisories.py", "deny.toml"]), env=env, cwd=tmp
             )
             lines = records.read_text(encoding="utf-8").splitlines()

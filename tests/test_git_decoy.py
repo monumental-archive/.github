@@ -245,7 +245,7 @@ class TestHelper:
             The helper's exit status and its standard error.
 
         """
-        done = hermetic.call_main(
+        done = hermetic.call(
             lambda: gd.main(["run", str(self.decoy), "--", BASH, "-c", script]),
             env=self.leak_env(),
             cwd=self.work,
@@ -271,7 +271,7 @@ class TestHelper:
         """`plant DIR` makes a repository there: the task's first call."""
         fresh = self.work / "fresh"
         fresh.mkdir()
-        done = hermetic.call_main(
+        done = hermetic.call(
             lambda: gd.main(["plant", str(fresh)]), env=self.leak_env(), cwd=self.work
         )
         assert (done.returncode, done.stderr) == (0, "")
@@ -279,7 +279,7 @@ class TestHelper:
 
     def test_run_with_no_command_is_a_usage_error(self) -> None:
         """`run DIR` and nothing to run is argparse's exit 2, by name."""
-        done = hermetic.call_main(
+        done = hermetic.call(
             lambda: gd.main(["run", str(self.decoy)]),
             env=self.leak_env(),
             cwd=self.work,

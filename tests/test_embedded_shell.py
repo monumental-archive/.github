@@ -547,9 +547,9 @@ class TestParser:
         with TemporaryDirectory() as tmp:
             path = Path(tmp) / "w.yml"
             path.write_text("on: [push\n", encoding="utf-8")
-            done = hermetic.call_main(lambda: es.main([str(path)]))
+            done = hermetic.call(lambda: es.main([str(path)]))
             debt = Path(tmp) / "debt.txt"
-            ceiling = hermetic.call_main(
+            ceiling = hermetic.call(
                 lambda: es.main(["--ceiling", str(debt), str(path)]),
                 env=hermetic.env(MISE_TASK_NAME="lint:workflow-shell"),
             )
@@ -1297,9 +1297,9 @@ class TestCli:
         with TemporaryDirectory() as tmp:
             t = Tree(Path(tmp), workflow(step("Big", 16)), None)
             argv = ["--ceiling", str(t.debt), str(t.wf)]
-            red = hermetic.call_main(lambda: es.main(argv))
+            red = hermetic.call(lambda: es.main(argv))
             t.debt.write_text(t.entry("Big", 16), encoding="utf-8")
-            green = hermetic.call_main(lambda: es.main(argv))
+            green = hermetic.call(lambda: es.main(argv))
         assert red.returncode == 1
         assert "step 'Big' holds a run: block of 16 lines" in red.stderr
         assert green.returncode == 0, green.stderr

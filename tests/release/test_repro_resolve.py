@@ -148,7 +148,7 @@ class TestReadTheLatestRelease:
             def call() -> int:
                 return repro_resolve.main()
 
-            done = hermetic.call_main(call, env=env, cwd=self.work)
+            done = hermetic.call(call, env=env, cwd=self.work)
         return done, output.read_text(encoding="utf-8")
 
     def test_typed_release_hands_its_manifest_on(self) -> None:

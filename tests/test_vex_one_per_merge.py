@@ -110,7 +110,7 @@ class Tree:
             The status and both streams, from an in-process call (#1697).
 
         """
-        return hermetic.call_main(
+        return hermetic.call(
             lambda: vex_one_per_merge.main(["--list", "origin/main.."]),
             env=self.env,
             cwd=self.dir,
@@ -140,7 +140,7 @@ class Tree:
             The status and both streams.
 
         """
-        return hermetic.call_main(
+        return hermetic.call(
             lambda: vex_one_per_merge.main([]), env=self.task_env(event), cwd=self.dir
         )
 

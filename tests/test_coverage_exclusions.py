@@ -84,7 +84,7 @@ def helper(root: Path, *paths: str) -> hermetic.Called:
         The status `main` returned and what it wrote to each stream.
 
     """
-    return hermetic.call_main(
+    return hermetic.call(
         lambda: ce.main([]), cwd=root, stdin="".join(f"{path}\0" for path in paths)
     )
 

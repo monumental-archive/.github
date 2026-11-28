@@ -88,7 +88,7 @@ def call(argv: list[str]) -> hermetic.Called:
 
     """
     with mock.patch.object(sys, "argv", [str(HELPER), *argv]):
-        return hermetic.call_main(lambda: verdict.main(argv), env=hermetic.env())
+        return hermetic.call(lambda: verdict.main(argv), env=hermetic.env())
 
 
 class TestVerdict:

@@ -26,16 +26,13 @@ And these are asked for by name:
 
 from __future__ import annotations
 
-import io
 import os
-import sys
-from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 
 from tests import hermetic
+from tests.hermetic import Called
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator
@@ -94,60 +91,20 @@ def env() -> Callable[..., dict[str, str]]:
     return hermetic.env
 
 
-@dataclass(frozen=True)
-class Called:
-    """What an in-process call to a command's `main` returned and wrote."""
-
-    returncode: int
-    stdout: str
-    stderr: str
-
-
 @pytest.fixture
-def call_main(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> Callable[..., Called]:
+def call_main() -> Callable[..., Called]:
     """Call a command's `main` in this process, as a script row ran it.
 
-    `run` makes the call, written out in the test (`lambda:
-    helper.main([...])`). `env`, when given, IS the process environment
-    for the call; `cwd` the working directory; `stdin` what it reads.
-    Each is restored afterwards. A `SystemExit` (argparse's usage error)
-    is the status, as it would be for a child.
+    `hermetic.call`: `run` makes the call, written out in the test
+    (`lambda: helper.main([...])`); `env`, `cwd`, `stdin` and `command`
+    are the child's it stands for, each restored afterwards; a
+    `SystemExit` (argparse's usage error) is the status.
 
     Returns:
         The caller.
 
     """
-
-    def call(
-        run: Callable[[], int],
-        *,
-        env: dict[str, str] | None = None,
-        cwd: Path | str | None = None,
-        stdin: str = "",
-    ) -> Called:
-        capsys.readouterr()
-        with monkeypatch.context() as patch:
-            if env is not None:
-                for name in list(os.environ):
-                    patch.delenv(name)
-                for name, value in env.items():
-                    patch.setenv(name, value)
-            if cwd is not None:
-                patch.chdir(cwd)
-            patch.setattr(sys, "stdin", io.StringIO(stdin))
-            try:
-                status = run()
-            except SystemExit as exc:
-                code = exc.code
-                status = code if isinstance(code, int) else (0 if code is None else 1)
-                if isinstance(code, str):
-                    print(code, file=sys.stderr)
-            written = capsys.readouterr()
-        return Called(status, written.out, written.err)
-
-    return call
+    return hermetic.call
 
 
 @pytest.fixture

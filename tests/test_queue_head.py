@@ -192,7 +192,7 @@ def run_helper(cwd: pathlib.Path, ref: str, base: str, group: str) -> hermetic.C
 
     """
     with mock.patch.object(sys, "argv", [STEP]):
-        return hermetic.call_main(
+        return hermetic.call(
             lambda: queue_head.main([]), env=step_env(ref, base, group), cwd=cwd
         )
 

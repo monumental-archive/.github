@@ -181,7 +181,7 @@ def run_helper(
             def call() -> int:
                 return check_go_stamps.main()
 
-            result = hermetic.call_main(call, env=env, cwd=work)
+            result = hermetic.call(call, env=env, cwd=work)
         return Run(result.returncode, result.stdout, result.stderr, head)
 
 

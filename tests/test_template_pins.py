@@ -162,7 +162,7 @@ class TestPins:
 
         """
         argv = [CANON, *files]
-        return hermetic.call_main(
+        return hermetic.call(
             lambda: template_pins.main(argv), env=self.env, cwd=self.tree
         )
 
@@ -291,4 +291,4 @@ class TestPins:
             The status and what it printed.
 
         """
-        return hermetic.call_main(lambda: template_pins.main(argv), env=self.env)
+        return hermetic.call(lambda: template_pins.main(argv), env=self.env)

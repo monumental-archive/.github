@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-    from tests.conftest import Called
+    from tests.hermetic import Called
 
 TASK = "audit:mutants"
 RED, USAGE = 1, 2

@@ -102,7 +102,7 @@ def call(
         try:
             # The profile's label is the task that runs it (#1934).
             task = {"MISE_TASK_NAME": pp.LABELS.get(argv[0], "")} if argv else {}
-            return hermetic.call_main(
+            return hermetic.call(
                 lambda: pp.main(argv), env=hermetic.env(**(task | env)), cwd=scratch
             )
         finally:
@@ -210,7 +210,7 @@ class TestUsage:
     def test_a_usage_error_is_two(self, argv: list[str]) -> None:
         """R: exit 2 with the usage line, and nothing run."""
         with hermetic.as_task(GATE):
-            done = hermetic.call_main(lambda: pp.main(argv))
+            done = hermetic.call(lambda: pp.main(argv))
         assert done == hermetic.Called(2, "", USAGE)
 
 

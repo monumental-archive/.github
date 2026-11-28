@@ -46,9 +46,17 @@ never a bare name the child's own PATH resolves to something else.
 makes: a skip, or a planted "tool missing". No test calls
 `shutil.which` itself; `test_hermetic.py` holds them to that.
 
-A test calls a helper's `main` in its own process with the
-`call_main` fixture, and names the task a helper runs under with
-`as_task` (tests/conftest.py, #1673, #1934).
+A test calls a helper's `main` in its own process here too (#1673,
+#2177), as a script row once ran it as a child:
+
+    done = hermetic.call(lambda: helper.main(["--flag"]), env=env, cwd=tree)
+
+The environment, working directory, standard input and `sys.argv` a
+child would have had are this process's for the call, then restored, so
+coverage and mutation see the helper run. `done` carries the status and
+both streams, as a finished process does; a `SystemExit` is the status.
+The `call_main` fixture is the same caller, and `as_task` names the task
+a helper runs under (tests/conftest.py, #1934).
 
 A test that needs a belt or a canon tree of its own gets the whole one
 (#1714), every tracked file a link, with only what it stubs replaced:
@@ -78,10 +86,12 @@ answers for RUSTUP_TOOLCHAIN, `stable` when unset, as the rustup proxy
 selects, so a leg's per-command toolchain reaches it.
 """
 
+import io
 import os
 import shlex
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -90,7 +100,9 @@ from belt import decoded
 from belt.belt_scripts import script
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping
+    from collections.abc import Callable, Iterable, Mapping, MutableMapping
+
+    import pytest
 
 # The canon this module is part of: its checkout, and the directories
 # a test reads the delivered files from (#2177): the belt's own (task
@@ -324,6 +336,153 @@ def track(tree: Path | str) -> None:
         subprocess.run(
             [git, "-C", str(tree), *args], env=env(), capture_output=True, check=True
         )
+
+
+@dataclass(frozen=True)
+class Called:
+    """What an in-process call to a command's `main` returned and wrote."""
+
+    returncode: int
+    stdout: str
+    stderr: str
+
+
+def _stream(raw: io.BytesIO) -> io.TextIOWrapper:
+    """Make a text stream over bytes, as a process's standard streams are.
+
+    Returns:
+        A UTF-8 stream with a `.buffer`, writing through, newlines as given.
+
+    """
+    return io.TextIOWrapper(
+        raw,
+        encoding="utf-8",
+        errors="backslashreplace",
+        newline="",
+        write_through=True,
+    )
+
+
+def call(
+    run: Callable[[], int],
+    *,
+    env: Mapping[str, str] | None = None,
+    cwd: Path | str | None = None,
+    stdin: str | bytes = "",
+    command: str | None = None,
+) -> Called:
+    """Call a command's `main` in this process, as a child once ran it.
+
+    `run` makes the call, written out in the test (`lambda:
+    helper.main([...])`). `env`, when given, IS the process environment
+    for the call; `cwd` the working directory; `stdin` what it reads;
+    `command` is `sys.argv[0]`, the name a finding falls back to. Each
+    is restored afterwards.
+
+    Returns:
+        The status and what was written to each stream.
+
+    """
+    out_raw, err_raw = io.BytesIO(), io.BytesIO()
+    out, err = _stream(out_raw), _stream(err_raw)
+    data = stdin.encode("utf-8") if isinstance(stdin, str) else stdin
+    saved_env = dict(os.environ)
+    saved = (sys.stdin, sys.stdout, sys.stderr, list(sys.argv), os.getcwd())
+    try:
+        if env is not None:
+            os.environ.clear()
+            os.environ.update(env)
+        if cwd is not None:
+            os.chdir(cwd)
+        sys.stdin, sys.stdout, sys.stderr = _stream(io.BytesIO(data)), out, err
+        sys.argv = [command or "belt"]
+        try:
+            status = run()
+        except SystemExit as exc:
+            code = exc.code
+            status = code if isinstance(code, int) else (0 if code is None else 1)
+            if isinstance(code, str):
+                print(code, file=sys.stderr)
+    finally:
+        sys.stdin, sys.stdout, sys.stderr, sys.argv, here = saved
+        os.chdir(here)
+        os.environ.clear()
+        os.environ.update(saved_env)
+    out.flush()
+    err.flush()
+    return Called(
+        status,
+        out_raw.getvalue().decode("utf-8", "backslashreplace"),
+        err_raw.getvalue().decode("utf-8", "backslashreplace"),
+    )
+
+
+def patch_env(
+    patch: pytest.MonkeyPatch, values: Mapping[str, str], *, clear: bool = False
+) -> None:
+    """Set the process environment for a patch's life, as a row needs it.
+
+    `clear` empties it first, so `values` is the whole environment.
+    """
+    if clear:
+        for name in list(os.environ):
+            patch.delenv(name)
+    for name, value in values.items():
+        patch.setenv(name, value)
+
+
+def patch_dict(
+    patch: pytest.MonkeyPatch,
+    target: MutableMapping[str, object],
+    values: Mapping[str, object] | None = None,
+    *,
+    clear: bool = False,
+) -> None:
+    """Set a dictionary's items for a patch's life; `clear` empties it first."""
+    if clear:
+        for key in list(target):
+            patch.delitem(target, key)
+    for key, value in (values or {}).items():
+        patch.setitem(target, key, value)
+
+
+def name_task(patch: pytest.MonkeyPatch, task: str) -> None:
+    """Name the task a helper runs under, recording nothing (#1934).
+
+    The finding writer reads MISE_TASK_NAME and ORG_FINDINGS. An empty
+    name is a workflow step's: the writer falls back to the command's
+    name. An empty ORG_FINDINGS records nothing.
+    """
+    patch.setenv("MISE_TASK_NAME", task)
+    patch.setenv("ORG_FINDINGS", "")
+
+
+def raising(error: BaseException | type[BaseException]) -> Callable[..., object]:
+    """Make a stand-in that raises, whatever it is called with.
+
+    Returns:
+        The stand-in.
+
+    """
+
+    def stand_in(*_args: object, **_kwargs: object) -> object:
+        raise error
+
+    return stand_in
+
+
+def returning(value: object) -> Callable[..., object]:
+    """Make a stand-in that returns one value, whatever it is called with.
+
+    Returns:
+        The stand-in.
+
+    """
+
+    def stand_in(*_args: object, **_kwargs: object) -> object:
+        return value
+
+    return stand_in
 
 
 def rustc_verbose(toolchain: str = "stable") -> str:

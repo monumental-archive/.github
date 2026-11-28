@@ -153,7 +153,7 @@ class TestPlanted:
         # The derivation resolves cargo when it is imported; here, the
         # stub on the row's PATH is the cargo it asks.
         with mock.patch.object(rust_workspaces, "CARGO", str(self.bins / "cargo")):
-            return hermetic.call_main(
+            return hermetic.call(
                 lambda: pg_clippy.main(list(argv)),
                 env=self.env | {"ORG_BELT_DIR": str(self.belt)} | stub,
                 cwd=self.tree,
@@ -325,7 +325,7 @@ class TestWorkspace(TestPlanted):
 
     def test_the_manifest_path_reaches_every_cargo_command(self) -> None:
         """Fetch, metadata and clippy each name the workspace they read."""
-        done = hermetic.call_main(
+        done = hermetic.call(
             lambda: (
                 pg_clippy.workspace(
                     str(self.bins / "cargo"), "crates/Cargo.toml"

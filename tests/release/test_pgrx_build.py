@@ -343,7 +343,7 @@ class TestPreviousRelease:
             return previous_release.main(args)
 
         with mock.patch.object(previous_release, "GH", str(self.gh)):
-            return hermetic.call_main(call, env=hermetic.env(**env), cwd=self.root)
+            return hermetic.call(call, env=hermetic.env(**env), cwd=self.root)
 
     def previous(
         self,

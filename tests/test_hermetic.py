@@ -1338,7 +1338,7 @@ class TestCallMain:
             where = Path(tmp) / "tree"
             where.mkdir()
             before = (dict(os.environ), Path.cwd(), sys.stdin)
-            done = hermetic.call_main(
+            done = hermetic.call(
                 lambda: _echo_main(["3"]),
                 env={"PLANTED": "yes"},
                 cwd=where,
@@ -1350,8 +1350,8 @@ class TestCallMain:
 
     def test_a_system_exit_is_the_status(self) -> None:
         """An exit code, or a message, as a child's would be."""
-        assert hermetic.call_main(lambda: _echo_main(["exit", "4"])).returncode == 4
-        refused = hermetic.call_main(lambda: _echo_main(["refuse"]))
+        assert hermetic.call(lambda: _echo_main(["exit", "4"])).returncode == 4
+        refused = hermetic.call(lambda: _echo_main(["refuse"]))
         assert refused.returncode == 1
         assert refused.stderr.endswith("refused by name\n"), refused.stderr
 
@@ -1359,5 +1359,5 @@ class TestCallMain:
         """Without `env`, the call sees this process's own variables."""
         kept: dict[str, str] = {"PLANTED": "kept"}
         with mock.patch.dict(os.environ, kept):
-            done = hermetic.call_main(lambda: _echo_main(["0"]))
+            done = hermetic.call(lambda: _echo_main(["0"]))
         assert "env=kept" in done.stdout

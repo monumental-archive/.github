@@ -120,7 +120,7 @@ class TestHarness:
         # The leg runs the script by path with no mise task around it, so
         # the finding writer names the script (#1934).
         with mock.patch.object(sys, "argv", [str(HELPER), *argv]):
-            return hermetic.call_main(
+            return hermetic.call(
                 lambda: certificate_issues.main(argv), env={**self.env, **env}
             )
 

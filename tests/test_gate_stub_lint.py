@@ -157,7 +157,7 @@ class TestLint:
 
         """
         args = list(argv)
-        return hermetic.call_main(
+        return hermetic.call(
             lambda: gate_stub.main(args), env=self.env, cwd=self.tree
         )
 

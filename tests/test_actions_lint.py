@@ -128,7 +128,7 @@ class TestActionsLint:
 
     def test_no_workflow_is_a_usage_error(self) -> None:
         """No file named: exit 2, never a walk of the directory."""
-        done = hermetic.call_main(lambda: actions_lint.main([]), cwd=self.tree)
+        done = hermetic.call(lambda: actions_lint.main([]), cwd=self.tree)
         assert done.returncode == actions_lint.EXIT_ERROR
         usage: list[str] = ["lint:actions: usage: actions_lint.py WORKFLOW..."]
         assert done.stderr.splitlines() == usage
@@ -154,7 +154,7 @@ class TestActionsLint:
             MISE_TASK_NAME=TASK, ORG_FINDINGS="", ORG_CANON_DIR=str(CANON_DIR)
         )
         with mock.patch.object(actions_lint, "ACTIONLINT", missing):
-            done = hermetic.call_main(
+            done = hermetic.call(
                 lambda: actions_lint.main([rel]), env=env, cwd=self.tree
             )
         assert done.returncode == actions_lint.EXIT_ERROR

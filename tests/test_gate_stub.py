@@ -184,7 +184,7 @@ def fixed(workflow: str) -> tuple[hermetic.Called, str]:
         flows.mkdir(parents=True)
         caller = flows / "gate.yml"
         caller.write_text(workflow, encoding="utf-8")
-        done = hermetic.call_main(
+        done = hermetic.call(
             lambda: gate_stub_fix.main([CANON_NAME, ".github/workflows/gate.yml"]),
             cwd=tmp,
         )

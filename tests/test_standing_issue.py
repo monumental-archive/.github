@@ -270,7 +270,7 @@ class TestStubbed:
         ]
         if findings is not None:
             argv += ["--findings", str(findings)]
-        return hermetic.call_main(lambda: standing.main(argv), env=self.env)
+        return hermetic.call(lambda: standing.main(argv), env=self.env)
 
     def gh_calls(self) -> list[list[str]]:
         """Read every argv the stub gh received.

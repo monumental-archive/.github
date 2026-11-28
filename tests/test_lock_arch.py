@@ -224,7 +224,7 @@ class TestMain:
         """An empty entry and a missing file are passed over; exit is 0."""
         path = planted_lock(DEFECT)
         listing = f"\0{path}\0{path.parent / 'absent.lock'}\0"
-        done = hermetic.call_main(lambda: lock_arch.main([]), stdin=listing)
+        done = hermetic.call(lambda: lock_arch.main([]), stdin=listing)
         assert done.returncode == 0
         assert lock_arch.candidates(path) == done.stdout.splitlines()
         assert len(done.stdout.splitlines()) == 1

@@ -256,7 +256,7 @@ class TestProducers:
 
     def test_stdin_paths_reads_a_nul_separated_list(self) -> None:
         """A name with a space or a newline is one path; empties dropped."""
-        done = hermetic.call_main(
+        done = hermetic.call(
             lambda: len(tracked.stdin_paths()) - 3,
             stdin=f"{SPACED}\0\0a\nb.md\0{ACCENTED}\0",
         )

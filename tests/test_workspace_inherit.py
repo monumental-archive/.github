@@ -535,7 +535,7 @@ class TwoRoots:
         """
         roots = ["Cargo.toml", "fuzz/Cargo.toml"]
         with mock.patch.object(wi, "CARGO", str(self.cargo)):
-            return hermetic.call_main(
+            return hermetic.call(
                 functools.partial(wi.main, roots), env=self.env, cwd=self.tree
             )
 
@@ -592,7 +592,7 @@ class TestEveryRoot:
     def test_no_root_is_a_usage_error(self) -> None:
         """The task always passes one; none at all is refused, exit 2."""
         none: list[str] = []
-        done = hermetic.call_main(functools.partial(wi.main, none))
+        done = hermetic.call(functools.partial(wi.main, none))
         assert (done.returncode, done.stdout, done.stderr) == (
             2,
             "",

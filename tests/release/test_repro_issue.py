@@ -116,7 +116,7 @@ class TestFileAnIssue:
             def call() -> int:
                 return repro_issue.main()
 
-            proc = hermetic.call_main(call, env=env)
+            proc = hermetic.call(call, env=env)
         assert proc.returncode == 0, proc.stdout + proc.stderr
         args = args_file.read_text(encoding="utf-8").split("\0")[:-1]
         create: list[str] = ["issue", "create", "--repo", "monumental-archive/lab"]

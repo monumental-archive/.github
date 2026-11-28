@@ -251,7 +251,7 @@ class TestColdAttested:
 
         """
         argv = list(files)
-        return hermetic.call_main(
+        return hermetic.call(
             lambda: cold_attested.main(argv), env=self.env, cwd=self.tree
         )
 

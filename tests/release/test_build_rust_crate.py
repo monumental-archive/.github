@@ -306,7 +306,7 @@ def steps(job: Job, *, script: bool) -> Run:
                 def call() -> int:
                     return package_crates.main()
 
-                result = hermetic.call_main(call, env=env, cwd=work)
+                result = hermetic.call(call, env=env, cwd=work)
             else:
                 result = subprocess.run(
                     argv,
