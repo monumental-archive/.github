@@ -440,11 +440,10 @@ class Mutation(Planted):
 
     def test_a_sharded_row_with_no_language_is_red(self) -> None:
         """MUTANTS_LEG unset on a row of several: red, nothing run."""
-        unset: dict[str, str] = {"MUTANTS_LEG": ""}
-        with mock.patch.dict(os.environ, unset):
-            done = hermetic.call_main(
-                lambda: gate_shard.run_mutants(2, 4, "m"), env=dict(os.environ)
-            )
+        done = hermetic.call_main(
+            lambda: gate_shard.run_mutants(2, 4, "m"),
+            env=hermetic.env(MUTANTS_LEG=""),
+        )
         self.assertEqual(1, done.returncode)
         self.assertIn("mutants 2/4: MUTANTS_LEG names no language", done.stderr)
 

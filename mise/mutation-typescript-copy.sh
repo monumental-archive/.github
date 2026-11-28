@@ -14,8 +14,8 @@ org__here=${BASH_SOURCE[0]%/*}
 unset org__here
 org_task "audit:mutants"
 
+: "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
 belt="${ORG_BELT_DIR:?unset — no belt}"
-: "${ORG_PYTHON:?unset — the belt Python}"
 
 dirty=$(git status --porcelain --untracked-files=no)
 if [[ -n ${dirty} ]]; then

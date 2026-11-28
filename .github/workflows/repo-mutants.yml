@@ -15,8 +15,10 @@
 # scheduled check is one workflow per subject, named for what a red
 # means.
 #
-# A mutation run repeats the suite once per mutant, which is why it is a
-# cron and never the gate. The measure is no unexplained surviving
+# A mutation run repeats the suite once per mutant, which is why the
+# whole population is a cron; the gate's `ci:mutants` runs the same legs
+# on what each change touches (#1432), and this run is for what a diff
+# cannot see. The measure is no unexplained surviving
 # mutant, never a score; adoption is each language's own config file in
 # the repository (`.cargo/mutants.toml` for Rust, a pattern-free root
 # `.gomuignore` for Go, a root `cosmic-ray.toml` for Python, a root
