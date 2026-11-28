@@ -17,14 +17,16 @@ Each row asserts the message, not just the exit status: a planted row
 scored on exit alone can pass for the wrong reason.
 """
 
+import io
 import json
 import os
 import re
 import subprocess
+import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 import pytest
 
@@ -661,24 +663,58 @@ def lint(files: dict[str, str], *, env: support.Env) -> Ran:
     return run(LINT, {"pnpm-lock.yaml": LOCK_BOTH, **files}, runner=False, make_env=env)
 
 
-# Imports outside a property file, and restated seeds, by name.
-def test_an_import_outside_a_property_file_is_red_by_name(env: support.Env) -> None:
+class Judge(Protocol):
+    """Judge planted files with the lint's own command, in this process."""
+
+    def __call__(self, files: dict[str, str]) -> tuple[int, str]:
+        """Write the files and judge them all.
+
+        Returns:
+            The exit status and what it printed.
+
+        """
+        ...
+
+
+@fixture
+def judge(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> Judge:
+    """Give a row the lint's judgment over files it plants, by relative name.
+
+    Returns:
+        The judge.
+
+    """
+    monkeypatch.chdir(tmp_path)
+
+    def judged(files: dict[str, str]) -> tuple[int, str]:
+        for name, text in files.items():
+            path = tmp_path / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
+        status = tp.main(["lint", *files])
+        return status, capfd.readouterr().out
+
+    return judged
+
+
+# The judgment itself, in process: imports outside a property file, and
+# restated seeds and times, by name.
+def test_an_import_outside_a_property_file_is_red_by_name(judge: Judge) -> None:
     """Every import form, in an ordinary test and a .js file."""
-    done = lint(
-        {
-            "a.prop.test.ts": PROPERTY,
-            "src/plain.test.ts": PROPERTY,
-            "src/more.ts": (
-                'import fc from "fast-check";\n'
-                'const m = await import("fast-check/lib/x");\n'
-                'const r = require("@fast-check/jest");\n'
-                'import "@fast-check/worker";\n'
-            ),
-            "src/helper.prop.test.js": 'export * from "fast-check";\n',
-        },
-        env=env,
-    )
-    assert done.returncode == 1
+    status, out = judge({
+        "a.prop.test.ts": PROPERTY,
+        "src/plain.test.ts": PROPERTY,
+        "src/more.ts": (
+            'import fc from "fast-check";\n'
+            'const m = await import("fast-check/lib/x");\n'
+            'const r = require("@fast-check/jest");\n'
+            'import "@fast-check/worker";\n'
+        ),
+        "src/helper.prop.test.js": 'export * from "fast-check";\n',
+    })
+    assert status == 1
     suffix = " but is not a *.prop.test.{ts,tsx,mts,cts} file\n"
     for site, package in (
         ("src/helper.prop.test.js:1", "fast-check"),
@@ -688,8 +724,8 @@ def test_an_import_outside_a_property_file_is_red_by_name(env: support.Env) -> N
         ("src/more.ts:4", "@fast-check/worker"),
         ("src/plain.test.ts:1", "@fast-check/vitest"),
     ):
-        assert f"  {site}: imports {package}{suffix}" in done.stderr
-    assert "a.prop.test.ts" not in done.stderr
+        assert f"{site}: imports {package}{suffix}" in out
+    assert "a.prop.test.ts" not in out
 
 
 @pytest.mark.parametrize(
@@ -702,43 +738,36 @@ def test_an_import_outside_a_property_file_is_red_by_name(env: support.Env) -> N
     ],
 )
 def test_a_property_restating_the_seed_is_red_by_name(
-    site: str, what: str, env: support.Env
+    site: str, what: str, judge: Judge
 ) -> None:
     """seed, shorthand seed, numRuns, configureGlobal: each named."""
-    done = lint(
-        {
-            "s.prop.test.ts": PROPERTY + "fc.assert(p, { seed: 4 });\n",
-            "h.prop.test.mts": PROPERTY + "fc.assert(p, { seed });\n",
-            "n.prop.test.tsx": PROPERTY
-            + 'test.prop([fc.nat()], { numRuns: 5 })("x", () => true);\n',
-            "g.prop.test.cts": PROPERTY + "fc.configureGlobal({});\n",
-        },
-        env=env,
-    )
-    assert done.returncode == 1
+    status, out = judge({
+        "s.prop.test.ts": PROPERTY + "fc.assert(p, { seed: 4 });\n",
+        "h.prop.test.mts": PROPERTY + "fc.assert(p, { seed });\n",
+        "n.prop.test.tsx": PROPERTY
+        + 'test.prop([fc.nat()], { numRuns: 5 })("x", () => true);\n',
+        "g.prop.test.cts": PROPERTY + "fc.configureGlobal({});\n",
+    })
+    assert status == 1
     tail = "; the belt's seed, run count and time bound own every property\n"
-    assert f"  {site}: restates {what}{tail}" in done.stderr
+    assert f"{site}: restates {what}{tail}" in out
 
 
-def test_a_property_setting_its_own_time_is_red_by_name(env: support.Env) -> None:
+def test_a_property_setting_its_own_time_is_red_by_name(judge: Judge) -> None:
     """Each of the six forms #2144 names, by name, file and line."""
-    done = lint(
-        {
-            "a.prop.test.ts": PROPERTY
-            + 'test.prop([fc.nat()])("x", (n) => n >= 0, 20_000);\n',
-            "b.prop.test.ts": PROPERTY
-            + 'it("x", { timeout: 9000 }, () => {});\n'
-            + 'test("y", () => {\n  return;\n}, { timeout });\n',
-            "c.prop.test.ts": PROPERTY + "vi.setConfig({ testTimeout: 1 });\n",
-            "d.prop.test.ts": PROPERTY + "fc.assert(p, { timeout: 100 });\n",
-            "e.prop.test.ts": PROPERTY
-            + 'test.prop([fc.nat()], { interruptAfterTimeLimit: 5 })("x", f);\n',
-            "f.prop.test.ts": PROPERTY
-            + "fc.assert(p, { skipAllAfterTimeLimit: 5 });\n",
-        },
-        env=env,
-    )
-    assert done.returncode == 1
+    status, out = judge({
+        "a.prop.test.ts": PROPERTY
+        + 'test.prop([fc.nat()])("x", (n) => n >= 0, 20_000);\n',
+        "b.prop.test.ts": PROPERTY
+        + 'it("x", { timeout: 9000 }, () => {});\n'
+        + 'test("y", () => {\n  return;\n}, { timeout });\n',
+        "c.prop.test.ts": PROPERTY + "vi.setConfig({ testTimeout: 1 });\n",
+        "d.prop.test.ts": PROPERTY + "fc.assert(p, { timeout: 100 });\n",
+        "e.prop.test.ts": PROPERTY
+        + 'test.prop([fc.nat()], { interruptAfterTimeLimit: 5 })("x", f);\n',
+        "f.prop.test.ts": PROPERTY + "fc.assert(p, { skipAllAfterTimeLimit: 5 });\n",
+    })
+    assert status == 1
     tail = "; the belt's seed, run count and time bound own every property\n"
     for site, what in (
         ("a.prop.test.ts:4", "a per-test timeout (test()'s third argument)"),
@@ -749,29 +778,26 @@ def test_a_property_setting_its_own_time_is_red_by_name(env: support.Env) -> Non
         ("e.prop.test.ts:4", "interruptAfterTimeLimit"),
         ("f.prop.test.ts:4", "skipAllAfterTimeLimit"),
     ):
-        assert f"  {site}: restates {what}{tail}" in done.stderr
-    assert done.stderr.count(": restates ") == RESTATED_IN_ALL, done.stderr
+        assert f"{site}: restates {what}{tail}" in out
+    assert out.count(": restates ") == RESTATED_IN_ALL, out
 
 
-def test_a_quote_in_a_regex_hides_no_bound(env: support.Env) -> None:
+def test_a_quote_in_a_regex_hides_no_bound(judge: Judge) -> None:
     """A regex literal's quote masks nothing: each bound still red."""
-    done = lint(
-        {
-            "a.prop.test.ts": 'import fc from "fast-check";\n'
-            "const q = /'/; fc.assert(p, { seed: 1, timeout: 9 });\n"
-            'const r = /"/; fc.assert(p, { numRuns: 5 });\n',
-        },
-        env=env,
-    )
-    assert done.returncode == 1
+    status, out = judge({
+        "a.prop.test.ts": 'import fc from "fast-check";\n'
+        "const q = /'/; fc.assert(p, { seed: 1, timeout: 9 });\n"
+        'const r = /"/; fc.assert(p, { numRuns: 5 });\n',
+    })
+    assert status == 1
     tail = "; the belt's seed, run count and time bound own every property\n"
     for site, what in (
         ("a.prop.test.ts:2", "seed"),
         ("a.prop.test.ts:2", "fast-check's timeout"),
         ("a.prop.test.ts:3", "numRuns"),
     ):
-        assert f"  {site}: restates {what}{tail}" in done.stderr
-    assert done.stderr.count(": restates ") == RESTATED_IN_ONE, done.stderr
+        assert f"{site}: restates {what}{tail}" in out
+    assert out.count(": restates ") == RESTATED_IN_ONE, out
 
 
 @pytest.mark.parametrize(
@@ -781,33 +807,26 @@ def test_a_quote_in_a_regex_hides_no_bound(env: support.Env) -> None:
         ("a.prop.test.ts:5", "vi.setConfig()"),
     ],
 )
-def test_a_bound_named_in_text_is_red(site: str, what: str, env: support.Env) -> None:
+def test_a_bound_named_in_text_is_red(site: str, what: str, judge: Judge) -> None:
     """A comment or string naming a bound reds: loud, never silent."""
-    done = lint(
-        {
-            "a.prop.test.ts": PROPERTY
-            + "// fc.assert(p, { timeout: 1 })\n"
-            + 'const note = "vi.setConfig({})";\n',
-        },
-        env=env,
-    )
-    assert done.returncode == 1
+    status, out = judge({
+        "a.prop.test.ts": PROPERTY
+        + "// fc.assert(p, { timeout: 1 })\n"
+        + 'const note = "vi.setConfig({})";\n',
+    })
+    assert status == 1
     tail = "; the belt's seed, run count and time bound own every property\n"
-    assert f"  {site}: restates {what}{tail}" in done.stderr
+    assert f"{site}: restates {what}{tail}" in out
 
 
-def test_a_two_argument_call_and_other_options_are_clean(env: support.Env) -> None:
+def test_a_two_argument_call_and_other_options_are_clean(judge: Judge) -> None:
     """A number inside a body, and options without timeout: clean."""
-    done = lint(
-        {
-            "a.prop.test.ts": PROPERTY
-            + 'it("waits, 5000", () => {\n  expect(Math.max(f(1), 5)).toBe(5);\n});\n'
-            + 'it("named", { retry: 2 }, () => {});\n',
-        },
-        env=env,
-    )
-    assert done.returncode == 0, done.stderr
-    assert done.stdout == "lint:typescript-properties: 1 file(s) clean\n"
+    status, out = judge({
+        "a.prop.test.ts": PROPERTY
+        + 'it("waits, 5000", () => {\n  expect(Math.max(f(1), 5)).toBe(5);\n});\n'
+        + 'it("named", { retry: 2 }, () => {});\n',
+    })
+    assert (status, out) == (0, "")
 
 
 def test_clean_files_pass_and_text_is_not_an_import(env: support.Env) -> None:
@@ -994,3 +1013,187 @@ def test_no_shard_is_every_file(
         written: list[Path] = list(Path(reports).iterdir())
         nothing: list[Path] = []
         assert nothing == written
+
+
+# The lockfile reader: what the lockfiles carry, one name a line.
+@pytest.mark.parametrize(
+    ("locks", "want"),
+    [
+        ([LOCK_BOTH], "fast-check\nvitest\n"),
+        ([LOCK_VITEST], "vitest\n"),
+        ([LOCK_FC_ONLY, LOCK_VITEST], "fast-check\nvitest\n"),
+        (["packages:\n"], ""),
+    ],
+    ids=["both", "vitest alone", "two lockfiles read together", "neither"],
+)
+def test_the_lockfiles_name_what_they_carry(
+    locks: list[str],
+    want: str,
+    tmp_path: Path,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """Every lockfile is read together; each package named once."""
+    paths = []
+    for at, text in enumerate(locks):
+        path = tmp_path / f"lock{at}.yaml"
+        path.write_text(text, encoding="utf-8")
+        paths.append(str(path))
+    assert tp.main(["locked", *paths]) == 0
+    assert capfd.readouterr().out == want
+
+
+@pytest.mark.parametrize(
+    ("planted", "reason"),
+    [(None, "FileNotFoundError"), (b"\xff\xfe", "UnicodeDecodeError")],
+    ids=["missing", "not UTF-8"],
+)
+def test_a_file_the_lint_cannot_read_is_named(
+    planted: bytes | None,
+    reason: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """A source it cannot read is a finding, never a pass."""
+    monkeypatch.chdir(tmp_path)
+    if planted is not None:
+        (tmp_path / "a.ts").write_bytes(planted)
+    assert tp.main(["lint", "a.ts"]) == 1
+    assert capfd.readouterr().out == f"a.ts: cannot be read ({reason})\n"
+
+
+def test_a_curried_test_with_no_second_call_is_read_as_one() -> None:
+    """`test.prop(...)` with no call after it: its own arguments, no more."""
+    code = tp.masked("test.prop([fc.nat()]);\n")
+    assert tp.test_calls(code) == [[(10, 20)]]
+
+
+def test_a_comment_across_lines_keeps_its_newline() -> None:
+    """A block comment over two lines blanks to spaces, the newline kept."""
+    assert tp.masked("a /* b\nc */ d") == "a     \n     d"
+
+
+def test_a_nested_group_is_one_argument() -> None:
+    """`(a(b), c)`: the inner call is inside the first argument."""
+    assert tp.arguments_of("(a(b), c)", 0) == ([(1, 5), (6, 8)], 9)
+
+
+@pytest.mark.parametrize(
+    ("config", "imports", "expression"),
+    [
+        ("vitest.config.mts", "import * as repo from ", "repo.default"),
+        (None, "// The repository has no vitest config.", "{}"),
+    ],
+    ids=["a config", "no config"],
+)
+def test_the_stage_writes_the_wrapper_and_the_setup(
+    config: str | None,
+    imports: str,
+    expression: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The wrapper imports the repository's config, or none, and lists the files."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(sys, "stdin", io.StringIO("a.prop.test.ts\0b.prop.test.ts\0"))
+    argv = ["stage", str(tmp_path), *([config] if config else [])]
+    assert tp.main(argv) == 0
+    wrapper = (tmp_path / "org-property.config.mts").read_text(encoding="utf-8")
+    assert imports in wrapper
+    assert expression in wrapper
+    staged: list[str] = ["a.prop.test.ts", "b.prop.test.ts"]
+    assert json.dumps(staged) in wrapper
+    assert json.dumps(str(tmp_path / "org-property-setup.mts")) in wrapper
+    setup = (tmp_path / "org-property-setup.mts").read_text(encoding="utf-8")
+    assert setup == tp.SETUP
+    if config:
+        assert json.dumps(str(tmp_path / config)) in wrapper
+
+
+REPORT = '{"testResults": [{"name": "a.prop.test.ts", "assertionResults": [1]}]}'
+
+
+@pytest.mark.parametrize(
+    ("report", "seeded", "want"),
+    [
+        (REPORT, "a.prop.test.ts\n\n", ""),
+        (REPORT, "", "a.prop.test.ts: ran without the belt's seed\n"),
+        (
+            '{"testResults": [{"name": "a.prop.test.ts"}]}',
+            "a.prop.test.ts\n",
+            "a.prop.test.ts: did not run, or ran no test\n",
+        ),
+        ("{}", "a.prop.test.ts\n", "a.prop.test.ts: did not run, or ran no test\n"),
+    ],
+    ids=["ran seeded", "ran unseeded", "ran no test", "no results"],
+)
+def test_verify_holds_every_file_to_a_seeded_run(
+    report: str,
+    seeded: str,
+    want: str,
+    tmp_path: Path,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """Each property file ran a test, under the seed; a blank line is no file."""
+    (tmp_path / "report.json").write_text(report, encoding="utf-8")
+    (tmp_path / "seeded").write_text(seeded, encoding="utf-8")
+    argv = [str(tmp_path / "report.json"), str(tmp_path / "seeded")]
+    status = tp.main(["verify", *argv, "a.prop.test.ts"])
+    assert (status, capfd.readouterr().out) == (1 if want else 0, want)
+
+
+def test_verify_with_no_report_is_red(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """No report written: red, named, before the seeded list is read."""
+    monkeypatch.chdir(tmp_path)
+    assert tp.main(["verify", "gone.json", "seeded", "a.prop.test.ts"]) == 1
+    assert capfd.readouterr().out == (
+        "no vitest JSON report at gone.json (FileNotFoundError)\n"
+    )
+
+
+@pytest.mark.parametrize(
+    ("listing", "want"),
+    [
+        ('[{"file": "a.prop.test.ts"}, {"file": "src/x.test.ts"}]', "a.prop.test.ts\n"),
+        ('[{"file": "src/x.test.ts"}]', ""),
+    ],
+    ids=["one collected", "none collected"],
+)
+def test_collected_names_each_property_file_the_repository_runs(
+    listing: str,
+    want: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """A property file the repository's own vitest collects is named, exit 1."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "list.json").write_text(listing, encoding="utf-8")
+    status = tp.main(["collected", "list.json", "a.prop.test.ts", "b.prop.test.ts"])
+    assert (status, capfd.readouterr().out) == (1 if want else 0, want)
+
+
+def test_collected_with_no_listing_is_red(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """No listing written: red, named."""
+    monkeypatch.chdir(tmp_path)
+    assert tp.main(["collected", "gone.json", "a.prop.test.ts"]) == 1
+    assert capfd.readouterr().out == (
+        "no readable vitest file list at gone.json (FileNotFoundError)\n"
+    )
+
+
+def test_a_malformed_shard_is_the_usage_exit(
+    sharded: Callable[[str, str], None],
+    tmp_path: Path,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """ORG_SHARD=0/2 is refused by name, exit 2, no file printed."""
+    sharded("0/2", str(tmp_path))
+    assert tp.main(["share", *FILES]) == tp.EXIT_USAGE
+    out, err = capfd.readouterr()
+    assert not out
+    assert "ORG_SHARD='0/2' is not a shard (k/n, 1 <= k <= n)" in err

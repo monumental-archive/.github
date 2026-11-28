@@ -395,3 +395,111 @@ def test_locks_proptest_reads_tracked_locks_only() -> None:
         assert not rp.locks_proptest(root, ["Cargo.lock"])
         assert not rp.locks_proptest(root, ["Cargo.lock", "vendor/Cargo.lock"])
         assert rp.locks_proptest(root, ["bad/Cargo.lock"])
+
+
+# The command itself, in process: the rows above run the task body,
+# whose command is a child they do not measure.
+def planted_locks(root: Path, locks: dict[str, str]) -> list[str]:
+    """Write each lock file under `root`.
+
+    Returns:
+        Their names, as the task hands them over.
+
+    """
+    for name, text in locks.items():
+        path = root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    return list(locks)
+
+
+PINS = "Cargo.lock: proptest 1.6.0\ncrates/a/Cargo.lock: proptest 1.12.0\n"
+LOW_PINS = "Cargo.lock: proptest 1.6.0 is below 1.7.0\n"
+
+
+@pytest.mark.parametrize(
+    ("mode", "answer"), [("locked", (0, PINS)), ("lint", (1, LOW_PINS))]
+)
+def test_the_pins_are_printed_and_judged(
+    mode: str,
+    answer: tuple[int, str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """`locked` prints each pin; `lint` names each below 1.7.0; vendor is not read."""
+    monkeypatch.chdir(tmp_path)
+    names = planted_locks(
+        tmp_path,
+        {
+            "Cargo.lock": lock(("proptest", "1.6.0")),
+            "crates/a/Cargo.lock": lock(("proptest", "1.12.0"), ("rand", "0.9.0")),
+            "vendor/x/Cargo.lock": lock(("proptest", "1.0.0")),
+        },
+    )
+    assert (rp.main([mode, *names]), capfd.readouterr().out) == answer
+
+
+def test_pins_at_the_minimum_pass_the_lint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """Every pin 1.7.0 or later: exit 0, nothing said."""
+    monkeypatch.chdir(tmp_path)
+    names = planted_locks(tmp_path, {"Cargo.lock": lock(("proptest", "1.7.0"))})
+    assert (rp.main(["lint", *names]), capfd.readouterr().out) == (0, "")
+
+
+@pytest.mark.parametrize(
+    ("text", "why"),
+    [(None, "No such file or directory"), ("[[package\n", "Cargo.lock: ")],
+    ids=["missing", "not TOML"],
+)
+def test_a_lock_that_cannot_be_read_is_a_finding(
+    text: str | None,
+    why: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """A lock the command cannot read is red, its reason named."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("MISE_TASK_NAME", "lint:rust-properties")
+    if text is not None:
+        (tmp_path / "Cargo.lock").write_text(text, encoding="utf-8")
+    assert rp.main(["lint", "Cargo.lock"]) == 1
+    err = capfd.readouterr().err
+    assert err.startswith("lint:rust-properties: ")
+    assert why in err
+
+
+@pytest.mark.parametrize("given", ["0", "18446744073709551615"])
+def test_a_given_seed_is_printed(
+    given: str, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """Any u64 is the seed, as given."""
+    monkeypatch.setenv("ORG_PROPERTY_SEED", given)
+    assert rp.main(["seed"]) == 0
+    assert capfd.readouterr().out == f"{given}\n"
+
+
+def test_an_unset_seed_is_drawn(
+    monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """No ORG_PROPERTY_SEED: 64 random bits, printed."""
+    monkeypatch.delenv("ORG_PROPERTY_SEED", raising=False)
+    assert rp.main(["seed"]) == 0
+    assert 0 <= int(capfd.readouterr().out) < 1 << rp.SEED_BITS
+
+
+@pytest.mark.parametrize("given", ["x", "-1", str(1 << 64)])
+def test_a_seed_proptest_would_not_read_is_refused(
+    given: str, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """Not a u64: the usage exit, the value named."""
+    monkeypatch.setenv("ORG_PROPERTY_SEED", given)
+    monkeypatch.setenv("MISE_TASK_NAME", "audit:rust-properties")
+    assert rp.main(["seed"]) == rp.EXIT_USAGE
+    assert capfd.readouterr().err == (
+        "audit:rust-properties: ORG_PROPERTY_SEED must be an integer from 0 to"
+        f" 2^64-1, got '{given}'\n"
+    )

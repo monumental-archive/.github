@@ -1065,6 +1065,16 @@ def test_default_major_refuses_metadata_it_cannot_read(
     assert err == f"{LABEL}: cargo metadata: packages is not a list\n"
 
 
+def test_default_major_prints_the_crates_major(
+    monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """The step prints the one pgNN in the crate's default features."""
+    meta = {"packages": [{"name": "a", "features": {"default": ["pg17"]}}]}
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(meta)))
+    assert helper.main(["default-major", "a"]) == 0
+    assert capfd.readouterr().out == "pg17\n"
+
+
 def test_a_listing_counts_lines_with_anything_on_them() -> None:
     """Blank and whitespace-only lines are not mutants."""
     assert helper.count_listed("a\n\n  \t\nb\n") == LISTED
@@ -1201,3 +1211,275 @@ def test_only_0_2_and_3_are_judged() -> None:
     """4 is a red baseline; 1 is a failure to run."""
     want = frozenset({0, 2, 3})
     assert want == helper.JUDGED
+
+
+# The plan and verdict steps in this process, over the files the shell
+# writes: the rows above run the shell, whose steps they do not measure.
+def test_an_unexplained_exclusion_is_red_by_name(
+    capfd: pytest.CaptureFixture[str], configured: Callable[[str], None]
+) -> None:
+    """An entry with no # line above it: named, with what to write."""
+    configured('exclude_re = [\n  "tests::",\n]\n')
+    status = helper.main(["reasons", CONFIG])
+    _out, err = capfd.readouterr()
+    entry = f'{CONFIG}:2: exclude_re entry "tests::"'
+    assert (status, err) == (
+        1,
+        f"{LABEL}: {entry} has no # reason line above it\n{REASON}\n",
+    )
+
+
+def listings(tmp_path: Path, **texts: str) -> list[str]:
+    """Write each listing as `<name>.txt` and spell the `plan` step's options.
+
+    Returns:
+        `--<name> <path>` for each.
+
+    """
+    argv: list[str] = []
+    for name, text in texts.items():
+        path = tmp_path / f"{name}.txt"
+        path.write_text(text, encoding="utf-8")
+        argv += [f"--{name}", str(path)]
+    return argv
+
+
+def test_the_plan_counts_and_records_a_shard(
+    tmp_path: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """Three in all, two listed, one here: one excluded, said and recorded."""
+    every, listed, here = "a\nb\n\t\nc", "a\nb\n", "a\n"
+    argv = listings(tmp_path, all=every, listed=listed, here=here)
+    out_dir = tmp_path / "run"
+    status = helper.main([
+        "plan",
+        "--name=demo",
+        "--where=,pkg",
+        f"--dir={out_dir}",
+        *argv,
+    ])
+    assert (status, capfd.readouterr().out) == (
+        0,
+        f"{LABEL}: mutating demo,pkg (1 mutants, 1 excluded)\n",
+    )
+    assert (out_dir / "counts").read_text(encoding="utf-8") == "3\t2\t1\n"
+    assert not (out_dir / "empty").exists()
+
+
+def test_an_empty_shard_says_so_and_marks_its_run(
+    tmp_path: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """No --here, nothing listed: nothing to run, `empty` written."""
+    argv = listings(tmp_path, all="a\n", listed="")
+    out_dir = tmp_path / "run"
+    status = helper.main(["plan", "--name=demo", "--where=", f"--dir={out_dir}", *argv])
+    said = [
+        f"{LABEL}: mutating demo (0 mutants, 1 excluded)",
+        f"{LABEL}: demo: no mutants in this shard, nothing to run",
+    ]
+    assert (status, capfd.readouterr().out.splitlines()) == (0, said)
+    assert (out_dir / "empty").is_file()
+
+
+class Scratch:
+    """The shell's scratch directory: its log of runs, and each run's files."""
+
+    def __init__(self, root: Path) -> None:
+        """Start with no run logged."""
+        self.root = root
+        self.log: list[str] = []
+
+    def red(self, message: str) -> None:
+        """Log a run the shell itself found red."""
+        self.log.append(f"red\t{message}")
+
+    def run(self, name: str, files: dict[str, str]) -> Path:
+        """Log a run and write its files, by path under its directory.
+
+        Returns:
+            The run's directory.
+
+        """
+        run = self.root / name
+        run.mkdir(parents=True)
+        for relative, text in files.items():
+            path = run / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
+        self.log.append(f"run\t{name}\t{run}")
+        return run
+
+    def verdict(self, *, where: str = "") -> int:
+        """Write the log and run the verdict step.
+
+        Returns:
+            Its exit status.
+
+        """
+        text = "".join(f"{line}\n" for line in self.log)
+        self.root.mkdir(parents=True, exist_ok=True)
+        (self.root / "runs.tsv").write_text(text, encoding="utf-8")
+        return helper.main([
+            "verdict",
+            str(self.root),
+            f"--where={where}",
+            "--shard=0/1",
+        ])
+
+
+@fixture
+def scratch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Scratch:
+    """Give a row its scratch directory, the summary written beside it.
+
+    Returns:
+        The row's Scratch.
+
+    """
+    monkeypatch.setenv("MUTANTS_SUMMARY_DIR", str(tmp_path / "summary"))
+    return Scratch(tmp_path / "scratch")
+
+
+def judged(total: int, caught: int, missed: int, *, timeout: int = 0) -> dict[str, str]:
+    """Spell a run cargo-mutants judged: its counts, listing and outcomes.
+
+    Returns:
+        The run's files, by path under its directory.
+
+    """
+    return {
+        "counts": "3\t2\t2\n",
+        "all.txt": "".join(f"{name}\n" for name in NAMES),
+        "status": "2\n" if missed else "0\n",
+        "mutants.out/outcomes.json": json.dumps(
+            outcomes(total, caught, missed, timeout)
+        ),
+        "mutants.out/missed.txt": f"{SURVIVOR}\n" if missed else "",
+    }
+
+
+def summary(tmp_path: Path) -> str | None:
+    """Read the shard's summary line, where the verdict wrote one.
+
+    Returns:
+        The rust.tsv text, or None.
+
+    """
+    path = tmp_path / "summary" / "rust.tsv"
+    return path.read_text(encoding="utf-8") if path.exists() else None
+
+
+def test_a_clean_run_is_green_and_summarised(
+    scratch: Scratch, tmp_path: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """Every mutant caught or timed out: green, the counts written."""
+    scratch.run("a", judged(3, 1, 0, timeout=1))
+    status = scratch.verdict(where=",pkg")
+    out, err = capfd.readouterr()
+    assert (status, err) == (0, "")
+    assert out == f"{LABEL}:pkg: 3 mutants, 2 killed, 0 survived, 1 excluded\n"
+    assert summary(tmp_path) == "0/1\t3\t2\t0\t1\twhole\n"
+
+
+def test_no_run_logged_is_nothing_judged_and_green(
+    scratch: Scratch, tmp_path: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A scratch with no log: zero of everything, still summarised."""
+    scratch.root.mkdir()
+    status = helper.main(["verdict", str(scratch.root), "--where=", "--shard=1/2"])
+    assert (status, capfd.readouterr().out) == (
+        0,
+        f"{LABEL}: 0 mutants, 0 killed, 0 survived, 0 excluded\n",
+    )
+    assert summary(tmp_path) == "1/2\t0\t0\t0\t0\twhole\n"
+
+
+def test_a_survivor_is_printed_and_red(
+    scratch: Scratch, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A missed mutant: named from missed.txt, then the red finding."""
+    scratch.run("a", judged(3, 1, 1))
+    status = scratch.verdict()
+    out, err = capfd.readouterr()
+    assert status == 1
+    assert out.splitlines()[0] == f"{LABEL}: survived: {SURVIVOR}"
+    assert err.splitlines() == RED
+
+
+@pytest.mark.parametrize(
+    ("files", "said"),
+    [
+        (
+            {"status": "4\n"},
+            "a: cargo mutants exited 4 — nothing judged (a red baseline is exit 4)",
+        ),
+        ({"status": "0\n"}, "a: cargo mutants wrote no outcomes.json"),
+        (
+            {"status": "0\n", "mutants.out/outcomes.json": "{"},
+            "a: outcomes.json: ",
+        ),
+        (
+            {"status": "0\n", "mutants.out/outcomes.json": '{"total_mutants": 1}'},
+            "a: outcomes.json states no caught",
+        ),
+    ],
+    ids=["a red baseline", "no outcomes", "undecodable outcomes", "a count unstated"],
+)
+def test_a_run_that_judged_nothing_is_red_and_unsummarised(
+    files: dict[str, str],
+    said: str,
+    scratch: Scratch,
+    tmp_path: Path,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """Each run that judged nothing is a finding; no summary is written."""
+    listing = {"counts": "3\t3\t3\n", "all.txt": "".join(f"{n}\n" for n in NAMES)}
+    scratch.run("a", listing | files)
+    assert scratch.verdict() == 1
+    err = capfd.readouterr().err
+    assert err.startswith(f"{LABEL}: {said}")
+    assert err.splitlines()[-len(RED) :] == RED
+    assert summary(tmp_path) is None
+
+
+def test_a_run_the_shell_found_red_is_named(
+    scratch: Scratch, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A `red` line in the log is a finding as written; a blank one is none."""
+    scratch.red("pkg: cargo metadata failed")
+    scratch.log.append("")
+    assert scratch.verdict() == 1
+    assert capfd.readouterr().err.splitlines()[0] == (
+        f"{LABEL}: pkg: cargo metadata failed"
+    )
+
+
+def test_an_empty_shard_counts_its_exclusions_and_judges_nothing(
+    scratch: Scratch, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """`empty` in a run: its exclusions counted, no status read."""
+    scratch.run("a", {"counts": "4\t1\t0\n", "all.txt": "x:1:1: y", "empty": ""})
+    assert scratch.verdict() == 0
+    assert capfd.readouterr().out == (
+        f"{LABEL}: 0 mutants, 0 killed, 0 survived, 3 excluded\n"
+    )
+
+
+def test_a_record_matching_nothing_is_red_after_the_runs(
+    scratch: Scratch, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """records.txt holds a record in no mutated file: named, red."""
+    scratch.run("a", judged(3, 3, 0))
+    (scratch.root / "records.txt").write_text(
+        f"src/other.rs:2:    {MARK} delete !: why\n", encoding="utf-8"
+    )
+    assert scratch.verdict() == 1
+    assert capfd.readouterr().err.splitlines()[0] == (
+        f"{LABEL}: src/other.rs:2: {MARK} delete ! is in no mutated file"
+    )
+
+
+def test_a_name_off_the_listing_form_holds_no_record() -> None:
+    """A listing line that is no `path:line:col:` name adds no file."""
+    found = helper.read_records(f"src/lib.rs:19:    {MARK} {EQUAL}: why\n")
+    want = [f"src/lib.rs:19: {MARK} {EQUAL} is in no mutated file"]
+    assert helper.unmatched(found, ["a listing banner"]) == want
