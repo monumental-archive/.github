@@ -72,6 +72,7 @@ see"). The table tests in test_adoption_population.py reach shapes the
 live org does not contain.
 """
 
+import argparse
 import sys
 from dataclasses import dataclass
 from typing import Self, TextIO
@@ -232,6 +233,12 @@ def obligations(member: Member, canon: str) -> list[tuple[str, tuple[str, ...]]]
     return owed
 
 
+class Args(argparse.Namespace):
+    """The command's arguments, typed as parsed."""
+
+    canon: str
+
+
 def main(argv: list[str]) -> int:
     """Print every derived obligation, one per line, from stdin.
 
@@ -241,13 +248,17 @@ def main(argv: list[str]) -> int:
         0 on success, 2 when the arguments or the document are refused.
 
     """
-    if len(argv) != 1 or not argv[0]:
-        findings.finding(
-            "",
-            f"takes the canon's repository name and nothing else, got {argv}",
-        )
-        return 2
-    canon = argv[0]
+    parser = argparse.ArgumentParser(
+        prog="belt adoption-population",
+        description="Print every derived obligation, one per line, from stdin",
+    )
+    parser.add_argument(
+        "canon", metavar="OWNER/REPO", help="the canon's own repository"
+    )
+    args = parser.parse_args(argv, namespace=Args())
+    if not args.canon:
+        parser.error("the canon's repository name is empty")
+    canon = args.canon
     try:
         members = load_members(sys.stdin)
     except RefusalError as exc:

@@ -651,7 +651,9 @@ def parser() -> argparse.ArgumentParser:
         The parser, one subcommand per operation.
 
     """
-    p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    p = argparse.ArgumentParser(
+        prog="belt registry", description=__doc__.splitlines()[0]
+    )
     sub = p.add_subparsers(dest="command", required=True)
 
     s = sub.add_parser("push", help="build and push by digest, untagged")

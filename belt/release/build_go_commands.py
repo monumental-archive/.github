@@ -15,6 +15,7 @@ one binary name, the second over the first.
 Exit status: 0 built, 1 refused, else go's own failing status.
 """
 
+import argparse
 import subprocess
 from pathlib import Path
 
@@ -86,9 +87,9 @@ def main(argv: list[str]) -> int:
         The exit status: 0 built, 1 refused, else go's.
 
     """
-    if argv:
-        findings.finding("", f"takes no arguments, got {argv!r}")
-        return 2
+    argparse.ArgumentParser(
+        prog="belt build-go-commands", description="Run the step"
+    ).parse_args(argv)
     try:
         build()
     except RefusedError as e:

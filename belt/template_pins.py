@@ -33,12 +33,14 @@ git on PATH, run in the repository whose templates these are.
 
 from __future__ import annotations
 
+import argparse
 import re
 import shutil
 import subprocess
 from pathlib import Path
 
 from belt import findings, typed_std
+from belt.arguments import repository
 
 GIT = shutil.which("git") or "git"
 EXIT_RED = 1
@@ -147,6 +149,13 @@ def read(path: Path) -> str:
         raise ValueError(msg) from err
 
 
+class Args(argparse.Namespace):
+    """The command's arguments, typed as parsed."""
+
+    canon: str
+    templates: list[str]
+
+
 def main(argv: list[str]) -> int:
     """Check every template's canon pins.
 
@@ -157,11 +166,13 @@ def main(argv: list[str]) -> int:
     """
     # identity.sh names a missing field on stderr and prints nothing, so
     # an empty owner or repository arrives here as "/x" or "x/".
-    owner, _, repo = argv[0].partition("/") if argv else ("", "", "")
-    if not owner or not repo:
-        findings.finding("", "usage: belt template-pins OWNER/REPO TEMPLATE...")
-        return EXIT_ERROR
-    canon, files = argv[0], [Path(f) for f in argv[1:]]
+    parser = argparse.ArgumentParser(
+        prog="belt template-pins", description="Check every template's canon pins"
+    )
+    parser.add_argument("canon", type=repository, metavar="OWNER/REPO")
+    parser.add_argument("templates", nargs="*", metavar="TEMPLATE")
+    args = parser.parse_args(argv, namespace=Args())
+    canon, files = args.canon, [Path(f) for f in args.templates]
     count = 0
     distinct: list[str] = []
     bad: list[str] = []

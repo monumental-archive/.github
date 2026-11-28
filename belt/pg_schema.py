@@ -32,6 +32,7 @@ Usage:
     belt pg-schema write <raw.sql> <snapshot>   (fix:pg-schema)
 """
 
+import argparse
 import difflib
 import re
 import sys
@@ -40,7 +41,6 @@ from pathlib import Path
 from belt import findings, tracked
 
 FIX = "fix:pg-schema"
-ARGUMENTS = 3  # mode, raw, snapshot
 
 
 def normalise(text: str) -> str:
@@ -151,6 +151,14 @@ def write(raw: str, snapshot: str) -> int:
     return 0
 
 
+class Args(argparse.Namespace):
+    """The command's arguments, typed as parsed."""
+
+    mode: str
+    raw: str
+    snapshot: str
+
+
 def main(argv: list[str]) -> int:
     """Dispatch `check` or `write`.
 
@@ -158,8 +166,13 @@ def main(argv: list[str]) -> int:
         The mode's status; 1 on a usage error.
 
     """
-    modes = {"check": check, "write": write}
-    if len(argv) != ARGUMENTS or argv[0] not in modes:
-        findings.finding("", "usage: belt pg-schema check|write <raw.sql> <snapshot>")
-        return 1
-    return modes[argv[0]](argv[1], argv[2])
+    parser = argparse.ArgumentParser(
+        prog="belt pg-schema", description="Check or write the schema snapshot"
+    )
+    modes = parser.add_subparsers(dest="mode", required=True)
+    for mode, said in (("check", "hold the snapshot"), ("write", "rewrite it")):
+        moded = modes.add_parser(mode, help=said)
+        moded.add_argument("raw", metavar="RAW_SQL")
+        moded.add_argument("snapshot", metavar="SNAPSHOT")
+    args = parser.parse_args(argv, namespace=Args())
+    return (check if args.mode == "check" else write)(args.raw, args.snapshot)

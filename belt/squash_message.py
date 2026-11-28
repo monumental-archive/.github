@@ -22,6 +22,7 @@ stdlib only.
 
 from __future__ import annotations
 
+import argparse
 import os
 import pathlib
 import re
@@ -222,7 +223,10 @@ def main(argv: list[str]) -> int:
         The step's exit status.
 
     """
-    del argv  # the step reads its environment, not arguments
+    argparse.ArgumentParser(
+        prog="belt squash-message",
+        description="Compose the squash message and hold it to the commit canon",
+    ).parse_args(argv)
     env = os.environ
     number = env["PR_NUMBER"]
     try:

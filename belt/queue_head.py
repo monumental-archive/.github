@@ -44,6 +44,7 @@ stdlib only.
 
 from __future__ import annotations
 
+import argparse
 import base64
 import os
 import re
@@ -203,7 +204,10 @@ def main(argv: list[str]) -> int:
         The step's exit status.
 
     """
-    del argv  # the step reads its environment, not arguments
+    argparse.ArgumentParser(
+        prog="belt queue-head",
+        description="Verify the merge group against its pull request's current head",
+    ).parse_args(argv)
     env = os.environ
     try:
         number = number_of(env.get("ORG_QUEUE_REF", ""))

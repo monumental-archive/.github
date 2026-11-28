@@ -77,21 +77,16 @@ Subcommands, run from the repository root:
 Exits 0 when clean, 1 on a finding, 2 on a usage error.
 """
 
+import argparse
 import json
 import re
 import sys
 from pathlib import Path
 
-from belt import coverage_js_runner, decoded, findings, shard, typed_std
+from belt import coverage_js_runner, decoded, shard, typed_std
 from belt.tracked import stdin_paths
 
 EXIT_USAGE = 2
-# stage takes a directory and, optionally, the config; verify a
-# report, the seeded list and at least one file; collected a listing
-# and at least one file.
-STAGE_ARGS = (1, 2)
-VERIFY_MIN_ARGS = 3
-COLLECTED_MIN_ARGS = 2
 
 # The lockfile reader is coverage_js_runner.py's, so the TypeScript
 # legs agree on what "the lockfile pins vitest" means (#1357).
@@ -645,30 +640,62 @@ def share(files: list[str]) -> int:
     return 0
 
 
+class Args(argparse.Namespace):
+    """The command's arguments, typed as parsed."""
+
+    mode: str
+    files: list[str]
+    scratch: str = ""
+    config: str | None = None
+    report: str = ""
+    seeded: str = ""
+    listing: str = ""
+
+
+def parser() -> argparse.ArgumentParser:
+    """Name the six subcommands and their arguments.
+
+    Returns:
+        The parser.
+
+    """
+    named = argparse.ArgumentParser(
+        prog="belt typescript-properties",
+        description="A repository's fast-check properties, under the belt's seed",
+    )
+    modes = named.add_subparsers(dest="mode", required=True)
+    for mode, at_least in (("locked", "+"), ("lint", "*"), ("share", "+")):
+        modes.add_parser(mode).add_argument("files", nargs=at_least, metavar="FILE")
+    staging = modes.add_parser("stage", help="property files on stdin")
+    staging.add_argument("scratch", metavar="DIR")
+    staging.add_argument("config", nargs="?", metavar="CONFIG")
+    staging.set_defaults(files=list[str]())
+    verifying = modes.add_parser("verify")
+    verifying.add_argument("report", metavar="REPORT")
+    verifying.add_argument("seeded", metavar="SEEDED")
+    verifying.add_argument("files", nargs="+", metavar="FILE")
+    collecting = modes.add_parser("collected")
+    collecting.add_argument("listing", metavar="LIST")
+    collecting.add_argument("files", nargs="+", metavar="FILE")
+    return named
+
+
 def main(argv: list[str]) -> int:
     """Dispatch a subcommand.
 
     Returns:
-        The subcommand's exit status, or 2 on a usage error.
+        The subcommand's exit status; argparse's 2 on a usage error.
 
     """
-    command, args = (argv[0], argv[1:]) if argv else ("", [])
-    status: int | None = None
-    if command == "locked" and args:
-        status = locked(args)
-    elif command == "lint":
-        status = lint(args)
-    elif command == "stage" and len(args) in STAGE_ARGS:
-        files = stdin_paths()
-        status = stage(args[0], args[1] if len(args) > 1 else None, files)
-    elif command == "verify" and len(args) >= VERIFY_MIN_ARGS:
-        status = verify(args[0], args[1], args[2:])
-    elif command == "collected" and len(args) >= COLLECTED_MIN_ARGS:
-        status = collected(args[0], args[1:])
-    elif command == "share" and args:
-        status = share(args)
-    if status is not None:
-        return status
-    head, *rest = __doc__.split("Subcommands", 1)[0].strip().splitlines()
-    findings.finding("", head, rest)
-    return EXIT_USAGE
+    args = parser().parse_args(argv, namespace=Args())
+    if args.mode == "locked":
+        return locked(args.files)
+    if args.mode == "lint":
+        return lint(args.files)
+    if args.mode == "stage":
+        return stage(args.scratch, args.config, stdin_paths())
+    if args.mode == "verify":
+        return verify(args.report, args.seeded, args.files)
+    if args.mode == "collected":
+        return collected(args.listing, args.files)
+    return share(args.files)

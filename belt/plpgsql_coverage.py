@@ -127,6 +127,7 @@ would be a second PL/pgSQL parser. The report lists every function's
 figures beside the totals, so the totals can be checked by hand.
 """
 
+import argparse
 import base64
 import hashlib
 import json
@@ -1245,24 +1246,39 @@ def totals(label: str, report_path: str) -> int:
     return 0
 
 
+class Args(argparse.Namespace):
+    """The command's arguments, typed as parsed."""
+
+    mode: str
+    conninfo: str = ""
+    client: list[str]
+    label: str = ""
+    report: str = ""
+
+
 def main(argv: list[str]) -> int:
     """Dispatch a subcommand.
 
     Returns:
-        The subcommand's status, or 2 on a usage error.
+        The subcommand's status; argparse's 2 on a usage error.
 
     """
-    match argv:
-        case ["collect", conninfo] | ["collect", conninfo, "--"]:
-            return collect(conninfo)
-        case ["collect", conninfo, "--", *client]:
-            return collect(conninfo, tuple(client))
-        case ["totals", label, report]:
-            return totals(label, report)
-        case _:
-            findings.finding(
-                "",
-                f"usage: {NAME} collect <conninfo> [-- <client> [<argument>...]]"
-                " | totals <label> <report>",
-            )
-            return 2
+    parser = argparse.ArgumentParser(
+        prog=f"belt {NAME}", description="Collect a database's PL/pgSQL coverage"
+    )
+    modes = parser.add_subparsers(dest="mode", required=True)
+    collecting = modes.add_parser("collect", help="write the teardown's report")
+    collecting.add_argument("conninfo", metavar="CONNINFO")
+    collecting.add_argument(
+        "client", nargs="*", metavar="CLIENT", help="after --: the client to run"
+    )
+    totalling = modes.add_parser("totals", help="total the reports")
+    totalling.add_argument("label", metavar="LABEL")
+    totalling.add_argument("report", metavar="REPORT")
+    totalling.set_defaults(client=list[str]())
+    args = parser.parse_args(argv, namespace=Args())
+    if args.mode == "totals":
+        return totals(args.label, args.report)
+    if args.client:
+        return collect(args.conninfo, tuple(args.client))
+    return collect(args.conninfo)

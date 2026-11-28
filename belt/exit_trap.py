@@ -194,7 +194,9 @@ def main(argv: list[str]) -> int:
         A process exit status.
 
     """
-    parser = argparse.ArgumentParser(description="hold EXIT traps to the guard")
+    parser = argparse.ArgumentParser(
+        prog="belt exit-trap", description="hold EXIT traps to the guard"
+    )
     parser.add_argument("files", nargs="*")
     args = parser.parse_args(argv, namespace=Args())
 

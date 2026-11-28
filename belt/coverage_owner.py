@@ -169,7 +169,9 @@ def parse(argv: list[str] | None) -> Args:
         The parsed arguments.
 
     """
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(
+        prog="belt coverage-owner", description=__doc__.splitlines()[0]
+    )
     sub = parser.add_subparsers(dest="command", required=True)
     one = sub.add_parser("claim", help="claim a build directory for a run")
     one.add_argument("target", type=Path, help="the build directory measured into")

@@ -247,7 +247,7 @@ done < "${scratch}/shard.tsv"
 
 git grep -n -e '//mutants:equivalent' -- ':!vendor/**' '*.go' > "${scratch}/records.txt" || true
 
-"${ORG_PYTHON}" -I "${belt%/*}/belt" mutants-go \
+"${ORG_PYTHON}" -I "${belt%/*}/belt" mutants-go judge \
   --label "${label}" --where "${where}" --shard "${shard:-whole}" \
   --root "${root}" --scratch "${scratch}" --summary-dir "${MUTANTS_SUMMARY_DIR:-}"
 org_done=1

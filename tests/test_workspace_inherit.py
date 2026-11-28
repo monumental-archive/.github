@@ -584,16 +584,26 @@ def test_a_failing_cargo_is_red_with_its_text_and_the_rest_judged(
     assert INERT_IN_FUZZ in err
 
 
-def test_no_root_is_a_usage_error(capfd: pytest.CaptureFixture[str]) -> None:
-    """The task always passes one; none at all is refused, exit 2."""
-    none: list[str] = []
-    status = wi.main(none)
+@pytest.mark.parametrize(
+    ("argv", "error"),
+    [
+        pytest.param(
+            [],
+            "belt workspace-inherit: error: the following arguments are required: CARGO_TOML",
+            id="nothing",
+        ),
+    ],
+)
+def test_no_root_is_a_usage_error(
+    argv: list[str], error: str, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """The task always passes one; none at all is refused, exit 2: argparse's exit 2, its usage and its error."""
+    with pytest.raises(SystemExit) as ended:
+        wi.main(argv)
     out, err = capfd.readouterr()
-    assert (status, out, err) == (
-        2,
-        "",
-        "usage: belt workspace-inherit <root Cargo.toml>...\n",
-    )
+    assert (ended.value.code, out) == (2, "")
+    assert err.startswith("usage: belt workspace-inherit "), err
+    assert err.splitlines()[-1] == error
 
 
 def test_the_task_reads_the_roots_and_judges_both(

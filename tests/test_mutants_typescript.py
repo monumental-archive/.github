@@ -603,9 +603,11 @@ def test_a_shard_with_files_writes_no_counts(
     config = share_out.tree / "stryker.config.json"
     config.write_text(json.dumps(CONFIG), encoding="utf-8")
     argv = ["share", str(config), "--out", str(share_out.out)]
-    status = mutants_typescript.main(
-        ["--label", LABEL, *[*argv, "--summary-dir", str(summary)]]
-    )
+    status = mutants_typescript.main([
+        "--label",
+        LABEL,
+        *[*argv, "--summary-dir", str(summary)],
+    ])
     err = capfd.readouterr().err
     assert status == 0, err
     assert not summary.exists()
@@ -644,9 +646,11 @@ def test_a_config_with_no_mutate_list_is_red(
     config = share_out.tree / "stryker.config.json"
     bare: dict[str, object] = {"testRunner": "vitest"}
     config.write_text(json.dumps(bare), encoding="utf-8")
-    status = mutants_typescript.main(
-        ["--label", LABEL, *["share", str(config), "--out", str(share_out.out)]]
-    )
+    status = mutants_typescript.main([
+        "--label",
+        LABEL,
+        *["share", str(config), "--out", str(share_out.out)],
+    ])
     out, err = capfd.readouterr()
     want = f"{LABEL}: {config} names no `mutate` list\n"
     assert (status, out, err) == (1, "", want)
@@ -656,13 +660,11 @@ def test_an_unreadable_config_is_red(
     share_out: ShareOut, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """No file: red, never an empty share."""
-    status = mutants_typescript.main(
-        [
-            "--label",
-            LABEL,
-            *["share", str(share_out.tree / "none.json"), "--out", str(share_out.out)],
-        ]
-    )
+    status = mutants_typescript.main([
+        "--label",
+        LABEL,
+        *["share", str(share_out.tree / "none.json"), "--out", str(share_out.out)],
+    ])
     err = capfd.readouterr().err
     assert status == 1
     assert err.startswith(f"{LABEL}: "), err
@@ -1089,13 +1091,11 @@ def test_a_sound_config_passes_silently(
     capfd: pytest.CaptureFixture[str], tmp_path: Path
 ) -> None:
     """No refused setting: exit 0, nothing printed."""
-    status = mutants_typescript.main(
-        [
-            "--label",
-            LABEL,
-            *["config", str(write("stryker.config.json", CONFIG, tmp_path=tmp_path))],
-        ]
-    )
+    status = mutants_typescript.main([
+        "--label",
+        LABEL,
+        *["config", str(write("stryker.config.json", CONFIG, tmp_path=tmp_path))],
+    ])
     out, err = capfd.readouterr()
     assert (status, out, err) == (0, "", "")
 
@@ -1154,9 +1154,11 @@ def test_a_clean_verdict_writes_its_counts(
     """Killed and timed out: exit 0, the summary line, typescript.tsv."""
     path = write("mutation.json", report(*KILLED), tmp_path=tmp_path)
     summary = path.parent / "summary"
-    status = mutants_typescript.main(
-        ["--label", LABEL, *["verdict", str(path), "--summary-dir", str(summary)]]
-    )
+    status = mutants_typescript.main([
+        "--label",
+        LABEL,
+        *["verdict", str(path), "--summary-dir", str(summary)],
+    ])
     out, err = capfd.readouterr()
     assert (status, out, err) == (
         0,
@@ -1175,13 +1177,11 @@ def test_a_verdict_writes_the_shard_it_was_given(
     """The row names `--shard`, never a fixed 0/1 (#2153)."""
     path = write("mutation.json", report(*KILLED), tmp_path=tmp_path)
     summary = path.parent / "summary"
-    status = mutants_typescript.main(
-        [
-            "--label",
-            LABEL,
-            *["verdict", str(path), "--shard", "3/8", "--summary-dir", str(summary)],
-        ]
-    )
+    status = mutants_typescript.main([
+        "--label",
+        LABEL,
+        *["verdict", str(path), "--shard", "3/8", "--summary-dir", str(summary)],
+    ])
     err = capfd.readouterr().err
     assert status == 0, err
     assert (summary / "typescript.tsv").read_text(

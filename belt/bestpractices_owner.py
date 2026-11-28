@@ -91,7 +91,9 @@ def main(argv: list[str]) -> int:
         The process exit status.
 
     """
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(
+        prog="belt bestpractices-owner", description=__doc__.splitlines()[0]
+    )
     parser.add_argument("wearer", help="https URL of the repository wearing the shield")
     args = parser.parse_args(argv, namespace=Args())
     try:

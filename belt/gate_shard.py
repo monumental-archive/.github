@@ -67,6 +67,7 @@ answer.
 stdlib only.
 """
 
+import argparse
 import fnmatch
 import json
 import os
@@ -78,7 +79,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from belt import decoded, findings, shard
+from belt import arguments, decoded, findings, shard
 from belt.gate_tools import matches
 from belt.tracked import tracked
 from belt.tree import MISE
@@ -836,24 +837,6 @@ def first_task(leg: str) -> str:
     return next(str(r["task"]) for r in rows if r["leg"] == leg)
 
 
-USAGE = (
-    "usage: belt gate-shard plan [mutants|deep-tests]"
-    " | belt gate-shard run <leg> <task> <shard> <of>"
-    " | belt gate-shard union <reports-dir> | belt gate-shard deal <of>"
-)
-USAGE_EXIT = 2
-
-
-def whole(text: str) -> int | None:
-    """Read a positive whole number.
-
-    Returns:
-        The number, or None when the text is not one.
-
-    """
-    return int(text) if text.isdigit() and int(text) > 0 else None
-
-
 def run(leg: str, task: str, at: int, of: int, mise: str) -> int:
     """Run one row: `ci:<leg>` alone, a lint shard's share, or one task's.
 
@@ -868,30 +851,6 @@ def run(leg: str, task: str, at: int, of: int, mise: str) -> int:
         print(f"gate_shard: lint {at}/{of}: {len(hand)} lints: {' '.join(hand)}")
         return run_tasks(mise, [[n] for n in hand], {}) if hand else 0
     return run_row(leg, task, at, of, mise)
-
-
-def parse(argv: list[str]) -> tuple[str, str, str, int, int] | None:
-    """Read the command line.
-
-    Returns:
-        The command, the leg, the task, the shard and the count, or None
-        when it is malformed.
-
-    """
-    match argv:
-        case ["plan"]:
-            return "plan", "", "", 0, 0
-        case ["plan", leg] if leg in LANGUAGES:
-            return "plan", leg, "", 0, 0
-        case ["union", directory]:
-            return "union", "", directory, 0, 0
-        case ["deal", count] if of := whole(count):
-            return "deal", "lint", "", 1, of
-        case ["run", leg, task, at, count] if leg in LEGS and task:
-            k, of = whole(at), whole(count)
-            if k is not None and of is not None and k <= of:
-                return "run", leg, task, k, of
-    return None
 
 
 def print_plan(leg: str) -> int:
@@ -950,6 +909,16 @@ def union(directory: str) -> int:
     ])
 
 
+class Args(argparse.Namespace):
+    """The command's arguments, typed as parsed."""
+
+    mode: str
+    leg: str = "lint"
+    task: str = ""
+    at: int = 1
+    of: int = 0
+
+
 def main(argv: list[str]) -> int:
     """Plan, run a row, check the union, or print the deal.
 
@@ -957,11 +926,31 @@ def main(argv: list[str]) -> int:
         The exit status: mise's for `run`, 2 for a malformed command line.
 
     """
-    parsed = parse(argv)
-    if parsed is None:
-        print(USAGE, file=sys.stderr)
-        return USAGE_EXIT
-    command, leg, task, at, of = parsed
+    parser = argparse.ArgumentParser(
+        prog="belt gate-shard", description="Plan the gate's runners, and run one"
+    )
+    modes = parser.add_subparsers(dest="mode", required=True)
+    planned: list[str] = ["", *LANGUAGES]
+    modes.add_parser("plan", help="print the plan for GITHUB_OUTPUT").add_argument(
+        "leg", nargs="?", default="", choices=planned, metavar="LEG"
+    )
+    modes.add_parser("union", help="hold every shard's share").add_argument(
+        "task", metavar="REPORTS_DIR"
+    )
+    modes.add_parser("deal", help="print each lint shard's hand").add_argument(
+        "of", type=arguments.count, metavar="OF"
+    )
+    running = modes.add_parser("run", help="run one row")
+    running.add_argument("leg", choices=LEGS)
+    running.add_argument("task")
+    running.add_argument("at", type=arguments.count, metavar="SHARD")
+    running.add_argument("of", type=arguments.count, metavar="OF")
+    args = parser.parse_args(argv, namespace=Args())
+    if args.mode == "run" and not args.task:
+        parser.error("the task is empty")
+    if args.mode == "run" and args.at > args.of:
+        parser.error(f"shard {args.at} is past {args.of}")
+    command, leg, task, at, of = args.mode, args.leg, args.task, args.at, args.of
     if command == "plan":
         return print_plan(leg)
     if command == "union":

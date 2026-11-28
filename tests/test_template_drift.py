@@ -405,18 +405,41 @@ def test_not_utf8_is_an_error(
     assert err.startswith(f"audit:template-pins: {rel}: cannot be read as UTF-8:"), err
 
 
+@pytest.mark.parametrize(
+    ("argv", "error"),
+    [
+        pytest.param(
+            [],
+            "belt template-drift: error: the following arguments are required: OWNER/REPO, TEMPLATE",
+            id="nothing",
+        ),
+        pytest.param(
+            [CANON],
+            "belt template-drift: error: the following arguments are required: TEMPLATE",
+            id="[CANON]",
+        ),
+        pytest.param(
+            ["/repo", STUB],
+            "belt template-drift: error: argument OWNER/REPO: '/repo' is not OWNER/REPO",
+            id='["/repo", STUB]',
+        ),
+        pytest.param(
+            ["owner/", STUB],
+            "belt template-drift: error: argument OWNER/REPO: 'owner/' is not OWNER/REPO",
+            id='["owner/", STUB]',
+        ),
+    ],
+)
 def test_a_bad_call_is_a_usage_error(
-    planted: Planted, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    argv: list[str], error: str, capfd: pytest.CaptureFixture[str]
 ) -> None:
-    """No canon, half a canon, or no template: exit 2 with the usage line."""
-    usage = "audit:template-pins: usage: belt template-drift OWNER/REPO TEMPLATE..."
-    calls: list[list[str]] = [[], [CANON], ["/repo", STUB], ["owner/", STUB]]
-    for argv in calls:
-        planted.enter(monkeypatch)
-        status = template_drift.main([*argv], T0)
-        _out, err = capfd.readouterr()
-        same(status, template_drift.EXIT_ERROR)
-        same(err.splitlines(), [usage])
+    """No canon, half a canon, or no template: exit 2 with the usage line: argparse's exit 2, its usage and its error."""
+    with pytest.raises(SystemExit) as ended:
+        template_drift.main(argv)
+    out, err = capfd.readouterr()
+    assert (ended.value.code, out) == (2, "")
+    assert err.startswith("usage: belt template-drift "), err
+    assert err.splitlines()[-1] == error
 
 
 @pytest.mark.usefixtures("planted")

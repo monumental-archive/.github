@@ -32,6 +32,7 @@ a finding, 2 on a usage or read error. Stdlib only.
 
 from __future__ import annotations
 
+import argparse
 import re
 import string
 import sys
@@ -42,8 +43,6 @@ from belt import exit_trap, findings
 EXIT_RED = 1
 EXIT_ERROR = 2
 # The three lists, split by two separators.
-LISTS = 3
-USAGE = "usage: belt bash-portability WORKFLOW... -- SCRIPT... -- CONFIG..."
 # POSIX [[:space:]] within one line.
 SPACE = r"[ \t\r\f\v]"
 COMMENT = re.compile(rf"{SPACE}*#")
@@ -230,20 +229,12 @@ def traps(names: list[str]) -> int:
         raise ValueError(msg) from err
 
 
-def split(argv: list[str]) -> list[list[str]] | None:
-    """Split the arguments into the three lists.
+class Args(argparse.Namespace):
+    """The command's arguments, typed as parsed."""
 
-    Returns:
-        The lists, or None when there are not exactly two separators.
-
-    """
-    lists: list[list[str]] = [[]]
-    for arg in argv:
-        if arg == "--":
-            lists.append([])
-        else:
-            lists[-1].append(arg)
-    return lists if len(lists) == LISTS else None
+    workflows: list[str]
+    scripts: list[str]
+    configs: list[str]
 
 
 def main(argv: list[str]) -> int:
@@ -254,11 +245,17 @@ def main(argv: list[str]) -> int:
         read error.
 
     """
-    lists = split(argv)
-    if lists is None:
-        findings.finding("", USAGE)
-        return EXIT_ERROR
-    flows, scripts, configs = lists
+    parser = argparse.ArgumentParser(
+        prog="belt bash-portability",
+        description="Check the workflows and shell files, then their EXIT traps",
+    )
+    parser.add_argument(
+        "--workflows", nargs="*", default=list[str](), metavar="WORKFLOW"
+    )
+    parser.add_argument("--scripts", nargs="*", default=list[str](), metavar="SCRIPT")
+    parser.add_argument("--configs", nargs="*", default=list[str](), metavar="CONFIG")
+    args = parser.parse_args(argv, namespace=Args())
+    flows, scripts, configs = args.workflows, args.scripts, args.configs
     files = flows + scripts
     try:
         found = "".join(hits(n, read(Path(n))) for n in files if Path(n).is_file())

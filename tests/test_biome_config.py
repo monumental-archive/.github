@@ -1121,12 +1121,10 @@ def resolved(types: object) -> dict[str, object]:
 
 def test_only_the_node_project_gets_an_override() -> None:
     """apps/a declares node, apps/b does not: one entry, for apps/a/**."""
-    entries = biome_config.node_overrides(
-        {
-            "apps/a/tsconfig.json": resolved(["node"]),
-            "apps/b/tsconfig.json": resolved(["vite/client", "geojson"]),
-        }
-    )
+    entries = biome_config.node_overrides({
+        "apps/a/tsconfig.json": resolved(["node"]),
+        "apps/b/tsconfig.json": resolved(["vite/client", "geojson"]),
+    })
     expected: list[dict[str, object]] = [
         {"includes": ["apps/a/**"], "linter": NODE_OFF},
     ]

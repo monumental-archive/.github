@@ -33,6 +33,7 @@ a usage or read error. Stdlib only.
 
 from __future__ import annotations
 
+import argparse
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -194,6 +195,12 @@ def lines(path: Path) -> list[str]:
     return records
 
 
+class Args(argparse.Namespace):
+    """The command's arguments, typed as parsed."""
+
+    workflows: list[str]
+
+
 def main(argv: list[str]) -> int:
     """Check every workflow named.
 
@@ -202,11 +209,13 @@ def main(argv: list[str]) -> int:
         when one does not, EXIT_ERROR on a usage or read error.
 
     """
-    if not argv:
-        findings.finding("", "usage: belt cold-attested WORKFLOW...")
-        return EXIT_ERROR
+    parser = argparse.ArgumentParser(
+        prog="belt cold-attested", description="Check every workflow named"
+    )
+    parser.add_argument("workflows", nargs="+", metavar="WORKFLOW")
+    args = parser.parse_args(argv, namespace=Args())
     reader = Reader()
-    for name in argv:
+    for name in args.workflows:
         try:
             records = lines(Path(name))
         except ValueError as err:

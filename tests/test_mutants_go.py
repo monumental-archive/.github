@@ -926,6 +926,7 @@ class Main:
 
         """
         return [
+            "judge",
             "--label",
             LABEL,
             "--where",
@@ -1043,19 +1044,17 @@ def test_a_skipped_file_and_a_failed_run_are_not_judged(
 @pytest.mark.usefixtures("main_state")
 def test_build_go_refuses_an_older_gomu(capfd: pytest.CaptureFixture[str]) -> None:
     """`build-go` names the gomu, both Go releases and the rebuild."""
-    status = mutants_go.main(
-        [
-            "build-go",
-            "--label",
-            LABEL,
-            "--gomu",
-            "/bin/gomu",
-            "--built",
-            "go1.24.13",
-            "--running",
-            "go1.27.4",
-        ]
-    )
+    status = mutants_go.main([
+        "build-go",
+        "--label",
+        LABEL,
+        "--gomu",
+        "/bin/gomu",
+        "--built",
+        "go1.24.13",
+        "--running",
+        "go1.27.4",
+    ])
     err = capfd.readouterr().err
     assert status == 1
     assert err == (

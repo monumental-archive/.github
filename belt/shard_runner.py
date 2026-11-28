@@ -50,6 +50,7 @@ red either way.
 stdlib only.
 """
 
+import argparse
 import re
 import subprocess
 import sys
@@ -141,7 +142,6 @@ PYTHON_M_PYTEST = 3
 PYTHONS = re.compile(r"python(3(\.[0-9]+)?)?")
 
 # `--` and at least one word of the command.
-MIN_ARGS = 2
 
 
 class NoAdapterError(Exception):
@@ -367,6 +367,12 @@ def share(command: Sequence[str], k: int, n: int) -> list[str]:
     return list(command)
 
 
+class Args(argparse.Namespace):
+    """The command's arguments, typed as parsed."""
+
+    command: list[str]
+
+
 def main(argv: list[str]) -> int:
     """Print the command with this shard's share, NUL-separated.
 
@@ -374,10 +380,18 @@ def main(argv: list[str]) -> int:
         0, 1 when a runner's share could not be listed, 2 for a bad command line.
 
     """
-    if argv[:1] != ["--"] or len(argv) < MIN_ARGS:
-        findings.finding("", "usage: belt shard-runner -- <command> [<argument>…]")
-        return 2
-    command = argv[1:]
+    parser = argparse.ArgumentParser(
+        prog="belt shard-runner",
+        description="Print the command with this shard's share, NUL-separated",
+    )
+    parser.add_argument(
+        "command",
+        nargs="+",
+        metavar="COMMAND",
+        help="after --: the command and its arguments",
+    )
+    args = parser.parse_args(argv, namespace=Args())
+    command = args.command
     named = shard.read()
     try:
         out = command if named is None else share(command, *named)

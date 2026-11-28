@@ -26,6 +26,7 @@ stdlib only.
 
 from __future__ import annotations
 
+import argparse
 import os
 import re
 import shutil
@@ -69,7 +70,6 @@ CONF = (
     "*/rustfmt.toml",
     "*/.rustfmt.toml",
 )
-USAGE = "usage: belt rust-lint lint|fix"
 # A record's fields: excluded or crate, the spec, plain or pgrx.
 RECORD, SPEC, KIND = 0, 1, 2
 
@@ -759,6 +759,12 @@ def fix_workspace(
     return 0
 
 
+class Args(argparse.Namespace):
+    """The command's arguments, typed as parsed."""
+
+    mode: str
+
+
 def main(argv: list[str]) -> int:
     """Run one task's body.
 
@@ -766,11 +772,11 @@ def main(argv: list[str]) -> int:
         The task's status; 2 on a usage error.
 
     """
-    match argv:
-        case ["lint"]:
-            return lint()
-        case ["fix"]:
-            return fix()
-        case _:
-            findings.finding("", USAGE)
-            return 2
+    parser = argparse.ArgumentParser(
+        prog="belt rust-lint", description="Lint or fix every Rust workspace"
+    )
+    modes = parser.add_subparsers(dest="mode", required=True)
+    modes.add_parser("lint", help="clippy and rustfmt, read-only")
+    modes.add_parser("fix", help="clippy and rustfmt, writing")
+    args = parser.parse_args(argv, namespace=Args())
+    return lint() if args.mode == "lint" else fix()

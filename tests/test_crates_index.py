@@ -76,16 +76,30 @@ def test_url(capfd: pytest.CaptureFixture[str]) -> None:
     )
 
 
-@pytest.mark.parametrize("argv", [(), ("url",), ("path", "alpha"), ("url", "a", "b")])
-def test_usage(argv: tuple[str, ...], capfd: pytest.CaptureFixture[str]) -> None:
-    """Anything but `url <crate>` is a usage error."""
-    status = crates_index.main(list(argv))
+@pytest.mark.parametrize(
+    ("argv", "error"),
+    [
+        ([], "belt crates-index: error: the following arguments are required: mode"),
+        (
+            ["url"],
+            "belt crates-index url: error: the following arguments are required: crate",
+        ),
+        (
+            ["path", "alpha"],
+            "belt crates-index: error: argument mode: invalid choice: 'path'"
+            " (choose from 'url')",
+        ),
+        (["url", "a", "b"], "belt crates-index: error: unrecognized arguments: b"),
+    ],
+)
+def test_usage(argv: list[str], error: str, capfd: pytest.CaptureFixture[str]) -> None:
+    """Anything but `url <crate>` is argparse's usage error."""
+    with pytest.raises(SystemExit) as ended:
+        crates_index.main(argv)
     out, err = capfd.readouterr()
-    assert (status, out, err) == (
-        2,
-        "",
-        f"{TASK}: usage: crates_index.py url <crate>\n",
-    )
+    assert (ended.value.code, out) == (2, "")
+    assert err.startswith("usage: belt crates-index"), err
+    assert err.splitlines()[-1] == error
 
 
 def test_an_empty_name(capfd: pytest.CaptureFixture[str]) -> None:

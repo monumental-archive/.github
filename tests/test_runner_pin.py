@@ -149,7 +149,7 @@ class Planted:
             The arguments that check it.
 
         """
-        return [self.flow("ci.yml", text), "--"]
+        return ["--workflows", self.flow("ci.yml", text), "--templates"]
 
     def task(self) -> subprocess.CompletedProcess[str]:
         """Run the task body in the planted tree.
@@ -341,7 +341,7 @@ def test_the_order_is_the_arguments(
     two = planted.flow("a.yml", job("x"))
     three = planted.plant("workflow-templates/c.yml", job("y"))
     planted.enter(monkeypatch)
-    status = runner_pin.main([one, two, "--", three])
+    status = runner_pin.main(["--workflows", one, two, "--templates", three])
     _out, err = capfd.readouterr()
     same(status, runner_pin.EXIT_RED)
     expected = red(
@@ -358,7 +358,7 @@ def test_nothing_given_is_clean(
 ) -> None:
     """A separator and no file: nothing to name."""
     planted.enter(monkeypatch)
-    status = runner_pin.main(["--"])
+    status = runner_pin.main(["--workflows", "--templates"])
     out, err = capfd.readouterr()
     same(status, 0, err)
     same(out.splitlines(), OK)
@@ -370,7 +370,7 @@ def test_not_utf8_is_an_error(
     """A workflow that is not UTF-8 is refused by name, exit 2."""
     rel = planted.flow("ci.yml", b"jobs: \xff\n")
     planted.enter(monkeypatch)
-    status = runner_pin.main([rel, "--"])
+    status = runner_pin.main(["--workflows", rel, "--templates"])
     _out, err = capfd.readouterr()
     same(status, runner_pin.EXIT_ERROR)
     assert err.startswith(f"{TASK}: {rel}: cannot be read as UTF-8:"), err
@@ -381,7 +381,11 @@ def test_a_missing_file_is_an_error(
 ) -> None:
     """A named file that is not there is refused by name, exit 2."""
     planted.enter(monkeypatch)
-    status = runner_pin.main(["--", "workflow-templates/gone.yml"])
+    status = runner_pin.main([
+        "--workflows",
+        "--templates",
+        "workflow-templates/gone.yml",
+    ])
     _out, err = capfd.readouterr()
     same(status, runner_pin.EXIT_ERROR)
     assert err.startswith(
@@ -389,12 +393,17 @@ def test_a_missing_file_is_an_error(
     ), err
 
 
-def test_no_separator_is_a_usage_error(
+def test_a_file_no_option_names_is_a_usage_error(
     planted: Planted, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """No `--` between the lists: exit 2 with the usage line."""
+    """A file no option names: argparse's exit 2, its usage and its error."""
     planted.enter(monkeypatch)
-    status = runner_pin.main([".github/workflows/ci.yml"])
+    with pytest.raises(SystemExit) as ended:
+        runner_pin.main([".github/workflows/ci.yml"])
     _out, err = capfd.readouterr()
-    same(status, runner_pin.EXIT_ERROR)
-    same(err.splitlines(), [f"{TASK}: {runner_pin.USAGE}"])
+    same(ended.value.code, runner_pin.EXIT_ERROR)
+    assert err.startswith("usage: belt runner-pin "), err
+    same(
+        err.splitlines()[-1],
+        "belt runner-pin: error: unrecognized arguments: .github/workflows/ci.yml",
+    )

@@ -535,7 +535,9 @@ def main(argv: list[str]) -> int:
         not read the repository or the clone is shallow.
 
     """
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(
+        prog="belt regression-count", description=__doc__.splitlines()[0]
+    )
     parser.add_argument("--repo", type=pathlib.Path, default=pathlib.Path())
     parser.add_argument("--rev", default="HEAD", help="the branch tip to walk")
     parser.add_argument("--since", help="window start, any git date")

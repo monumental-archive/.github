@@ -34,6 +34,7 @@ Two findings, both red, each reported for every manifest that has it:
 stdlib only.
 """
 
+import argparse
 import contextlib
 import io
 import os
@@ -258,9 +259,12 @@ def main(argv: list[str]) -> int:
         0 with the roots printed, 1 on a finding, 2 on a usage error.
 
     """
-    if argv != ["roots"]:
-        print("usage: belt rust-workspaces roots", file=sys.stderr)
-        return 2
+    parser = argparse.ArgumentParser(
+        prog="belt rust-workspaces", description="Print the tree's Rust workspace roots"
+    )
+    modes = parser.add_subparsers(dest="mode", required=True)
+    modes.add_parser("roots", help="print the roots, NUL-separated")
+    parser.parse_args(argv)
     listed = resolved()
     if listed is None:
         return 1

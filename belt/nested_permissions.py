@@ -23,6 +23,7 @@ Each workflow is read as UTF-8, strictly. Exit 0 with one summary line,
 
 from __future__ import annotations
 
+import argparse
 import re
 from pathlib import Path
 
@@ -106,6 +107,12 @@ def offenders(lines: list[str]) -> list[str]:
     return found
 
 
+class Args(argparse.Namespace):
+    """The command's arguments, typed as parsed."""
+
+    workflows: list[str]
+
+
 def main(argv: list[str]) -> int:
     """Check every workflow named.
 
@@ -114,12 +121,14 @@ def main(argv: list[str]) -> int:
         EXIT_RED when one does not, EXIT_ERROR on a usage or read error.
 
     """
-    if not argv:
-        findings.finding("", "usage: belt nested-permissions WORKFLOW...")
-        return EXIT_ERROR
+    parser = argparse.ArgumentParser(
+        prog="belt nested-permissions", description="Check every workflow named"
+    )
+    parser.add_argument("workflows", nargs="+", metavar="WORKFLOW")
+    args = parser.parse_args(argv, namespace=Args())
     bad: list[str] = []
     checked = 0
-    for name in argv:
+    for name in args.workflows:
         try:
             lines = read(Path(name)).split("\n")
         except ValueError as err:

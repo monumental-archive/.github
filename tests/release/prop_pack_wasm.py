@@ -49,20 +49,18 @@ def a_name(name: str) -> bool:
 NAME = st.from_regex(r"[A-Za-z0-9._-]{1,12}", fullmatch=True).filter(a_name)
 CALLER = st.builds("{}/{}".format, OWNER, NAME)
 VERSION = "1.2.3"
-NEAR_MISS = st.sampled_from(
-    [
-        "http://github.com/{}",
-        "https://github.com/{}/",
-        "https://www.github.com/{}",
-        "git://github.com/{}.git",
-        "git+ssh://git@github.com/{}.git",
-        "github:{}",
-        "{}",
-        "git+git+https://github.com/{}",
-        "https://github.com/{}.git.git",
-        " https://github.com/{}",
-    ]
-)
+NEAR_MISS = st.sampled_from([
+    "http://github.com/{}",
+    "https://github.com/{}/",
+    "https://www.github.com/{}",
+    "git://github.com/{}.git",
+    "git+ssh://git@github.com/{}.git",
+    "github:{}",
+    "{}",
+    "git+git+https://github.com/{}",
+    "https://github.com/{}.git.git",
+    " https://github.com/{}",
+])
 SCALAR: st.SearchStrategy[object] = st.one_of(
     st.none(), st.booleans(), st.integers(), st.floats(allow_nan=False), st.text()
 )

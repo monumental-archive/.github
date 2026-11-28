@@ -196,7 +196,9 @@ def main(argv: list[str]) -> int:
         0 after planting, or the command's exit status.
 
     """
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(
+        prog="belt git-decoy", description=__doc__.splitlines()[0]
+    )
     sub = parser.add_subparsers(dest="verb", required=True)
     p = sub.add_parser("plant", help="make the decoy repository in DIR")
     p.add_argument("decoy", type=pathlib.Path)

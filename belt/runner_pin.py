@@ -25,6 +25,7 @@ with every offender named, 2 on a usage or read error. Stdlib only.
 
 from __future__ import annotations
 
+import argparse
 import re
 from pathlib import Path
 
@@ -32,7 +33,6 @@ from belt import findings
 
 EXIT_RED = 1
 EXIT_ERROR = 2
-USAGE = "usage: belt runner-pin WORKFLOW... -- TEMPLATE..."
 # POSIX [[:space:]] within one line.
 SPACE = r"[ \t\r\f\v]"
 RUNS_ON = re.compile(rf"{SPACE}*runs-on:")
@@ -102,6 +102,13 @@ def offences(name: str, text: str) -> list[str]:
     return found
 
 
+class Args(argparse.Namespace):
+    """The command's arguments, typed as parsed."""
+
+    workflows: list[str]
+    templates: list[str]
+
+
 def main(argv: list[str]) -> int:
     """Check every runs-on in the workflows and the templates.
 
@@ -110,11 +117,18 @@ def main(argv: list[str]) -> int:
         named, EXIT_ERROR on a usage or read error.
 
     """
-    if "--" not in argv:
-        findings.finding("", USAGE)
-        return EXIT_ERROR
-    cut = argv.index("--")
-    names = argv[:cut] + argv[cut + 1 :]
+    parser = argparse.ArgumentParser(
+        prog="belt runner-pin",
+        description="Check every runs-on in the workflows and the templates",
+    )
+    parser.add_argument(
+        "--workflows", nargs="*", default=list[str](), metavar="WORKFLOW"
+    )
+    parser.add_argument(
+        "--templates", nargs="*", default=list[str](), metavar="TEMPLATE"
+    )
+    args = parser.parse_args(argv, namespace=Args())
+    names = [*args.workflows, *args.templates]
     bad: list[str] = []
     for name in names:
         try:

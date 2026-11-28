@@ -21,6 +21,7 @@ render's own status. Stdlib only, with bash and diff on PATH.
 
 from __future__ import annotations
 
+import argparse
 import contextlib
 import os
 import re
@@ -138,6 +139,12 @@ def compare() -> int:
     return 0
 
 
+class Args(argparse.Namespace):
+    """The command's arguments, typed as parsed."""
+
+    files: list[str]
+
+
 def main(argv: list[str]) -> int:
     """Check the tree's citation against its sources.
 
@@ -148,9 +155,20 @@ def main(argv: list[str]) -> int:
     """
     # Asked of git, never the directory: an untracked file is not the
     # tree's (#2013).
+    parser = argparse.ArgumentParser(
+        prog="belt citation-check",
+        description="Check the tree's citation against its sources",
+    )
+    parser.add_argument(
+        "files",
+        nargs="*",
+        metavar="FILE",
+        help="the tracked files, to find what requests minting",
+    )
+    args = parser.parse_args(argv, namespace=Args())
     here = Path.cwd()
     if not tracked.has("CITATION.cff", root=here):
-        return uncited(argv)
+        return uncited(args.files)
     if not tracked.has("REUSE.toml", root=here):
         findings.finding(
             "", "CITATION.cff exists but REUSE.toml (its source of truth) does not"

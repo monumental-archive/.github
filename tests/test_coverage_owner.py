@@ -105,9 +105,11 @@ def test_no_file_writes_this_run(
     claim_state: ClaimState, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """No claim yet, and no directory: made, and claimed for this run."""
-    status = coverage_owner.main(
-        ["claim", str(claim_state.target), str(claim_state.run_dir)]
-    )
+    status = coverage_owner.main([
+        "claim",
+        str(claim_state.target),
+        str(claim_state.run_dir),
+    ])
     out, err = capfd.readouterr()
     assert status == 0, err
     assert err == ""
@@ -120,9 +122,11 @@ def test_this_runs_own_claim_is_kept(
 ) -> None:
     """A second call in the same run finds its own claim: 0."""
     claim_state.plant(claim_state.run_dir)
-    status = coverage_owner.main(
-        ["claim", str(claim_state.target), str(claim_state.run_dir)]
-    )
+    status = coverage_owner.main([
+        "claim",
+        str(claim_state.target),
+        str(claim_state.run_dir),
+    ])
     out, err = capfd.readouterr()
     assert status == 0, err
     assert f"{claim_state.run_dir}\n" == owner(claim_state.target)
@@ -136,9 +140,11 @@ def test_a_dead_pids_run_is_taken_over(
     dead = claim_state.tmp / f"org-coverage-{dead_pid()}"
     dead.mkdir()
     claim_state.plant(dead)
-    status = coverage_owner.main(
-        ["claim", str(claim_state.target), str(claim_state.run_dir)]
-    )
+    status = coverage_owner.main([
+        "claim",
+        str(claim_state.target),
+        str(claim_state.run_dir),
+    ])
     out, err = capfd.readouterr()
     assert status == 0, err
     assert f"{claim_state.run_dir}\n" == owner(claim_state.target)
@@ -150,9 +156,11 @@ def test_a_missing_gate_named_run_is_taken_over(
 ) -> None:
     """A gate-named run whose directory is gone: not live, taken over."""
     claim_state.plant(claim_state.tmp / "coverage-run")
-    status = coverage_owner.main(
-        ["claim", str(claim_state.target), str(claim_state.run_dir)]
-    )
+    status = coverage_owner.main([
+        "claim",
+        str(claim_state.target),
+        str(claim_state.run_dir),
+    ])
     out, err = capfd.readouterr()
     assert status == 0, err
     assert f"{claim_state.run_dir}\n" == owner(claim_state.target)
@@ -166,9 +174,11 @@ def test_a_live_other_run_is_refused_by_name(
     other = claim_state.tmp / f"org-coverage-{os.getpid()}"
     other.mkdir()
     claim_state.plant(other)
-    status = coverage_owner.main(
-        ["claim", str(claim_state.target), str(claim_state.run_dir)]
-    )
+    status = coverage_owner.main([
+        "claim",
+        str(claim_state.target),
+        str(claim_state.run_dir),
+    ])
     out, err = capfd.readouterr()
     assert status == 1
     assert (
@@ -186,9 +196,11 @@ def test_a_present_gate_named_run_is_live(
     other = claim_state.tmp / "coverage-run"
     other.mkdir()
     claim_state.plant(other)
-    status = coverage_owner.main(
-        ["claim", str(claim_state.target), str(claim_state.run_dir)]
-    )
+    status = coverage_owner.main([
+        "claim",
+        str(claim_state.target),
+        str(claim_state.run_dir),
+    ])
     out, err = capfd.readouterr()
     assert status == 1
     assert f"another run ({other})" in err
@@ -242,9 +254,11 @@ def test_a_new_directory_carries_cargos_tag(
     tag_state: Tag, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """The planted row: on main the claim made the directory untagged."""
-    status = coverage_owner.main(
-        ["claim", str(tag_state.target), str(tag_state.run_dir)]
-    )
+    status = coverage_owner.main([
+        "claim",
+        str(tag_state.target),
+        str(tag_state.run_dir),
+    ])
     out, err = capfd.readouterr()
     assert status == 0, err
     assert tag_state.tag() == CARGO_TAG
@@ -257,9 +271,11 @@ def test_a_restored_untagged_directory_is_tagged(
     """A cache saved by main's claim holds the directory with no tag."""
     tag_state.target.mkdir(parents=True)
     (tag_state.target / "stale").write_text("from an earlier build\n")
-    status = coverage_owner.main(
-        ["claim", str(tag_state.target), str(tag_state.run_dir)]
-    )
+    status = coverage_owner.main([
+        "claim",
+        str(tag_state.target),
+        str(tag_state.run_dir),
+    ])
     out, err = capfd.readouterr()
     assert status == 0, err
     assert tag_state.tag() == CARGO_TAG
@@ -273,9 +289,11 @@ def test_an_invalid_tag_is_replaced(
     """A tag with the wrong signature is what cargo calls invalid."""
     tag_state.target.mkdir(parents=True)
     (tag_state.target / coverage_owner.TAG).write_text("Signature: wrong\n")
-    status = coverage_owner.main(
-        ["claim", str(tag_state.target), str(tag_state.run_dir)]
-    )
+    status = coverage_owner.main([
+        "claim",
+        str(tag_state.target),
+        str(tag_state.run_dir),
+    ])
     out, err = capfd.readouterr()
     assert status == 0, err
     assert tag_state.tag() == CARGO_TAG
@@ -287,9 +305,11 @@ def test_a_valid_tag_is_kept(tag_state: Tag, capfd: pytest.CaptureFixture[str]) 
     tag_state.target.mkdir(parents=True)
     mine = "Signature: 8a477f597d28d172789f06886806bc55\n# written by cargo\n"
     (tag_state.target / coverage_owner.TAG).write_text(mine)
-    status = coverage_owner.main(
-        ["claim", str(tag_state.target), str(tag_state.run_dir)]
-    )
+    status = coverage_owner.main([
+        "claim",
+        str(tag_state.target),
+        str(tag_state.run_dir),
+    ])
     out, err = capfd.readouterr()
     assert status == 0, err
     assert mine == tag_state.tag()
@@ -304,9 +324,11 @@ def test_a_refusal_writes_no_tag(
     other.mkdir()
     tag_state.target.mkdir(parents=True)
     (tag_state.target / coverage_owner.OWNER).write_text(f"{other}\n")
-    status = coverage_owner.main(
-        ["claim", str(tag_state.target), str(tag_state.run_dir)]
-    )
+    status = coverage_owner.main([
+        "claim",
+        str(tag_state.target),
+        str(tag_state.run_dir),
+    ])
     out, err = capfd.readouterr()
     assert status == 1
     assert not (tag_state.target / coverage_owner.TAG).exists()

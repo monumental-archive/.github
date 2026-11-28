@@ -21,6 +21,7 @@ succeeded (found by the v0.14.1 run).
 Exit status: 0 packed, 1 refused, else npm's own failing status.
 """
 
+import argparse
 import hashlib
 import json
 import os
@@ -204,9 +205,9 @@ def main(argv: list[str], *, env: Mapping[str, str] | None = None) -> int:
         The exit status: 0 packed, 1 refused, else npm's.
 
     """
-    if argv:
-        findings.finding("", f"takes no arguments, got {argv!r}")
-        return 2
+    argparse.ArgumentParser(
+        prog="belt pack-wasm", description="Run the pack step"
+    ).parse_args(argv)
     env = os.environ if env is None else env
     try:
         outputs = pack(env)

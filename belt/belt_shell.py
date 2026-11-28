@@ -832,7 +832,9 @@ def main(argv: list[str]) -> int:
         A process exit status.
 
     """
-    parser = argparse.ArgumentParser(description="lint mise task run bodies")
+    parser = argparse.ArgumentParser(
+        prog="belt belt-shell", description="lint mise task run bodies"
+    )
     parser.add_argument("files", nargs="*")
     parser.add_argument(
         "--env-from",

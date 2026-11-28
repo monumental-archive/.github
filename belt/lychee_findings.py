@@ -26,6 +26,7 @@ turns `audit:links` red until this moves with it. The other maps
 counts as broken links, so they are not recorded.
 """
 
+import argparse
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -104,6 +105,12 @@ def read_report(output: bytes) -> tuple[Broken, ...]:
         raise NotAReportError(msg) from err
 
 
+class Args(argparse.Namespace):
+    """The command's arguments, typed as parsed."""
+
+    args: list[str]
+
+
 def main(argv: list[str]) -> int:
     """Run lychee and record each link it found broken.
 
@@ -112,10 +119,16 @@ def main(argv: list[str]) -> int:
         report of the shape read here, or lychee is not on PATH.
 
     """
+    parser = argparse.ArgumentParser(
+        prog="belt lychee-findings",
+        description="Run lychee and record each link it found broken",
+    )
+    parser.add_argument("args", nargs="*", metavar="ARGUMENT")
+    args = parser.parse_args(argv, namespace=Args())
     task = findings.task_name()
     try:
         ran = subprocess.run(
-            [LYCHEE, "--format", "json", *argv],
+            [LYCHEE, "--format", "json", *args.args],
             stdout=subprocess.PIPE,
             check=False,
         )

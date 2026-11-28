@@ -95,12 +95,10 @@ GH_TOKEN = "actions-token"  # ruff: ignore[hardcoded-password-string] - a stand-
 ACTOR = "release-bot"
 AMD = "sha256:" + "a" * 64
 ARM = "sha256:" + "b" * 64
-FACTS = dumps(
-    {
-        "org.opencontainers.image.version": "1.2.3",
-        "org.opencontainers.image.revision": "0123456789abcdef",
-    }
-)
+FACTS = dumps({
+    "org.opencontainers.image.version": "1.2.3",
+    "org.opencontainers.image.revision": "0123456789abcdef",
+})
 
 DOCKER_STUB = r'''#!{python} -IS
 """Stub `docker`: logs its argv, answers each subcommand the helper runs."""
@@ -206,13 +204,11 @@ class Fake(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         """Serve a token or a manifest."""
         if self.headers.get("X-Stub") != "inspect":
-            Fake.log.append(
-                {
-                    "method": "GET",
-                    "path": self.path,
-                    "headers": dict(self.headers.items()),
-                }
-            )
+            Fake.log.append({
+                "method": "GET",
+                "path": self.path,
+                "headers": dict(self.headers.items()),
+            })
         if self.path.startswith("/token?"):
             self.answer(200, Fake.token_body, "application/json")
             return
@@ -233,14 +229,12 @@ class Fake(BaseHTTPRequestHandler):
         """Store a manifest under its reference and its own digest."""
         body = self.rfile.read(int(self.headers["Content-Length"]))
         ctype = self.headers.get("Content-Type", "")
-        Fake.log.append(
-            {
-                "method": "PUT",
-                "path": self.path,
-                "headers": dict(self.headers.items()),
-                "body": body,
-            }
-        )
+        Fake.log.append({
+            "method": "PUT",
+            "path": self.path,
+            "headers": dict(self.headers.items()),
+            "body": body,
+        })
         route = self.route()
         if route is None:
             self.answer(418)
@@ -314,12 +308,10 @@ class Harness:
             call = decoded.as_object(decoded.load_json(ln), "a docker call")
             argv = decoded.as_array(call["argv"], "argv")
             stdin = call["stdin"]
-            calls.append(
-                {
-                    "argv": [decoded.as_str(a, "an argument") for a in argv],
-                    "stdin": None if stdin is None else decoded.as_str(stdin, "stdin"),
-                }
-            )
+            calls.append({
+                "argv": [decoded.as_str(a, "an argument") for a in argv],
+                "stdin": None if stdin is None else decoded.as_str(stdin, "stdin"),
+            })
         return calls
 
     def argvs(self) -> list[list[str]]:
@@ -897,16 +889,14 @@ def gated(tag: str = "1.2.3", digest: str | None = None) -> str:
     body = DRY_RUN.read_bytes()[:-1]
     real = "sha256:" + hashlib.sha256(body).hexdigest()
     Fake.manifests["some-owner/some-image", real] = (body, OCI_INDEX)
-    return dumps(
-        [
-            {
-                "image": "ghcr.io/some-owner/some-image",
-                "tag": tag,
-                "digest": digest or real,
-                "extra": "ignored",
-            }
-        ]
-    )
+    return dumps([
+        {
+            "image": "ghcr.io/some-owner/some-image",
+            "tag": tag,
+            "digest": digest or real,
+            "extra": "ignored",
+        }
+    ])
 
 
 def gated_entry(images: str) -> dict[str, object]:
@@ -1072,9 +1062,9 @@ def test_registry_url_in_the_environment_changes_nothing(
     machine, and the one request it is asked for goes to ghcr.io.
     """
     harness.env["REGISTRY_URL"] = "https://attacker.example"
-    harness.env["UNTRUSTED_IMAGES"] = dumps(
-        [{"image": "ghcr.io/a/b", "tag": "1.2.3", "digest": AMD}]
-    )
+    harness.env["UNTRUSTED_IMAGES"] = dumps([
+        {"image": "ghcr.io/a/b", "tag": "1.2.3", "digest": AMD}
+    ])
     opened: list[str] = []
 
     def refuse(req: urllib.request.Request, **_: object) -> None:

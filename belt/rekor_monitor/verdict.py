@@ -155,7 +155,9 @@ def main(argv: list[str]) -> int:
         0 green, EXIT_RED red.
 
     """
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(
+        prog="belt verdict", description=__doc__.splitlines()[0]
+    )
     parser.add_argument("--exit-code", default="")
     parser.add_argument("--report", type=Path, required=True)
     parser.add_argument("--saved", choices=SAVED, required=True)

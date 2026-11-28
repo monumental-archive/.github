@@ -18,6 +18,7 @@ every short file named, 2 on a usage or read error. Stdlib only.
 
 from __future__ import annotations
 
+import argparse
 import re
 from pathlib import Path
 
@@ -64,6 +65,12 @@ def shortfall(text: str) -> tuple[int, int] | None:
     return steps, pins
 
 
+class Args(argparse.Namespace):
+    """The command's arguments, typed as parsed."""
+
+    workflows: list[str]
+
+
 def main(argv: list[str]) -> int:
     """Judge every workflow named.
 
@@ -72,11 +79,13 @@ def main(argv: list[str]) -> int:
         EXIT_ERROR on a usage or read error.
 
     """
-    if not argv:
-        findings.finding("", "usage: belt installer-pinned WORKFLOW...")
-        return EXIT_ERROR
+    parser = argparse.ArgumentParser(
+        prog="belt installer-pinned", description="Judge every workflow named"
+    )
+    parser.add_argument("workflows", nargs="+", metavar="WORKFLOW")
+    args = parser.parse_args(argv, namespace=Args())
     bad = ""
-    for name in argv:
+    for name in args.workflows:
         try:
             text = read(Path(name))
         except ValueError as err:

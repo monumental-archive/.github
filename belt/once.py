@@ -21,15 +21,12 @@ directory the clean is emptying.
 Stdlib only.
 """
 
+import argparse
 import fcntl
 import subprocess
 from pathlib import Path
 
-from belt import findings
-
-USAGE = "usage: belt once <marker> -- <command> [<argument>…]"
 # The arguments before the command: the marker and the separator.
-HEAD = 2
 
 
 def once(marker: Path, command: list[str]) -> int:
@@ -50,6 +47,13 @@ def once(marker: Path, command: list[str]) -> int:
         return status
 
 
+class Args(argparse.Namespace):
+    """The command's arguments, typed as parsed."""
+
+    marker: str
+    command: list[str]
+
+
 def main(argv: list[str]) -> int:
     """Read the marker and the command, then run it at most once.
 
@@ -57,8 +61,16 @@ def main(argv: list[str]) -> int:
         The exit status `once` gives, or 2 on a usage error.
 
     """
-    args = argv
-    if len(args) <= HEAD or args[1] != "--":
-        findings.finding("", USAGE)
-        return 2
-    return once(Path(args[0]), args[HEAD:])
+    parser = argparse.ArgumentParser(
+        prog="belt once",
+        description="Read the marker and the command, then run it at most once",
+    )
+    parser.add_argument("marker", metavar="MARKER")
+    parser.add_argument(
+        "command",
+        nargs="+",
+        metavar="COMMAND",
+        help="after --: the command and its arguments",
+    )
+    args = parser.parse_args(argv, namespace=Args())
+    return once(Path(args.marker), args.command)

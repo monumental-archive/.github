@@ -57,6 +57,7 @@ The environment carries ORG_USER_AGENT and, from the runner,
 ACTIONS_ID_TOKEN_REQUEST_URL and ACTIONS_ID_TOKEN_REQUEST_TOKEN.
 """
 
+import argparse
 import hashlib
 import json
 import os
@@ -412,9 +413,10 @@ def main(argv: list[str]) -> int:
         The exit code.
 
     """
-    if argv:
-        findings.finding("", f"takes no arguments, got {argv!r}")
-        return 2
+    argparse.ArgumentParser(
+        prog="belt publish-crates",
+        description="Run against the job's environment and working directory",
+    ).parse_args(argv)
     try:
         return run(os.environ, Path.cwd(), http)
     except RefusalError as e:

@@ -23,8 +23,13 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 PYTHON = os.environ.get("ORG_PYTHON") or sys.executable
-USAGE = launcher.USAGE
 EXIT_USAGE = 2
+USAGE = "usage: belt [-h] command\n"
+ROOTS_USAGE = "usage: belt python-roots [-h] BELT_ROOT FILE [FILE ...]\n"
+ROOTS_REFUSED = (
+    ROOTS_USAGE + "belt python-roots: error: the following arguments are required:"
+    " BELT_ROOT, FILE\n"
+)
 
 
 def run(
@@ -60,7 +65,8 @@ def test_a_planted_belt_on_pythonpath_never_answers(
     )
     assert "planted" not in done.stdout
     assert done.stderr == (
-        "subject-budget: takes no arguments, got ['--no-such-flag']\n"
+        "usage: belt subject-budget [-h]\n"
+        "belt subject-budget: error: unrecognized arguments: --no-such-flag\n"
     )
     assert done.returncode == EXIT_USAGE
 
@@ -69,7 +75,7 @@ def test_an_unknown_command_exits_2_with_its_message(env: support.Env) -> None:
     """A name no module has: 2, the usage line."""
     done = run("no-such-command", make_env=env)
     assert done.returncode == EXIT_USAGE
-    assert done.stderr == f"belt: unknown command 'no-such-command' — {USAGE}\n"
+    assert done.stderr == (f"{USAGE}belt: error: unknown command 'no-such-command'\n")
     assert not done.stdout
 
 
@@ -87,29 +93,35 @@ def test_a_commands_status_reaches_the_shell(env: support.Env) -> None:
         check=False,
     )
     assert done.stdout == "status 2\n"
-    assert done.stderr == (
-        "python-roots: usage: belt python-roots <belt-root> <file>...\n"
-    )
+    assert done.stderr == ROOTS_REFUSED
 
 
 @pytest.mark.parametrize(
     ("argv", "message"),
     [
-        pytest.param([], f"belt: no command — {USAGE}\n", id="no command"),
-        pytest.param(["--help"], f"belt: no command — {USAGE}\n", id="a flag"),
+        pytest.param(
+            [],
+            f"{USAGE}belt: error: the following arguments are required: command\n",
+            id="no command",
+        ),
+        pytest.param(
+            ["--no-such-flag"],
+            f"{USAGE}belt: error: the following arguments are required: command\n",
+            id="a flag",
+        ),
         pytest.param(
             ["subject_budget"],
-            f"belt: unknown command 'subject_budget' — {USAGE}\n",
+            f"{USAGE}belt: error: unknown command 'subject_budget'\n",
             id="underscores",
         ),
         pytest.param(
             ["not-a.name"],
-            f"belt: unknown command 'not-a.name' — {USAGE}\n",
+            f"{USAGE}belt: error: unknown command 'not-a.name'\n",
             id="not an identifier",
         ),
         pytest.param(
             ["tree"],
-            f"belt: unknown command 'tree' — {USAGE}\n",
+            f"{USAGE}belt: error: unknown command 'tree'\n",
             id="a module with no main",
         ),
     ],
@@ -118,7 +130,9 @@ def test_a_call_that_names_no_command_is_a_usage_error(
     argv: list[str], message: str, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Each way of naming no command: 2 and the usage line, nothing run."""
-    assert launcher.launch(argv) == EXIT_USAGE
+    with pytest.raises(SystemExit) as ended:
+        launcher.launch(argv)
+    assert ended.value.code == EXIT_USAGE
     written = capsys.readouterr()
     assert written.err == message
     assert not written.out
@@ -129,20 +143,23 @@ def test_a_command_gets_its_arguments_and_its_name(
 ) -> None:
     """The rest of argv is the command's; argv[0] becomes the command."""
     monkeypatch.setattr(sys, "argv", ["belt"])
-    assert launcher.launch(["python-roots"]) == EXIT_USAGE
+    with pytest.raises(SystemExit) as ended:
+        launcher.launch(["python-roots"])
+    assert ended.value.code == EXIT_USAGE
     assert sys.argv == ["python-roots"]
-    assert capsys.readouterr().err == (
-        "python-roots: usage: belt python-roots <belt-root> <file>...\n"
-    )
+    assert capsys.readouterr().err == ROOTS_REFUSED
 
 
 def test_a_release_command_is_found_in_its_package(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """The packages are searched in order: belt.release's matrix answers."""
-    assert launcher.launch(["matrix"]) == EXIT_USAGE
-    assert capsys.readouterr().err.startswith(
-        "matrix: usage: belt matrix targets {go-binary,rust-binary} REQUEST\n"
+    with pytest.raises(SystemExit) as ended:
+        launcher.launch(["matrix"])
+    assert ended.value.code == EXIT_USAGE
+    assert capsys.readouterr().err == (
+        "usage: belt matrix [-h] {targets,pgrx-extension,pgrx-images,base-images}"
+        " ...\nbelt matrix: error: the following arguments are required: mode\n"
     )
 
 

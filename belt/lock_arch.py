@@ -24,6 +24,7 @@ lives in a release listing, not in the diff.
 Prints nothing when every entry agrees.
 """
 
+import argparse
 import pathlib
 import sys
 
@@ -233,7 +234,10 @@ def main(argv: list[str]) -> int:
         caller decides, once it has asked the release what it publishes.
 
     """
-    del argv  # the entries arrive on stdin, not as arguments
+    argparse.ArgumentParser(
+        prog="belt lock-arch",
+        description="Emit a candidate line for every disagreeing lock entry on stdin",
+    ).parse_args(argv)
     for name in stdin_paths():
         path = pathlib.Path(name)
         if not path.is_file():

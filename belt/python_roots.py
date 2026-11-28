@@ -26,15 +26,14 @@ beside its own `.py` is that module's stub, not a second module.
 Prints the roots joined by `:`, or names the clashes and exits 1.
 """
 
+import argparse
 import os
 import sys
 from pathlib import PurePosixPath
 
 from belt import findings
 
-USAGE = "usage: belt python-roots <belt-root> <file>..."
 # The belt and at least one file.
-MIN_ARGS = 2
 
 
 def root_of(path: PurePosixPath, tracked: frozenset[str]) -> PurePosixPath:
@@ -94,6 +93,13 @@ def roots(files: list[str], belt: str) -> tuple[list[str], list[str]]:
     return found, clashes
 
 
+class Args(argparse.Namespace):
+    """The command's arguments, typed as parsed."""
+
+    belt_root: str
+    files: list[str]
+
+
 def main(argv: list[str]) -> int:
     """Print the roots, or name the clashes.
 
@@ -101,10 +107,13 @@ def main(argv: list[str]) -> int:
         0 with the roots printed, 1 on a clash, 2 on bad usage.
 
     """
-    if len(argv) < MIN_ARGS:
-        findings.finding("", USAGE)
-        return 2
-    found, clashes = roots(argv[1:], argv[0])
+    parser = argparse.ArgumentParser(
+        prog="belt python-roots", description="Print the roots, or name the clashes"
+    )
+    parser.add_argument("belt_root", metavar="BELT_ROOT")
+    parser.add_argument("files", nargs="+", metavar="FILE")
+    args = parser.parse_args(argv, namespace=Args())
+    found, clashes = roots(args.files, args.belt_root)
     if clashes:
         findings.finding(
             "",

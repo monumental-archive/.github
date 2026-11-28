@@ -300,15 +300,38 @@ def test_missing_file_is_an_error(
     assert err.startswith(f"lint:gate-stub: {rel}: cannot be read as UTF-8:"), err
 
 
+@pytest.mark.parametrize(
+    ("argv", "error"),
+    [
+        pytest.param(
+            [],
+            "belt gate-stub: error: the following arguments are required: OWNER/REPO, WORKFLOW",
+            id="nothing",
+        ),
+        pytest.param(
+            [CANON],
+            "belt gate-stub: error: the following arguments are required: WORKFLOW",
+            id="[CANON]",
+        ),
+        pytest.param(
+            ["/repo", "x"],
+            "belt gate-stub: error: argument OWNER/REPO: '/repo' is not OWNER/REPO",
+            id='["/repo", "x"]',
+        ),
+        pytest.param(
+            ["owner/", "x"],
+            "belt gate-stub: error: argument OWNER/REPO: 'owner/' is not OWNER/REPO",
+            id='["owner/", "x"]',
+        ),
+    ],
+)
 def test_a_bad_call_is_a_usage_error(
-    lint: Lint, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    argv: list[str], error: str, capfd: pytest.CaptureFixture[str]
 ) -> None:
-    """No canon, half a canon, or no workflow: exit 2 with the usage line."""
-    usage = "lint:gate-stub: usage: belt gate-stub OWNER/REPO WORKFLOW..."
-    calls: list[list[str]] = [[], [CANON], ["/repo", "x"], ["owner/", "x"]]
-    for argv in calls:
-        lint.enter(monkeypatch)
-        status = gate_stub.main([*argv])
-        _out, err = capfd.readouterr()
-        same(status, gate_stub.EXIT_ERROR)
-        same(err.splitlines(), [usage])
+    """No canon, half a canon, or no workflow: exit 2 with the usage line: argparse's exit 2, its usage and its error."""
+    with pytest.raises(SystemExit) as ended:
+        gate_stub.main(argv)
+    out, err = capfd.readouterr()
+    assert (ended.value.code, out) == (2, "")
+    assert err.startswith("usage: belt gate-stub "), err
+    assert err.splitlines()[-1] == error

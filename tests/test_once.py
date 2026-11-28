@@ -114,12 +114,17 @@ def test_two_concurrent_callers_run_it_once(once_state: Once) -> None:
     assert lines("start", "end") == once_state.ran()
 
 
-def test_no_separator_is_a_usage_error(once_state: Once) -> None:
-    """Arguments without `--` or a command: 2, nothing run."""
-    for argv in (
-        [str(once_state.marker)],
-        [str(once_state.marker), "--"],
-        ["a", "b", "c"],
-    ):
-        assert once.main(argv) == 2
+@pytest.mark.parametrize("separated", [[], ["--"]])
+def test_no_command_is_a_usage_error(
+    once_state: Once, separated: list[str], capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A marker and no command: argparse's exit 2, nothing run."""
+    with pytest.raises(SystemExit) as ended:
+        once.main([str(once_state.marker), *separated])
+    out, err = capfd.readouterr()
+    assert (ended.value.code, out) == (2, "")
+    assert err.startswith("usage: belt once "), err
+    assert err.splitlines()[-1] == (
+        "belt once: error: the following arguments are required: COMMAND"
+    )
     assert not once_state.marker.exists()

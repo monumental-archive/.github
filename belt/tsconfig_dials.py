@@ -128,7 +128,9 @@ def main(argv: list[str]) -> int:
         A process exit status.
 
     """
-    parser = argparse.ArgumentParser(description="the org's TypeScript level")
+    parser = argparse.ArgumentParser(
+        prog="belt tsconfig-dials", description="the org's TypeScript level"
+    )
     parser.add_argument("--flags", type=Path, required=True)
     parser.add_argument("--name", required=True)
     args = parser.parse_args(argv, namespace=Args())

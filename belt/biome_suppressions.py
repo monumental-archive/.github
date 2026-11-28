@@ -32,6 +32,7 @@ language biome parses gets a small lexer rather than a line grep:
 - GraphQL: `#` comments, and quoted and block strings.
 """
 
+import argparse
 import re
 from pathlib import Path
 
@@ -345,7 +346,7 @@ def main(argv: list[str]) -> int:
         A process exit status: 0 clean, 1 on any finding or refusal.
 
     """
-    if argv:
-        writer.finding("", f"takes no arguments, got {argv!r}")
-        return 2
+    argparse.ArgumentParser(
+        prog="belt biome-suppressions", description="Check every path on stdin"
+    ).parse_args(argv)
     return check(stdin_paths())

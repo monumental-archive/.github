@@ -26,6 +26,7 @@ ORG_CANON_DIR, or no actionlint on PATH. Stdlib only.
 
 from __future__ import annotations
 
+import argparse
 import os
 import shutil
 import subprocess
@@ -43,6 +44,12 @@ SELF_REF = 'specifying action "\\$/'
 RUNNER = 'label "ubuntu-26\\.04(-arm)?" is unknown'
 
 
+class Args(argparse.Namespace):
+    """The command's arguments, typed as parsed."""
+
+    workflows: list[str]
+
+
 def main(argv: list[str]) -> int:
     """Run actionlint on the workflows named.
 
@@ -51,9 +58,11 @@ def main(argv: list[str]) -> int:
         usage error, no canon tree, or no actionlint.
 
     """
-    if not argv:
-        findings.finding("", "usage: belt actions-lint WORKFLOW...")
-        return EXIT_ERROR
+    parser = argparse.ArgumentParser(
+        prog="belt actions-lint", description="Run actionlint on the workflows named"
+    )
+    parser.add_argument("workflows", nargs="+", metavar="WORKFLOW")
+    args = parser.parse_args(argv, namespace=Args())
     canon = os.environ.get("ORG_CANON_DIR", "")
     if not canon:
         findings.finding(
@@ -65,7 +74,15 @@ def main(argv: list[str]) -> int:
         opts = f"{os.environ.get('SHELLCHECK_OPTS', '')} --source-path={src}"
         try:
             done = subprocess.run(
-                [ACTIONLINT, "-color", "-ignore", SELF_REF, "-ignore", RUNNER, *argv],
+                [
+                    ACTIONLINT,
+                    "-color",
+                    "-ignore",
+                    SELF_REF,
+                    "-ignore",
+                    RUNNER,
+                    *args.workflows,
+                ],
                 env=os.environ | {"SHELLCHECK_OPTS": opts},
                 check=False,
             )

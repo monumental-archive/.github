@@ -253,12 +253,10 @@ def test_a_tracked_marker_is_red(task: Task, env: support.Env) -> None:
 def test_vendor_is_not_read(task: Task, env: support.Env) -> None:
     """A marker under vendor/ is outside the lint; the rest is read."""
     r = run_task(
-        task.repo(
-            {
-                "vendor/x/a.py": f"x = 1  {PRAGMA} cover\n",
-                "src/b.py": "y = 2\n",
-            }
-        ),
+        task.repo({
+            "vendor/x/a.py": f"x = 1  {PRAGMA} cover\n",
+            "src/b.py": "y = 2\n",
+        }),
         env=env,
     )
     assert r.returncode == 0, r.stderr

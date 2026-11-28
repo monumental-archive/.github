@@ -279,12 +279,23 @@ def test_a_package_that_is_not_a_table_is_refused(
     )
 
 
+@pytest.mark.parametrize(
+    ("argv", "error"),
+    [
+        pytest.param(
+            ["crate"],
+            "belt inventory-plan: error: the following arguments are required: MAJOR",
+            id='["crate"]',
+        ),
+    ],
+)
 def test_a_wrong_argument_count_is_usage(
-    plant: Callable[..., Planted], capfd: pytest.CaptureFixture[str]
+    argv: list[str], error: str, capfd: pytest.CaptureFixture[str]
 ) -> None:
-    """Two positional arguments, never fewer."""
-    planted = plant()
-    status = inventory_plan.main(["crate"])
-    run = planted.ran(status, capfd.readouterr())
-    assert run.returncode == 2
-    assert run.stderr == "inventory-plan: usage: belt inventory-plan CRATE_DIR MAJOR\n"
+    """Two positional arguments, never fewer: argparse's exit 2, its usage and its error."""
+    with pytest.raises(SystemExit) as ended:
+        inventory_plan.main(argv)
+    out, err = capfd.readouterr()
+    assert (ended.value.code, out) == (2, "")
+    assert err.startswith("usage: belt inventory-plan "), err
+    assert err.splitlines()[-1] == error

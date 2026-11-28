@@ -141,12 +141,21 @@ def test_a_wrong_shape_is_red_by_where(
     assert (1, "", f"fix:test: REUSE.toml: {where}\n") == (status, out, err)
 
 
-def test_usage(
-    capfd: pytest.CaptureFixture[str], repo: Callable[[dict[str, str]], None]
-) -> None:
-    """No caller is a usage error, not a pass."""
-    repo({})
-    status = pl.main([])
+@pytest.mark.parametrize(
+    ("argv", "error"),
+    [
+        pytest.param(
+            [],
+            "belt project-licence: error: the following arguments are required: caller",
+            id="nothing",
+        ),
+    ],
+)
+def test_usage(argv: list[str], error: str, capfd: pytest.CaptureFixture[str]) -> None:
+    """No caller is a usage error, not a pass: argparse's exit 2, its usage and its error."""
+    with pytest.raises(SystemExit) as ended:
+        pl.main(argv)
     out, err = capfd.readouterr()
-    usage = f"{TASK}: usage: belt project-licence <caller>\n"
-    assert (2, "", usage) == (status, out, err)
+    assert (ended.value.code, out) == (2, "")
+    assert err.startswith("usage: belt project-licence "), err
+    assert err.splitlines()[-1] == error

@@ -228,7 +228,7 @@ if [[ -n ${in_tree} ]]; then
 fi
 ts_runner=""
 if [[ -n ${tracked_js[0]+set} ]]; then
-  ts_runner=$("${ORG_PYTHON}" -I "$(dirname "${BASH_SOURCE[0]}")/../belt" coverage-js-runner "${tracked_js[@]}") || exit 1
+  ts_runner=$("${ORG_PYTHON}" -I "$(dirname "${BASH_SOURCE[0]}")/../belt" coverage-js-runner runner "${tracked_js[@]}") || exit 1
 fi
 # The leg measures the repository's own `test` task (#1357 item 2), so a
 # vitest tree with no `test` task has no suite the gate runs: it skips

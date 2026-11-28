@@ -45,6 +45,7 @@ once. Unset is 1/1, every module.
 
 from __future__ import annotations
 
+import argparse
 import configparser
 import json
 import os
@@ -384,6 +385,12 @@ def run(root: Path, where: str) -> int:
     return judge(root, venv, mine, where)
 
 
+class Args(argparse.Namespace):
+    """The command's arguments, typed as parsed."""
+
+    mode: str | None
+
+
 def main(argv: list[str]) -> int:
     """Run the leg, or say whether the repository adopts it.
 
@@ -391,12 +398,15 @@ def main(argv: list[str]) -> int:
         The leg's status; 2 for a usage error.
 
     """
+    parser = argparse.ArgumentParser(
+        prog="belt mutants-python", description="Run this shard's Python mutants"
+    )
+    modes = parser.add_subparsers(dest="mode")
+    modes.add_parser("adopted", help="print whether the tree adopted mutation")
+    args = parser.parse_args(argv, namespace=Args())
     root = Path.cwd()
-    if argv == ["adopted"]:
+    if args.mode == "adopted":
         return adopted(root)
-    if argv:
-        findings.finding("", "usage: belt mutants-python [adopted]")
-        return EXIT_USAGE
     try:
         named = shard.parse(os.environ.get(SHARD, ""))
     except shard.ShardError as bad:

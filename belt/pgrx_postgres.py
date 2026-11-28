@@ -207,7 +207,9 @@ def main(argv: list[str]) -> int:
         A process exit status.
 
     """
-    parser = argparse.ArgumentParser(description="the gate's Postgres provisioning")
+    parser = argparse.ArgumentParser(
+        prog="belt pgrx-postgres", description="the gate's Postgres provisioning"
+    )
     parser.add_argument("--majors", required=True)
     args = parser.parse_args(argv, namespace=Args())
 

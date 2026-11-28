@@ -303,12 +303,10 @@ def test_private_repository_attached_to_public_shape_reds(
     live = Live()
     ep = ATTACHED
     rows = rows_of(live, ep)
-    rows.append(
-        {
-            "status": "enforced",
-            "repository": {"name": "monumental-archive", "private": True},
-        }
-    )
+    rows.append({
+        "status": "enforced",
+        "repository": {"name": "monumental-archive", "private": True},
+    })
     live.answers[ep] = (200, rows)
     rc = sc.report(sc.Audit(OWNER, records(), live).run())
     err = capfd.readouterr().err

@@ -20,6 +20,7 @@ step's jq wrote: two-space indentation and a trailing newline.
 Exit status: 0 written, 1 refused, 2 usage.
 """
 
+import argparse
 import json
 import os
 import re
@@ -117,6 +118,13 @@ def plan(crate_dir: Path, major: str, prefix: str) -> list[dict[str, object]]:
     return [cell(crate_dir, major, prefix).entry()]
 
 
+class Args(argparse.Namespace):
+    """The command's arguments, typed as parsed."""
+
+    crate_dir: str
+    major: str
+
+
 def main(argv: list[str]) -> int:
     """Run the step.
 
@@ -124,11 +132,16 @@ def main(argv: list[str]) -> int:
         The exit status: 0 written, 1 refused, 2 usage.
 
     """
-    if len(argv) != 2:  # ruff: ignore[magic-value-comparison] - the two positional arguments
-        findings.finding("", "usage: belt inventory-plan CRATE_DIR MAJOR")
-        return 2
+    parser = argparse.ArgumentParser(
+        prog="belt inventory-plan", description="Run the step"
+    )
+    parser.add_argument("crate_dir", metavar="CRATE_DIR")
+    parser.add_argument("major", metavar="MAJOR")
+    args = parser.parse_args(argv, namespace=Args())
     try:
-        one = cell(Path(argv[0]), argv[1], os.environ.get("PLAN_DOC_PREFIX", ""))
+        one = cell(
+            Path(args.crate_dir), args.major, os.environ.get("PLAN_DOC_PREFIX", "")
+        )
     except RefusedError as e:
         findings.finding("", str(e), annotate=True)
         return 1

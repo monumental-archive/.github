@@ -18,6 +18,7 @@ truncated stream.
 Exit status: 0 built, 1 refused, else git's own failing status.
 """
 
+import argparse
 import hashlib
 import os
 import subprocess
@@ -119,9 +120,9 @@ def main(argv: list[str], *, env: Mapping[str, str] | None = None) -> int:
         The exit status: 0 built, 1 refused, else git's.
 
     """
-    if argv:
-        findings.finding("", f"takes no arguments, got {argv!r}")
-        return 2
+    argparse.ArgumentParser(
+        prog="belt source-archive", description="Run the step"
+    ).parse_args(argv)
     env = os.environ if env is None else env
     try:
         workflow_command.notice(build(env))

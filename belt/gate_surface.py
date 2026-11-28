@@ -311,7 +311,9 @@ def main(argv: list[str]) -> int:
         A process exit status.
 
     """
-    parser = argparse.ArgumentParser(description="the gate's crate surface")
+    parser = argparse.ArgumentParser(
+        prog="belt gate-surface", description="the gate's crate surface"
+    )
     parser.add_argument("--exclude", default="")
     parser.add_argument("--publish", type=Path)
     args = parser.parse_args(argv, namespace=Args())

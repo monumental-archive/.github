@@ -291,13 +291,23 @@ def test_missing_file_is_an_error(
     ), err
 
 
+@pytest.mark.parametrize(
+    ("argv", "error"),
+    [
+        pytest.param(
+            [],
+            "belt nested-permissions: error: the following arguments are required: WORKFLOW",
+            id="nothing",
+        ),
+    ],
+)
 def test_no_workflows_is_a_usage_error(
-    nested: Nested, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    argv: list[str], error: str, capfd: pytest.CaptureFixture[str]
 ) -> None:
-    """No workflow named: exit 2 with the usage line."""
-    nested.enter(monkeypatch)
-    status = nested_permissions.main([])
-    _out, err = capfd.readouterr()
-    same(status, nested_permissions.EXIT_ERROR)
-    usage = "lint:nested-permissions: usage: belt nested-permissions WORKFLOW..."
-    same(err.splitlines(), [usage])
+    """No workflow named: exit 2 with the usage line: argparse's exit 2, its usage and its error."""
+    with pytest.raises(SystemExit) as ended:
+        nested_permissions.main(argv)
+    out, err = capfd.readouterr()
+    assert (ended.value.code, out) == (2, "")
+    assert err.startswith("usage: belt nested-permissions "), err
+    assert err.splitlines()[-1] == error

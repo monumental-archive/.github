@@ -454,7 +454,9 @@ def main(argv: list[str]) -> int:
         A process exit status.
 
     """
-    parser = argparse.ArgumentParser(description="the generated biome config")
+    parser = argparse.ArgumentParser(
+        prog="belt biome-config", description="the generated biome config"
+    )
     parser.add_argument("--org", type=Path, required=True)
     parser.add_argument("--domains", type=Path, required=True)
     parser.add_argument("--nursery", type=Path, required=True)

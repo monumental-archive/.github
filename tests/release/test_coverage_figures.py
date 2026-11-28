@@ -281,11 +281,6 @@ def test_exactly_the_leg(text: object, said: object) -> None:
     assert said in str(raised.value)
 
 
-def test_the_command_line_takes_only_a_pgrx_leg() -> None:
-    """A third argument is `pgrx-pg<major>` or a usage error."""
-    assert figures.main(["figures", SHA, "python"]) == 2
-
-
 # main(), in process: each subcommand over what is piped to it.
 @fixture
 def pipe(monkeypatch: pytest.MonkeyPatch) -> Iterator[Callable[[bytes], None]]:
@@ -358,23 +353,40 @@ def test_a_forge_answer_that_is_not_json_is_refused(
 
 
 @pytest.mark.parametrize(
-    "argv",
+    ("argv", "error"),
     [
-        ["choose"],
-        ["choose", "abc"],
-        ["measure", SHA],
-        ["figures", SHA, "python"],
+        pytest.param(
+            ["choose"],
+            "belt coverage-figures choose: error: the following arguments are required: SHA",
+            id='["choose"]',
+        ),
+        pytest.param(
+            ["choose", "abc"],
+            "belt coverage-figures choose: error: argument SHA: 'abc' is not a 40-hex sha",
+            id='["choose", "abc"]',
+        ),
+        pytest.param(
+            ["measure", SHA],
+            "belt coverage-figures: error: argument mode: invalid choice: 'measure' (choose from 'choose', 'judge', 'figures')",
+            id='["measure", SHA]',
+        ),
+        pytest.param(
+            ["figures", SHA, "python"],
+            "belt coverage-figures figures: error: argument pgrx-pg<major>: 'python' is not pgrx-pg<major>",
+            id='["figures", SHA, "python"]',
+        ),
     ],
 )
 def test_usage_errors_are_status_two(
-    argv: object, capfd: pytest.CaptureFixture[str], pipe: Callable[[bytes], None]
+    argv: list[str], error: str, capfd: pytest.CaptureFixture[str]
 ) -> None:
-    """No sha, a short sha, an unknown command, a leg that is not pgrx."""
-    pipe(b"")
-    status = figures.main(argv)
+    """No sha, a short sha, an unknown command, a leg that is not pgrx: argparse's exit 2, its usage and its error."""
+    with pytest.raises(SystemExit) as ended:
+        figures.main(argv)
     out, err = capfd.readouterr()
-    assert (status, out) == (2, "")
-    assert f"{COMMAND}: usage: belt {COMMAND} " in err
+    assert (ended.value.code, out) == (2, "")
+    assert err.startswith("usage: belt coverage-figures "), err
+    assert err.splitlines()[-1] == error
 
 
 # The forge: answers from files the row planted beside it, keyed by the
@@ -492,12 +504,10 @@ class Derive:
         (self.tree / "a.py").write_text("", encoding="utf-8")
         env = self.make_env(self.base / "home")
         monkeypatch.setattr(sys, "stdin", io.StringIO(LEGS))
-        assert not coverage_floor.main(
-            [
-                *("--path", str(self.tree / ".coverage-floor")),
-                *("write", "--adopt", "--provenance", "v1.0.0"),
-            ]
-        )
+        assert not coverage_floor.main([
+            *("--path", str(self.tree / ".coverage-floor")),
+            *("write", "--adopt", "--provenance", "v1.0.0"),
+        ])
         capfd.readouterr()
         for argv in (
             [GIT, "init", "-q"],

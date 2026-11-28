@@ -33,10 +33,10 @@ This is the rule the lint deal already keeps by construction.
 stdlib only.
 """
 
+import argparse
 import json
 import os
 import re
-import sys
 from collections import Counter
 from pathlib import Path
 
@@ -46,8 +46,6 @@ VARIABLE = "ORG_SHARD"
 REPORTS = "ORG_SHARD_REPORTS"
 TASK = "ORG_SHARD_TASK"
 FORM = re.compile(r"([1-9][0-9]*)/([1-9][0-9]*)")
-USAGE = "usage: belt shard union <reports-dir> <task>=<shards> …"
-USAGE_EXIT = 2
 
 
 class ShardError(ValueError):
@@ -216,20 +214,30 @@ def whole(name: str, n: int, shards: dict[int, list[dict[str, object]]]) -> list
     return red
 
 
-def planned_counts(args: list[str]) -> dict[str, int] | None:
-    """Read `<task>=<shards>` arguments.
+def planned(text: str) -> tuple[str, int]:
+    """Read one `<task>=<shards>` argument.
 
     Returns:
-        Each task's count, or None when one is malformed.
+        The task and its count.
+
+    Raises:
+        ArgumentTypeError: it is not that shape, or the count is no
+            positive whole number.
 
     """
-    counts: dict[str, int] = {}
-    for arg in args:
-        task, sep, count = arg.rpartition("=")
-        if not sep or not task or not count.isdecimal() or int(count) < 1:
-            return None
-        counts[task] = int(count)
-    return counts
+    task, sep, shards = text.rpartition("=")
+    if not sep or not task or not shards.isdecimal() or int(shards) < 1:
+        msg = f"{text!r} is not <task>=<shards>"
+        raise argparse.ArgumentTypeError(msg)
+    return task, int(shards)
+
+
+class Args(argparse.Namespace):
+    """The command's arguments, typed as parsed."""
+
+    mode: str
+    directory: str
+    counts: list[tuple[str, int]]
 
 
 def main(argv: list[str]) -> int:
@@ -240,14 +248,15 @@ def main(argv: list[str]) -> int:
         when not, 2 for a malformed command line.
 
     """
-    match argv:
-        case ["union", directory, *rest] if (
-            counts := planned_counts(rest)
-        ) is not None:
-            pass
-        case _:
-            print(USAGE, file=sys.stderr)
-            return USAGE_EXIT
+    parser = argparse.ArgumentParser(
+        prog="belt shard", description="Hold every shard's share to its population"
+    )
+    modes = parser.add_subparsers(dest="mode", required=True)
+    union_ = modes.add_parser("union", help="hold the shards' reports")
+    union_.add_argument("directory", metavar="REPORTS_DIR")
+    union_.add_argument("counts", nargs="*", type=planned, metavar="TASK=SHARDS")
+    args = parser.parse_args(argv, namespace=Args())
+    directory, counts = args.directory, dict(args.counts)
     red = union(load(Path(directory)), counts)
     for line in red:
         findings.finding("", line)

@@ -22,6 +22,7 @@ comment lost in that round trip is the whole record of a decision. Every
 is one line, which is what makes the narrow match below safe.
 """
 
+import argparse
 import pathlib
 import re
 import tempfile
@@ -97,6 +98,12 @@ def variant_without(
     return None
 
 
+class Args(argparse.Namespace):
+    """The command's arguments, typed as parsed."""
+
+    config: str
+
+
 def main(argv: list[str]) -> int:
     """Write one variant per declared skip and print `spec<TAB>path`.
 
@@ -104,10 +111,13 @@ def main(argv: list[str]) -> int:
         A process exit status.
 
     """
-    if len(argv) != EXPECTED_ARGC:
-        findings.finding("", "usage: belt deny-skips <deny.toml>")
-        return 2
-    source = pathlib.Path(argv[0])
+    parser = argparse.ArgumentParser(
+        prog="belt deny-skips",
+        description="Write one variant per declared skip and print `spec<TAB>path`",
+    )
+    parser.add_argument("config", metavar="DENY_TOML")
+    args = parser.parse_args(argv, namespace=Args())
+    source = pathlib.Path(args.config)
     try:
         skips = entries(load_toml(source.read_text(encoding="utf-8")))
     except UndecodableError as error:

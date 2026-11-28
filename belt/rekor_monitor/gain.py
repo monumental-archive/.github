@@ -259,7 +259,9 @@ def main(argv: list[str]) -> int:
         0 green, EXIT_RED behind.
 
     """
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(
+        prog="belt gain", description=__doc__.splitlines()[0]
+    )
     parser.add_argument("--start", type=Path, required=True)
     parser.add_argument("--start-kept", default="")
     parser.add_argument("--checkpoint", type=Path, required=True)

@@ -26,6 +26,7 @@ Hypothesis's own is typed `Callable[..., None]`, which the belt's mypy
 reds on every property.
 """
 
+import argparse
 import ast
 from pathlib import Path
 
@@ -74,6 +75,13 @@ def takes_hypothesis_given(tree: ast.AST) -> bool:
     return False
 
 
+class Args(argparse.Namespace):
+    """The command's arguments, typed as parsed."""
+
+    given: bool
+    files: list[str]
+
+
 def main(argv: list[str]) -> int:
     """Print the importing files.
 
@@ -81,11 +89,18 @@ def main(argv: list[str]) -> int:
         0: the list is the answer.
 
     """
-    names = argv
-    judge = imports_hypothesis
-    if names[:1] == ["--given"]:
-        names, judge = names[1:], takes_hypothesis_given
-    for name in names:
+    parser = argparse.ArgumentParser(
+        prog="belt hypothesis-imports", description="Print the importing files"
+    )
+    parser.add_argument(
+        "--given",
+        action="store_true",
+        help="name the files whose tests take given instead",
+    )
+    parser.add_argument("files", nargs="*", metavar="FILE")
+    args = parser.parse_args(argv, namespace=Args())
+    judge = takes_hypothesis_given if args.given else imports_hypothesis
+    for name in args.files:
         try:
             tree = ast.parse(Path(name).read_text(encoding="utf-8"), filename=name)
         except (OSError, SyntaxError, ValueError) as err:

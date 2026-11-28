@@ -24,16 +24,17 @@ a usage or read error. Stdlib only.
 
 from __future__ import annotations
 
+import argparse
 import re
 from pathlib import Path
 
 from belt import findings, tracked
+from belt.arguments import repository
 
 EXIT_RED = 1
 EXIT_ERROR = 2
 PIN_FILE = "security/signer.pin"
 # The canon, the signer, and at least one workflow.
-MIN_ARGS = 3
 # grep's [[:space:]] within one line: lines split on "\n" alone, as grep's.
 SPACE = r"[ \t\r\f\v]"
 LITERAL = re.compile(rf"--signer-digest{SPACE}+[0-9a-f]{{40}}")
@@ -193,6 +194,14 @@ def judge(canon: str, signer: str, texts: dict[str, list[str]]) -> int:
     return 0
 
 
+class Args(argparse.Namespace):
+    """The command's arguments, typed as parsed."""
+
+    canon: str
+    signer: str
+    workflows: list[str]
+
+
 def main(argv: list[str]) -> int:
     """Check the signer references in every workflow named.
 
@@ -203,17 +212,21 @@ def main(argv: list[str]) -> int:
     """
     # identity.sh names a missing field on stderr and prints nothing, so
     # an empty owner or repository arrives here as "/x" or "x/".
-    owner, _, repo = argv[0].partition("/") if argv else ("", "", "")
-    if not owner or not repo or len(argv) < MIN_ARGS or not argv[1]:
-        findings.finding(
-            "", "usage: belt signer-pin OWNER/REPO SIGNER-WORKFLOW WORKFLOW..."
-        )
-        return EXIT_ERROR
+    parser = argparse.ArgumentParser(
+        prog="belt signer-pin",
+        description="Check the signer references in every workflow named",
+    )
+    parser.add_argument("canon", type=repository, metavar="OWNER/REPO")
+    parser.add_argument("signer", metavar="SIGNER-WORKFLOW")
+    parser.add_argument("workflows", nargs="+", metavar="WORKFLOW")
+    args = parser.parse_args(argv, namespace=Args())
+    if not args.signer:
+        parser.error("the signer workflow is empty")
     texts: dict[str, list[str]] = {}
-    for name in argv[2:]:
+    for name in args.workflows:
         try:
             texts[name] = lines_of(read(Path(name)))
         except ValueError as err:
             findings.finding("", str(err))
             return EXIT_ERROR
-    return judge(argv[0], argv[1], texts)
+    return judge(args.canon, args.signer, texts)

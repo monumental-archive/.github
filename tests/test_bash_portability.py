@@ -142,7 +142,7 @@ class Planted:
             The arguments that check it.
 
         """
-        return ["--", self.plant("a.sh", text), "--"]
+        return ["--workflows", "--scripts", self.plant("a.sh", text), "--configs"]
 
     def task(self) -> subprocess.CompletedProcess[str]:
         """Run the task body in the planted tree.
@@ -285,7 +285,7 @@ def test_hits_in_one_file_and_across_files(
     one = planted.plant(".github/workflows/a.yml", "a: ${x,}\nb: ok\nc: ${y^}\n")
     two = planted.plant("b.sh", SCRIPT + "mapfile x\n")
     planted.enter(monkeypatch)
-    status = bash_portability.main([one, "--", two, "--"])
+    status = bash_portability.main(["--workflows", one, "--scripts", two, "--configs"])
     _out, err = capfd.readouterr()
     same(status, bash_portability.EXIT_RED)
     expected = red(f"  {one}: 1:a: ${{x,}}", "3:c: ${y^}", f"  {two}: 2:mapfile x")
@@ -298,7 +298,13 @@ def test_a_path_that_is_not_a_file_is_counted_unread(
     """A named directory or a missing path: counted, never read."""
     (planted.tree / "d.yml").mkdir()
     planted.enter(monkeypatch)
-    status = bash_portability.main([".github/workflows/gone.yml", "d.yml", "--", "--"])
+    status = bash_portability.main([
+        "--workflows",
+        ".github/workflows/gone.yml",
+        "d.yml",
+        "--scripts",
+        "--configs",
+    ])
     out, err = capfd.readouterr()
     same(status, 0, err)
     same(out.splitlines()[-1], clean(2))
@@ -342,7 +348,7 @@ def test_backslash_c_and_nul_end_the_text(
     one = planted.plant("a.sh", SCRIPT + f"echo ${{v,,}} x{stop}y\n")
     two = planted.plant("b.sh", SCRIPT + "mapfile x\n")
     planted.enter(monkeypatch)
-    status = bash_portability.main(["--", one, two, "--"])
+    status = bash_portability.main(["--workflows", "--scripts", one, two, "--configs"])
     _out, err = capfd.readouterr()
     same(status, bash_portability.EXIT_RED)
     expected = red("  a.sh: 2:echo ${v,,} x")
@@ -390,7 +396,7 @@ def test_a_workflow_not_utf8_is_judged_on_its_bytes(
     """A workflow that is not UTF-8 is read as grep reads it."""
     rel = planted.plant("a.yml", b"x: \xff\nmapfile x\n")
     planted.enter(monkeypatch)
-    status = bash_portability.main([rel, "--", "--"])
+    status = bash_portability.main(["--workflows", rel, "--scripts", "--configs"])
     _out, err = capfd.readouterr()
     same(status, bash_portability.EXIT_RED)
     same(err.splitlines(), red(f"  {rel}: 2:mapfile x"))
@@ -416,17 +422,25 @@ def test_a_script_exit_trap_cannot_read_is_an_error(
         assert err.startswith(said), err
 
 
-@pytest.mark.parametrize("argv", [[], ["a.sh"], ["--"], ["--", "--", "--"]])
+@pytest.mark.parametrize(
+    ("argv", "error"),
+    [
+        pytest.param(["a.sh"], "unrecognized arguments: a.sh", id="a file unnamed"),
+        pytest.param(["--"], "unrecognized arguments: --", id="a separator"),
+    ],
+)
 def test_a_bad_call_is_a_usage_error(
     planted: Planted,
-    argv: object,
+    argv: list[str],
+    error: str,
     capfd: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Not two separators: exit 2 with the usage line."""
-    usage = f"{TASK}: {bash_portability.USAGE}"
+    """A file no option names: argparse's exit 2, its usage and its error."""
     planted.enter(monkeypatch)
-    status = bash_portability.main([*argv])
+    with pytest.raises(SystemExit) as ended:
+        bash_portability.main(argv)
     _out, err = capfd.readouterr()
-    same(status, bash_portability.EXIT_ERROR)
-    same(err.splitlines(), [usage])
+    same(ended.value.code, bash_portability.EXIT_ERROR)
+    assert err.startswith("usage: belt bash-portability "), err
+    same(err.splitlines()[-1], f"belt bash-portability: error: {error}")

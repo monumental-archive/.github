@@ -38,6 +38,7 @@ stdlib only.
 
 from __future__ import annotations
 
+import argparse
 import contextlib
 import json
 import os
@@ -236,9 +237,10 @@ def main(argv: list[str]) -> int:
         The step's exit status.
 
     """
-    if argv:
-        findings.finding("", f"takes no arguments, got {argv!r}")
-        return 2
+    argparse.ArgumentParser(
+        prog="belt attach-publish",
+        description="Attach and publish, or converge on a published release",
+    ).parse_args(argv)
     tag, repo = os.environ["TAG"], os.environ["GITHUB_REPOSITORY"]
     draft = gh(
         "release", "view", tag, "--repo", repo, "--json", "isDraft", "--jq", ".isDraft",

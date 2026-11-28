@@ -504,17 +504,43 @@ def test_each_runner(line: object, want: object) -> None:
 
 # A malformed command line is the usage exit, never a run.
 @pytest.mark.parametrize(
-    "argv",
+    ("argv", "error"),
     [
-        [],
-        ["run", "lint", "ci:lint", "5", "4"],
-        ["run", "lint", "ci:lint", "0", "4"],
-        ["run", "docs", "ci:docs", "1", "1"],
-        ["run", "test", "", "1", "1"],
-        ["plan", "gate"],
-        ["deal", "x"],
+        ([], "belt gate-shard: error: the following arguments are required: mode"),
+        (
+            ["run", "lint", "ci:lint", "5", "4"],
+            "belt gate-shard: error: shard 5 is past 4",
+        ),
+        (
+            ["run", "lint", "ci:lint", "0", "4"],
+            "belt gate-shard run: error: argument SHARD: '0' is not a positive"
+            " whole number",
+        ),
+        (
+            ["run", "docs", "ci:docs", "1", "1"],
+            "belt gate-shard run: error: argument leg: invalid choice: 'docs'"
+            " (choose from 'lint', 'test', 'properties')",
+        ),
+        (["run", "test", "", "1", "1"], "belt gate-shard: error: the task is empty"),
+        (
+            ["plan", "gate"],
+            "belt gate-shard plan: error: argument LEG: invalid choice: 'gate'"
+            " (choose from '', 'mutants', 'deep-tests')",
+        ),
+        (
+            ["deal", "x"],
+            "belt gate-shard deal: error: argument OF: 'x' is not a positive"
+            " whole number",
+        ),
     ],
 )
-def test_bad_arguments(argv: object) -> None:
-    """Each malformed form exits 2 before running anything."""
-    assert gate_shard.main(argv) == 2
+def test_bad_arguments(
+    argv: list[str], error: str, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """Each malformed form is argparse's exit 2, before running anything."""
+    with pytest.raises(SystemExit) as ended:
+        gate_shard.main(argv)
+    out, err = capfd.readouterr()
+    assert (ended.value.code, out) == (2, "")
+    assert err.startswith("usage: belt gate-shard"), err
+    assert err.splitlines()[-1] == error

@@ -253,15 +253,26 @@ def test_adopted_says_whether_the_section_is_tracked(
     assert out == said
 
 
+@pytest.mark.parametrize(
+    ("argv", "error"),
+    [
+        pytest.param(
+            ["plan"],
+            "belt mutants-python: error: argument mode: invalid choice: 'plan' (choose from 'adopted')",
+            id='["plan"]',
+        ),
+    ],
+)
 def test_an_unknown_argument_is_a_usage_error(
-    tmp_path: Path, leg: Callable[[Path], None], capfd: pytest.CaptureFixture[str]
+    argv: list[str], error: str, capfd: pytest.CaptureFixture[str]
 ) -> None:
-    """Only `adopted` is a verb."""
-    leg(tmp_path)
-    status = mutants_python.main(["plan"])
-    err = capfd.readouterr().err
-    assert status == USAGE
-    assert err == "audit:mutants: usage: belt mutants-python [adopted]\n"
+    """Only `adopted` is a verb: argparse's exit 2, its usage and its error."""
+    with pytest.raises(SystemExit) as ended:
+        mutants_python.main(argv)
+    out, err = capfd.readouterr()
+    assert (ended.value.code, out) == (2, "")
+    assert err.startswith("usage: belt mutants-python "), err
+    assert err.splitlines()[-1] == error
 
 
 @pytest.mark.parametrize(

@@ -20,6 +20,7 @@ Where a marker counts, by language:
   line is removed.
 """
 
+import argparse
 import io
 import re
 import tokenize
@@ -177,7 +178,10 @@ def main(argv: list[str]) -> int:
         0 when no path holds an exclusion, 1 otherwise.
 
     """
-    del argv
+    argparse.ArgumentParser(
+        prog="belt coverage-exclusions",
+        description="Scan the paths on stdin and report",
+    ).parse_args(argv)
     paths = stdin_paths()
     found = [f for p in paths for f in scan(p)]
     for each in found:

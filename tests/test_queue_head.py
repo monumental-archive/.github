@@ -195,14 +195,12 @@ def step_env(ref: str, base: str, group: str, *, env: support.Env) -> dict[str, 
 
     """
     environ = scrubbed(env=env)
-    environ.update(
-        {
-            "ORG_QUEUE_REF": ref,
-            "ORG_QUEUE_BASE": base,
-            "ORG_QUEUE_GROUP": group,
-            "ORG_QUEUE_TOKEN": "not-a-real-token",
-        }
-    )
+    environ.update({
+        "ORG_QUEUE_REF": ref,
+        "ORG_QUEUE_BASE": base,
+        "ORG_QUEUE_GROUP": group,
+        "ORG_QUEUE_TOKEN": "not-a-real-token",
+    })
     return environ
 
 

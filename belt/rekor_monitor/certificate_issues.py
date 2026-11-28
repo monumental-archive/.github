@@ -309,7 +309,9 @@ def main(argv: list[str]) -> int:
         0 when every finding has its issue, EXIT_ERROR otherwise.
 
     """
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(
+        prog="belt certificate-issues", description=__doc__.splitlines()[0]
+    )
     parser.add_argument("--report", type=Path, required=True)
     parser.add_argument("--run-url", required=True)
     args = parser.parse_args(argv, namespace=Args())

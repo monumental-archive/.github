@@ -19,6 +19,7 @@ names none, which each caller reports in its own words; exits 1 with
 the reason on stderr otherwise.
 """
 
+import argparse
 import pathlib
 
 from belt import findings, tracked
@@ -97,6 +98,12 @@ def decide(caller: str, names: list[str], declaration: str) -> tuple[str, list[s
     return (names[0] if names else ""), []
 
 
+class Args(argparse.Namespace):
+    """The command's arguments, typed as parsed."""
+
+    caller: str
+
+
 def main(argv: list[str]) -> int:
     """Print the project's licence expression for the caller.
 
@@ -104,10 +111,13 @@ def main(argv: list[str]) -> int:
         A process exit status.
 
     """
-    if len(argv) != EXPECTED_ARGC:
-        findings.finding("", "usage: belt project-licence <caller>")
-        return 2
-    caller = argv[0]
+    parser = argparse.ArgumentParser(
+        prog="belt project-licence",
+        description="Print the project's licence expression for the caller",
+    )
+    parser.add_argument("caller")
+    args = parser.parse_args(argv, namespace=Args())
+    caller = args.caller
     try:
         config = load_toml(pathlib.Path("REUSE.toml").read_text(encoding="utf-8"))
     except UndecodableError as error:

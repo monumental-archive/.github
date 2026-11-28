@@ -33,6 +33,7 @@ workspace, so a root workspace alone left its `[workspace.package]`
 unread.
 """
 
+import argparse
 import os
 import shutil
 import subprocess
@@ -379,6 +380,12 @@ def account(manifest: str) -> str | None:
     return out
 
 
+class Args(argparse.Namespace):
+    """The command's arguments, typed as parsed."""
+
+    roots: list[str]
+
+
 def main(roots: list[str]) -> int:
     """Run the check once per workspace root, past a red one.
 
@@ -386,11 +393,14 @@ def main(roots: list[str]) -> int:
         0 when every root is green, 1 when any is red.
 
     """
-    if not roots:
-        print("usage: belt workspace-inherit <root Cargo.toml>...", file=sys.stderr)
-        return 2
+    parser = argparse.ArgumentParser(
+        prog="belt workspace-inherit",
+        description="Run the check once per workspace root, past a red one",
+    )
+    parser.add_argument("roots", nargs="+", metavar="CARGO_TOML")
+    args = parser.parse_args(roots, namespace=Args())
     status = 0
-    for manifest in roots:
+    for manifest in args.roots:
         text = account(manifest)
         verdict = 1 if text is None else check(text, manifest)
         status = max(status, verdict)

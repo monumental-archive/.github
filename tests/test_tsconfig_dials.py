@@ -216,9 +216,12 @@ def test_a_config_at_the_org_level_passes(
 ) -> None:
     """Built from the delivered level itself, so it cannot drift."""
     fed({"compilerOptions": dict(REQUIRED)})
-    status = tsconfig_dials.main(
-        ["--flags", str(FLAGS_FILE), "--name", "tsconfig.json"]
-    )
+    status = tsconfig_dials.main([
+        "--flags",
+        str(FLAGS_FILE),
+        "--name",
+        "tsconfig.json",
+    ])
     out = capfd.readouterr().out
     assert status == 0
     assert f"{len(REQUIRED)} dial(s)" in out
@@ -234,9 +237,12 @@ def test_the_scaffold_stub_passes_its_own_check(
         ),
     )
     fed(stub)
-    status = tsconfig_dials.main(
-        ["--flags", str(FLAGS_FILE), "--name", "tsconfig.json"]
-    )
+    status = tsconfig_dials.main([
+        "--flags",
+        str(FLAGS_FILE),
+        "--name",
+        "tsconfig.json",
+    ])
     err = capfd.readouterr().err
     assert status == 0, err
 
@@ -246,9 +252,12 @@ def test_a_stripped_config_fails_with_every_dial_named(
 ) -> None:
     """The old scaffold instruction, refused, and told what is missing."""
     fed({"compilerOptions": {"lib": ["es2025"], "module": "nodenext"}})
-    status = tsconfig_dials.main(
-        ["--flags", str(FLAGS_FILE), "--name", "tsconfig.json"]
-    )
+    status = tsconfig_dials.main([
+        "--flags",
+        str(FLAGS_FILE),
+        "--name",
+        "tsconfig.json",
+    ])
     err = capfd.readouterr().err
     assert status == 1
     for key in REQUIRED:
@@ -262,9 +271,12 @@ def test_one_weaker_dial_fails_the_whole_config(
     options = dict(REQUIRED)
     options["skipLibCheck"] = True
     fed({"compilerOptions": options})
-    status = tsconfig_dials.main(
-        ["--flags", str(FLAGS_FILE), "--name", "tsconfig.json"]
-    )
+    status = tsconfig_dials.main([
+        "--flags",
+        str(FLAGS_FILE),
+        "--name",
+        "tsconfig.json",
+    ])
     err = capfd.readouterr().err
     assert status == 1
     assert "skipLibCheck" in err
@@ -277,9 +289,12 @@ def test_a_config_without_ts_extension_imports_fails(
     options = dict(REQUIRED)
     options.pop("allowImportingTsExtensions", None)
     fed({"compilerOptions": options})
-    status = tsconfig_dials.main(
-        ["--flags", str(FLAGS_FILE), "--name", "tsconfig.json"]
-    )
+    status = tsconfig_dials.main([
+        "--flags",
+        str(FLAGS_FILE),
+        "--name",
+        "tsconfig.json",
+    ])
     err = capfd.readouterr().err
     assert status == 1
     assert '"allowImportingTsExtensions" is absent' in err
@@ -288,9 +303,12 @@ def test_a_config_without_ts_extension_imports_fails(
 def test_a_config_with_no_compiler_options_fails(fed: Callable[[object], None]) -> None:
     """Nothing stated is nothing enforced."""
     fed({})
-    status = tsconfig_dials.main(
-        ["--flags", str(FLAGS_FILE), "--name", "tsconfig.json"]
-    )
+    status = tsconfig_dials.main([
+        "--flags",
+        str(FLAGS_FILE),
+        "--name",
+        "tsconfig.json",
+    ])
     assert status == 1
 
 
@@ -299,9 +317,12 @@ def test_a_compileroptions_that_is_not_an_object_fails(
 ) -> None:
     """Malformed input gets a sentence, not a traceback."""
     fed({"compilerOptions": []})
-    status = tsconfig_dials.main(
-        ["--flags", str(FLAGS_FILE), "--name", "tsconfig.json"]
-    )
+    status = tsconfig_dials.main([
+        "--flags",
+        str(FLAGS_FILE),
+        "--name",
+        "tsconfig.json",
+    ])
     err = capfd.readouterr().err
     assert status == 1
     assert "not an object" in err
@@ -314,9 +335,12 @@ def test_a_resolved_config_that_is_not_an_object_fails(
     shapes: tuple[object, ...] = ([], 1, "x")
     for resolved in shapes:
         fed(resolved)
-        status = tsconfig_dials.main(
-            ["--flags", str(FLAGS_FILE), "--name", "tsconfig.json"]
-        )
+        status = tsconfig_dials.main([
+            "--flags",
+            str(FLAGS_FILE),
+            "--name",
+            "tsconfig.json",
+        ])
         err = capfd.readouterr().err
         assert status == 1
         assert "did not resolve to an object" in err
@@ -327,9 +351,12 @@ def test_unresolvable_json_fails(
 ) -> None:
     """Output from tsc that is not JSON must not pass."""
     fed(None)
-    status = tsconfig_dials.main(
-        ["--flags", str(FLAGS_FILE), "--name", "tsconfig.json"]
-    )
+    status = tsconfig_dials.main([
+        "--flags",
+        str(FLAGS_FILE),
+        "--name",
+        "tsconfig.json",
+    ])
     err = capfd.readouterr().err
     assert status == 1
     assert "did not resolve" in err
@@ -340,9 +367,12 @@ def test_a_flags_file_naming_no_dial_fails(
 ) -> None:
     """An empty level would silently pass every repo in the org."""
     fed({"compilerOptions": {}})
-    status = tsconfig_dials.main(
-        ["--flags", str(flags("# nothing but prose")), "--name", "tsconfig.json"]
-    )
+    status = tsconfig_dials.main([
+        "--flags",
+        str(flags("# nothing but prose")),
+        "--name",
+        "tsconfig.json",
+    ])
     err = capfd.readouterr().err
     assert status == 1
     assert "no dial" in err
@@ -353,14 +383,12 @@ def test_a_flags_file_the_check_cannot_read_fails(
 ) -> None:
     """Refuse rather than enforce a subset nobody chose."""
     fed({"compilerOptions": {"strict": True}})
-    status = tsconfig_dials.main(
-        [
-            "--flags",
-            str(flags("--strict", "--target es2025")),
-            "--name",
-            "tsconfig.json",
-        ]
-    )
+    status = tsconfig_dials.main([
+        "--flags",
+        str(flags("--strict", "--target es2025")),
+        "--name",
+        "tsconfig.json",
+    ])
     err = capfd.readouterr().err
     assert status == 1
     assert "cannot read" in err

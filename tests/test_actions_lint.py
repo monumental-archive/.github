@@ -134,18 +134,26 @@ def test_the_two_ignores_are_anchored() -> None:
     assert runner == actions_lint.RUNNER
 
 
+@pytest.mark.parametrize(
+    ("argv", "error"),
+    [
+        pytest.param(
+            [],
+            "belt actions-lint: error: the following arguments are required: WORKFLOW",
+            id="nothing",
+        ),
+    ],
+)
 def test_no_workflow_is_a_usage_error(
-    actions_lint_state: ActionsLint,
-    capfd: pytest.CaptureFixture[str],
-    monkeypatch: pytest.MonkeyPatch,
+    argv: list[str], error: str, capfd: pytest.CaptureFixture[str]
 ) -> None:
-    """No file named: exit 2, never a walk of the directory."""
-    monkeypatch.chdir(actions_lint_state.tree)
-    status = actions_lint.main([])
-    _out, err = capfd.readouterr()
-    assert status == actions_lint.EXIT_ERROR
-    usage: list[str] = ["lint:actions: usage: belt actions-lint WORKFLOW..."]
-    assert err.splitlines() == usage
+    """No file named: exit 2, never a walk of the directory: argparse's exit 2, its usage and its error."""
+    with pytest.raises(SystemExit) as ended:
+        actions_lint.main(argv)
+    out, err = capfd.readouterr()
+    assert (ended.value.code, out) == (2, "")
+    assert err.startswith("usage: belt actions-lint "), err
+    assert err.splitlines()[-1] == error
 
 
 def test_no_canon_tree_is_refused(

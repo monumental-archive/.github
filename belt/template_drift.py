@@ -31,6 +31,7 @@ only, and git on PATH, run in the canon's clone.
 
 from __future__ import annotations
 
+import argparse
 import re
 import shutil
 import subprocess
@@ -38,12 +39,12 @@ import time
 from pathlib import Path
 
 from belt import findings, typed_std
+from belt.arguments import repository
 
 GIT = shutil.which("git") or "git"
 EXIT_RED = 1
 EXIT_ERROR = 2
 # The canon and at least one template.
-MIN_ARGS = 2
 GRACE = 86400
 HOUR = 3600
 PATHS = (".github/workflows/", "mise/")
@@ -211,6 +212,13 @@ def audit(sha: str, now: int) -> int:
     return EXIT_RED
 
 
+class Args(argparse.Namespace):
+    """The command's arguments, typed as parsed."""
+
+    canon: str
+    templates: list[str]
+
+
 def main(argv: list[str], now: int | None = None) -> int:
     """Audit the templates' canon pin.
 
@@ -219,18 +227,20 @@ def main(argv: list[str], now: int | None = None) -> int:
         on a usage or read error or a failed git call.
 
     """
-    owner, _, repo = argv[0].partition("/") if argv else ("", "", "")
-    if not owner or not repo or len(argv) < MIN_ARGS:
-        findings.finding("", "usage: belt template-drift OWNER/REPO TEMPLATE...")
-        return EXIT_ERROR
+    parser = argparse.ArgumentParser(
+        prog="belt template-drift", description="Audit the templates' canon pin"
+    )
+    parser.add_argument("canon", type=repository, metavar="OWNER/REPO")
+    parser.add_argument("templates", nargs="+", metavar="TEMPLATE")
+    args = parser.parse_args(argv, namespace=Args())
     texts: list[str] = []
-    for name in argv[1:]:
+    for name in args.templates:
         try:
             texts.append(read(Path(name)))
         except ValueError as err:
             findings.finding("", str(err))
             return EXIT_ERROR
-    shas = pinned(texts, argv[0])
+    shas = pinned(texts, args.canon)
     if not shas:
         print("audit:template-pins: no org pins in templates, skipped")
         return 0

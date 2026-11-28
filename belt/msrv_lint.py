@@ -29,6 +29,7 @@ stdlib only.
 
 from __future__ import annotations
 
+import argparse
 import os
 import shutil
 import tempfile
@@ -258,9 +259,9 @@ def main(argv: list[str]) -> int:
         The task's status.
 
     """
-    if argv:
-        findings.finding("", f"takes no arguments, got {argv!r}")
-        return 2
+    argparse.ArgumentParser(
+        prog="belt msrv-lint", description="Run the body after the task's guard"
+    ).parse_args(argv)
     # A repo with a Cargo.toml has rust pinned as a build input; cargo
     # absent is a broken toolchain, and skipping would be the
     # vacuous-success failure.

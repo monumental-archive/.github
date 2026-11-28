@@ -694,7 +694,9 @@ def main(argv: list[str]) -> int:
         The subcommand's exit status.
 
     """
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(
+        prog="belt mutants-typescript", description=__doc__.splitlines()[0]
+    )
     parser.add_argument("--label", default="audit:mutants: typescript")
     sub = parser.add_subparsers(dest="command", required=True)
     config = sub.add_parser("config")

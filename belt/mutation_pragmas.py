@@ -27,6 +27,7 @@ is 1, since an unreadable file is a site nobody checked, never a skip.
 
 from __future__ import annotations
 
+import argparse
 import tokenize
 from pathlib import Path
 
@@ -89,6 +90,12 @@ def refusal(comment: str) -> str | None:
     return None
 
 
+class Args(argparse.Namespace):
+    """The command's arguments, typed as parsed."""
+
+    files: list[str]
+
+
 def main(argv: list[str]) -> int:
     """Judge every pragma comment in the named files.
 
@@ -96,8 +103,14 @@ def main(argv: list[str]) -> int:
         0 when every pragma is the line form with its reason, 1 otherwise.
 
     """
+    parser = argparse.ArgumentParser(
+        prog="belt mutation-pragmas",
+        description="Judge every pragma comment in the named files",
+    )
+    parser.add_argument("files", nargs="*", metavar="FILE")
+    args = parser.parse_args(argv, namespace=Args())
     status = 0
-    for name in argv:
+    for name in args.files:
         try:
             found = pragmas(Path(name))
         except (OSError, SyntaxError, UnicodeDecodeError, tokenize.TokenError) as bad:

@@ -18,22 +18,20 @@ the record's path.
 Exit status: 0 every version reaches VERSION, 1 refused, 2 usage.
 """
 
+import argparse
 import collections
 import os
 import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from belt import findings, workflow_command
+from belt import workflow_command
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
 EXIT_REFUSED = 1
-EXIT_USAGE = 2
-USAGE = "usage: belt pg-upgrade-path NAME VERSION SQL_DIR SCRIPT..."
 # NAME VERSION SQL_DIR, then the scripts.
-LEADING_ARGUMENTS = 3
 
 
 class RefusedError(Exception):
@@ -271,6 +269,15 @@ def judge(argv: list[str], record_path: str) -> None:
         print(f"ok  {Path(path).name}")
 
 
+class Args(argparse.Namespace):
+    """The command's arguments, typed as parsed."""
+
+    name: str
+    version: str
+    sql_dir: str
+    scripts: list[str]
+
+
 def main(argv: list[str]) -> int:
     """Run the judgment.
 
@@ -279,11 +286,18 @@ def main(argv: list[str]) -> int:
         refused, 2 usage.
 
     """
-    if len(argv) < LEADING_ARGUMENTS:
-        findings.finding("", USAGE)
-        return EXIT_USAGE
+    parser = argparse.ArgumentParser(
+        prog="belt pg-upgrade-path", description="Judge an extension's upgrade graph"
+    )
+    parser.add_argument("name", metavar="NAME")
+    parser.add_argument("version", metavar="VERSION")
+    parser.add_argument("sql_dir", metavar="SQL_DIR")
+    parser.add_argument("scripts", nargs="*", metavar="SCRIPT")
+    args = parser.parse_args(argv, namespace=Args())
     try:
-        judge(argv, os.environ["RECORD"])
+        judge(
+            [args.name, args.version, args.sql_dir, *args.scripts], os.environ["RECORD"]
+        )
     except RefusedError as refused:
         for line in refused.lines:
             workflow_command.error(line)

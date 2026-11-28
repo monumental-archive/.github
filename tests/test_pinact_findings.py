@@ -433,7 +433,7 @@ def test_arguments_pass_unchanged_after_the_format(
     """The adapter calls `pinact run --format sarif` and the arguments."""
     args = ["--config", "a b.yaml", "--fix=false", WORKFLOW, "x/action.yml"]
     adapter.answer(monkeypatch, sarif(), 0)
-    status = pinact_findings.main([*args])
+    status = pinact_findings.main(["--", *args])
     out, err = capfd.readouterr()
     same(status, 0, err)
     same(

@@ -29,6 +29,7 @@ publisher reads, so the subjects and the uploads are one set.
 Exit status: 0 packaged, 1 refused, else cargo's own failing status.
 """
 
+import argparse
 import hashlib
 import os
 import subprocess
@@ -169,9 +170,9 @@ def main(argv: list[str]) -> int:
         The exit status: 0 packaged, 1 refused, else cargo's.
 
     """
-    if argv:
-        findings.finding("", f"takes no arguments, got {argv!r}")
-        return 2
+    argparse.ArgumentParser(
+        prog="belt package-crates", description="Run the Package step"
+    ).parse_args(argv)
     try:
         refused = package(os.environ.get("EXCLUDE_FLAGS", ""))
     except CargoFailedError as e:

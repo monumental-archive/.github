@@ -62,6 +62,7 @@ be run, 2 on a usage error.
 
 from __future__ import annotations
 
+import argparse
 import os
 import random
 import sys
@@ -79,7 +80,6 @@ if TYPE_CHECKING:
 
 EXIT_USAGE = 2
 # A profile name and at least one file.
-MIN_ARGS = 2
 # The default worker count's ceiling, and the variable that sets it.
 MAX_WORKERS = 8
 WORKERS = "ORG_TEST_WORKERS"
@@ -203,6 +203,13 @@ def run(
     return 1
 
 
+class Args(argparse.Namespace):
+    """The command's arguments, typed as parsed."""
+
+    mode: str
+    files: list[str]
+
+
 def main(argv: list[str]) -> int:
     """Read the profile name and the files, and run this shard's.
 
@@ -210,11 +217,17 @@ def main(argv: list[str]) -> int:
         The run's exit status.
 
     """
-    if len(argv) < MIN_ARGS or argv[0] not in LABELS:
-        findings.finding("", "usage: belt python-properties gate|audit FILE...")
-        return EXIT_USAGE
-    label = LABELS[argv[0]]
-    files = [Path(a) for a in argv[1:]]
+    parser = argparse.ArgumentParser(
+        prog="belt python-properties", description="Run the property files"
+    )
+    modes = parser.add_subparsers(dest="mode", required=True)
+    for mode, label in LABELS.items():
+        modes.add_parser(mode, help=f"as {label}").add_argument(
+            "files", nargs="+", metavar="FILE"
+        )
+    args = parser.parse_args(argv, namespace=Args())
+    label = LABELS[args.mode]
+    files = [Path(a) for a in args.files]
     try:
         named = shard.parse(os.environ.get(shard.VARIABLE, ""))
     except shard.ShardError as bad:
@@ -240,4 +253,4 @@ def main(argv: list[str]) -> int:
     environ = dict(os.environ)
     if named is not None and named != (1, 1):
         environ[WORKERS] = "1"
-    return run(argv[0], chosen, environ)
+    return run(args.mode, chosen, environ)

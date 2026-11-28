@@ -291,12 +291,10 @@ def test_a_leg_measured_at_100_is_written_at_90(
     ) == got
     assert "\n# plpgsql measured: 100.0\nplpgsql 90\n" in text
     assert (
-        floors(
-            {
-                "plpgsql": held("90", "100.0"),
-                "plpgsql-branches": held("85.5", "87.5"),
-            }
-        )
+        floors({
+            "plpgsql": held("90", "100.0"),
+            "plpgsql-branches": held("85.5", "87.5"),
+        })
         == clean(text).floors
     )
 
@@ -650,13 +648,11 @@ def test_render_round_trips() -> None:
     assert parsed.derived == "v1.52.0"
     assert parsed.legs == ("python", "go")
     assert (
-        floors(
-            {
-                "python": held("83.4", "85.4"),
-                "go": held("88", None, "workspace split"),
-                "rust-branches": held("70.4", "72.4"),
-            }
-        )
+        floors({
+            "python": held("83.4", "85.4"),
+            "go": held("88", None, "workspace split"),
+            "rust-branches": held("70.4", "72.4"),
+        })
         == parsed.floors
     )
 
@@ -1136,9 +1132,13 @@ def test_write_reads_the_legs_from_stdin(capfd: pytest.CaptureFixture[str]) -> N
         stdin = sys.stdin
         sys.stdin = io.StringIO("go 86.8\n")
         try:
-            status = cf.main(
-                ["--path", str(tree.path), "write", "--provenance", "v0.21.0"]
-            )
+            status = cf.main([
+                "--path",
+                str(tree.path),
+                "write",
+                "--provenance",
+                "v0.21.0",
+            ])
             got = (status, *capfd.readouterr())
         finally:
             sys.stdin = stdin
@@ -1647,29 +1647,25 @@ def test_the_command_line_reaches_both_checks(
         stdin = sys.stdin
         sys.stdin = io.StringIO("pgrx-pg15 95\n")
         try:
-            status = cf.main(
-                [
-                    "--path",
-                    str(tree.path),
-                    "hold",
-                    "--label",
-                    "lbl",
-                    "--job",
-                    "pgrx:15",
-                ]
-            )
+            status = cf.main([
+                "--path",
+                str(tree.path),
+                "hold",
+                "--label",
+                "lbl",
+                "--job",
+                "pgrx:15",
+            ])
             got = (status, *capfd.readouterr())
         finally:
             sys.stdin = stdin
-        status = cf.main(
-            [
-                "--path",
-                str(tree.path),
-                "planned",
-                "--majors-json",
-                '["16"]',
-            ]
-        )
+        status = cf.main([
+            "--path",
+            str(tree.path),
+            "planned",
+            "--majors-json",
+            '["16"]',
+        ])
         plan = (status, *capfd.readouterr())
     assert got == (0, "lbl: pgrx-pg15 leg holds its floor 90 (95%)\n", "")
     assert plan[0] == 1
@@ -1826,13 +1822,11 @@ def test_the_producers_stdout_is_the_helpers_input(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """pgrx-plan.sh's literal stdout, given to `planned --majors-json`."""
-    plan = the_plan_feeds_the_helper.run_in_tree(
-        [
-            BASH,
-            str(the_plan_feeds_the_helper.canon / "mise" / "pgrx-plan.sh"),
-            str(the_plan_feeds_the_helper.canon),
-        ]
-    )
+    plan = the_plan_feeds_the_helper.run_in_tree([
+        BASH,
+        str(the_plan_feeds_the_helper.canon / "mise" / "pgrx-plan.sh"),
+        str(the_plan_feeds_the_helper.canon),
+    ])
     assert plan.returncode == 0, plan.stderr
     assert plan.stdout == '["15","16","17","18"]\n'
     the_plan_feeds_the_helper.floor(legs)

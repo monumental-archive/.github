@@ -21,6 +21,7 @@ Exit 0 when the file keeps no advisory ignore; 1 with each one named,
 or with the reason the file could not be read.
 """
 
+import argparse
 from pathlib import Path
 
 from belt import findings
@@ -56,6 +57,12 @@ def advisories(config: dict[str, object]) -> list[str]:
     return named
 
 
+class Args(argparse.Namespace):
+    """The command's arguments, typed as parsed."""
+
+    config: str
+
+
 def main(argv: list[str]) -> int:
     """Name every advisory ignore in the file.
 
@@ -63,10 +70,13 @@ def main(argv: list[str]) -> int:
         A process exit status.
 
     """
-    if len(argv) != EXPECTED_ARGC:
-        findings.finding("", "usage: belt deny-advisories <deny.toml>")
-        return 2
-    source = Path(argv[0])
+    parser = argparse.ArgumentParser(
+        prog="belt deny-advisories",
+        description="Name every advisory ignore in the file",
+    )
+    parser.add_argument("config", metavar="DENY_TOML")
+    args = parser.parse_args(argv, namespace=Args())
+    source = Path(args.config)
     try:
         named = advisories(load_toml(source.read_text(encoding="utf-8")))
     except UndecodableError as error:

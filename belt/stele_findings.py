@@ -28,6 +28,7 @@ status. `excused`, `staleExceptions` and `facts` do not move the
 verdict, so they are not recorded.
 """
 
+import argparse
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -41,9 +42,6 @@ STELE = shutil.which("stele") or "stele"
 # The one verdict that is not a finding.
 SOUND = frozenset({"PASS"})
 EXIT_REFUSED = 1
-# `assert` and the target, before stele's own arguments.
-NAMED = 2
-USAGE = "usage: belt stele-findings assert <target> [<stele's arguments>...]"
 
 
 class NotAReportError(ValueError):
@@ -140,6 +138,14 @@ def read_report(output: bytes) -> Report:
         raise NotAReportError(msg) from err
 
 
+class Args(argparse.Namespace):
+    """The command's arguments, typed as parsed."""
+
+    mode: str
+    target: str
+    rest: list[str]
+
+
 def main(argv: list[str]) -> int:
     """Run stele's assertion and record what it found.
 
@@ -150,10 +156,17 @@ def main(argv: list[str]) -> int:
 
     """
     task = findings.task_name()
-    if len(argv) < NAMED or argv[0] != "assert":
-        findings.finding("", USAGE)
-        return EXIT_REFUSED
-    target, rest = argv[1], argv[NAMED:]
+    parser = argparse.ArgumentParser(
+        prog="belt stele-findings", description="Run a stele assertion as findings"
+    )
+    modes = parser.add_subparsers(dest="mode", required=True)
+    asserting = modes.add_parser("assert", help="run stele assert TARGET")
+    asserting.add_argument("target", metavar="TARGET")
+    asserting.add_argument(
+        "rest", nargs="*", metavar="ARGUMENT", help="after --: stele's own arguments"
+    )
+    args = parser.parse_args(argv, namespace=Args())
+    target, rest = args.target, args.rest
     named = f"stele assert {target}"
     try:
         ran = subprocess.run(

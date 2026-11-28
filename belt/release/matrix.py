@@ -27,6 +27,7 @@ input with its spaces removed): the first line only, a trailing comma
 dropped, an inner or leading empty field kept and refused as unknown.
 """
 
+import argparse
 import json
 import sys
 from dataclasses import dataclass
@@ -317,30 +318,56 @@ def base_images(mapping: Path) -> tuple[list[str], list[str]]:
     return [f"matrix={compact({'include': cells})}"], notices
 
 
-USAGE = """usage: belt matrix targets {go-binary,rust-binary} REQUEST
-       belt matrix pgrx-extension MAPPING REQUEST
-       belt matrix pgrx-images REQUEST
-       belt matrix base-images MAPPING"""
+class Args(argparse.Namespace):
+    """The command's arguments, typed as parsed."""
+
+    mode: str
+    cls: str = ""
+    mapping: str = ""
+    request: str = ""
 
 
-def plan(argv: list[str]) -> tuple[list[str], list[str]] | None:
+def parser() -> argparse.ArgumentParser:
+    """Name the four modes and their arguments.
+
+    Returns:
+        The parser.
+
+    """
+    named = argparse.ArgumentParser(
+        prog="belt matrix", description="Plan a release class's build matrix"
+    )
+    modes = named.add_subparsers(dest="mode", required=True)
+    classes: list[str] = sorted(TARGETS)
+    targets_ = modes.add_parser("targets", help="a binary class's targets")
+    targets_.add_argument("cls", choices=classes, metavar="CLASS")
+    targets_.add_argument("request", metavar="REQUEST")
+    extension = modes.add_parser("pgrx-extension", help="a pgrx extension's cells")
+    extension.add_argument("mapping", metavar="MAPPING")
+    extension.add_argument("request", metavar="REQUEST")
+    modes.add_parser("pgrx-images", help="the pgrx images").add_argument(
+        "request", metavar="REQUEST"
+    )
+    modes.add_parser("base-images", help="the base images").add_argument(
+        "mapping", metavar="MAPPING"
+    )
+    return named
+
+
+def plan(args: Args) -> tuple[list[str], list[str]]:
     """Dispatch one mode.
 
     Returns:
-        The output and notice lines, or None for a malformed command line.
+        The output and notice lines.
 
     """
-    match argv:
-        case ["targets", cls, request] if cls in TARGETS:
-            return targets(cls, request)
-        case ["pgrx-extension", mapping, request]:
-            return pgrx_extension(Path(mapping), request)
-        case ["pgrx-images", request]:
-            return pgrx_images(request)
-        case ["base-images", mapping]:
-            return base_images(Path(mapping))
-        case _:
-            return None
+    if args.mode == "targets":
+        return targets(args.cls, args.request)
+    if args.mode == "pgrx-extension":
+        return pgrx_extension(Path(args.mapping), args.request)
+    if args.mode == "pgrx-images":
+        return pgrx_images(args.request)
+    return base_images(Path(args.mapping))
 
 
 def main(argv: list[str]) -> int:
@@ -350,19 +377,15 @@ def main(argv: list[str]) -> int:
         0 when planned, 1 on a refusal, 2 on a malformed command line.
 
     """
+    args = parser().parse_args(argv, namespace=Args())
     try:
-        planned = plan(argv)
+        outputs, notices = plan(args)
     except BareRefusalError as refusal:
         findings.finding("", str(refusal))
         return 1
     except RefusalError as refusal:
         findings.finding("", str(refusal), annotate=True)
         return 1
-    if planned is None:
-        first, *rest = USAGE.splitlines()
-        findings.finding("", first, [line.strip() for line in rest])
-        return 2
-    outputs, notices = planned
     for line in notices:
         workflow_command.notice(line, stream=sys.stderr)
     for line in outputs:

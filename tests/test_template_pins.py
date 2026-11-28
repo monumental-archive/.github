@@ -313,15 +313,33 @@ def test_not_utf8_is_an_error(
     assert err.startswith(f"lint:template-pins: {STUB}: cannot be read as UTF-8:"), err
 
 
+@pytest.mark.parametrize(
+    ("argv", "error"),
+    [
+        pytest.param(
+            [],
+            "belt template-pins: error: the following arguments are required: OWNER/REPO",
+            id="nothing",
+        ),
+        pytest.param(
+            ["/repo", STUB],
+            "belt template-pins: error: argument OWNER/REPO: '/repo' is not OWNER/REPO",
+            id='["/repo", STUB]',
+        ),
+        pytest.param(
+            ["owner/", STUB],
+            "belt template-pins: error: argument OWNER/REPO: 'owner/' is not OWNER/REPO",
+            id='["owner/", STUB]',
+        ),
+    ],
+)
 def test_no_canon_is_a_usage_error(
-    pins: Pins, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    argv: list[str], error: str, capfd: pytest.CaptureFixture[str]
 ) -> None:
-    """No canon, or one missing its owner or repository: exit 2."""
-    usage = "lint:template-pins: usage: belt template-pins OWNER/REPO TEMPLATE..."
-    calls: list[list[str]] = [[], ["/repo", STUB], ["owner/", STUB]]
-    for argv in calls:
-        pins.enter(monkeypatch)
-        status = template_pins.main(argv)
-        err = capfd.readouterr().err
-        same(status, template_pins.EXIT_ERROR)
-        same(err.splitlines(), [usage])
+    """No canon, or one missing its owner or repository: exit 2: argparse's exit 2, its usage and its error."""
+    with pytest.raises(SystemExit) as ended:
+        template_pins.main(argv)
+    out, err = capfd.readouterr()
+    assert (ended.value.code, out) == (2, "")
+    assert err.startswith("usage: belt template-pins "), err
+    assert err.splitlines()[-1] == error

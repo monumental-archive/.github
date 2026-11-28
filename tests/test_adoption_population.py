@@ -348,18 +348,31 @@ def test_each_refusal_exits_two_and_names_its_field(
     assert err.startswith(f"{TASK}: {message}"), err
 
 
+@pytest.mark.parametrize(
+    ("argv", "error"),
+    [
+        pytest.param(
+            ["--roster", "x.json"],
+            "belt adoption-population: error: unrecognized arguments: --roster",
+            id='["--roster", "x.json"]',
+        ),
+        pytest.param(
+            [""],
+            "belt adoption-population: error: the canon's repository name is empty",
+            id='[""]',
+        ),
+    ],
+)
 def test_arguments_other_than_the_canon_are_refused(
-    capfd: pytest.CaptureFixture[str], fed: Callable[[object], None]
+    argv: list[str], error: str, capfd: pytest.CaptureFixture[str]
 ) -> None:
-    """The roster is no input any more: a caller passing one is told."""
-    fed(document(member()))
-    code = ap.main(["--roster", "x.json"])
+    """The roster is no input any more: a caller passing one is told: argparse's exit 2, its usage and its error."""
+    with pytest.raises(SystemExit) as ended:
+        ap.main(argv)
     out, err = capfd.readouterr()
-    assert (code, out) == (2, "")
-    assert (
-        f"{TASK}: takes the canon's repository name and nothing"
-        " else, got ['--roster', 'x.json']\n"
-    ) == err
+    assert (ended.value.code, out) == (2, "")
+    assert err.startswith("usage: belt adoption-population "), err
+    assert err.splitlines()[-1] == error
 
 
 def test_an_empty_canon_name_is_refused(

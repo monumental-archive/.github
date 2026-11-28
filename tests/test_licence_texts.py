@@ -298,8 +298,21 @@ def test_the_canons_own_tree_is_green() -> None:
         assert want == lt.findings(ROOT, without)
 
 
-def test_usage(capfd: pytest.CaptureFixture[str]) -> None:
-    """An argument is a usage error, not a pass."""
-    assert lt.main(["extra"]) == 2
-    err = capfd.readouterr().err
-    assert f"{TASK}: usage: org_tracked | belt licence-texts\n" == err
+@pytest.mark.parametrize(
+    ("argv", "error"),
+    [
+        pytest.param(
+            ["extra"],
+            "belt licence-texts: error: unrecognized arguments: extra",
+            id='["extra"]',
+        ),
+    ],
+)
+def test_usage(argv: list[str], error: str, capfd: pytest.CaptureFixture[str]) -> None:
+    """An argument is a usage error, not a pass: argparse's exit 2, its usage and its error."""
+    with pytest.raises(SystemExit) as ended:
+        lt.main(argv)
+    out, err = capfd.readouterr()
+    assert (ended.value.code, out) == (2, "")
+    assert err.startswith("usage: belt licence-texts "), err
+    assert err.splitlines()[-1] == error

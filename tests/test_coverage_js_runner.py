@@ -1,7 +1,7 @@
 """Tests for coverage_js_runner.py's readers (#1659, #2105).
 
 The runner line a tree's package.json and lockfile answer, and the
-vitest run `measured` reads off its own command line (`--measured-run`).
+vitest run `measured` reads off its own command line (`measured-run`).
 """
 
 import json
@@ -151,7 +151,7 @@ def test_no_tracked_package_json_prints_nothing(
 ) -> None:
     """An untracked package.json is never read."""
     main_state.enter(monkeypatch, {"package.json": "{"})
-    status = cj.main([])
+    status = cj.main(["runner"])
     out, err = capfd.readouterr()
     assert (status, out, err) == (0, "", "")
 
@@ -161,7 +161,7 @@ def test_an_unreadable_package_json_is_refused(
 ) -> None:
     """Broken JSON is exit 1, named, never read as no runner."""
     main_state.enter(monkeypatch, {"package.json": "{"})
-    status = cj.main(["package.json"])
+    status = cj.main(["runner", "package.json"])
     out, err = capfd.readouterr()
     assert (status, out) == (1, "")
     assert err.startswith(f"{TASK}: package.json: "), err
@@ -172,7 +172,7 @@ def test_a_package_json_that_is_not_an_object_names_no_runner(
 ) -> None:
     """A JSON array declares nothing."""
     main_state.enter(monkeypatch, {"package.json": "[]"})
-    status = cj.main(["package.json"])
+    status = cj.main(["runner", "package.json"])
     out, err = capfd.readouterr()
     assert (status, out, err) == (0, "", "")
 
@@ -184,7 +184,7 @@ def test_vitest_declared_without_a_lockfile_entry_is_named(
     declared: dict[str, object] = {"devDependencies": {"vitest": "4.1.12"}}
     manifest = json.dumps(declared)
     main_state.enter(monkeypatch, {"package.json": manifest})
-    status = cj.main(["package.json"])
+    status = cj.main(["runner", "package.json"])
     out, err = capfd.readouterr()
     assert (status, out, err) == (
         0,
@@ -200,7 +200,7 @@ def test_another_runner_is_named(
     declared: dict[str, object] = {"devDependencies": {"jest": "29"}}
     manifest = json.dumps(declared)
     main_state.enter(monkeypatch, {"package.json": manifest})
-    status = cj.main(["package.json"])
+    status = cj.main(["runner", "package.json"])
     out, err = capfd.readouterr()
     assert (status, out, err) == (
         0,
@@ -219,7 +219,7 @@ FLAGS = [
 
 
 class MeasuredRun:
-    """`--measured-run`: the vitest run on `measured`'s line (#2105)."""
+    """`measured-run`: the vitest run on `measured`'s line (#2105)."""
 
     def __init__(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
@@ -246,7 +246,14 @@ class MeasuredRun:
         for name, text in planted.items():
             (Path(tmp) / name).write_text(text, encoding="utf-8")
         monkeypatch.chdir(tmp)
-        return ["--measured-run", "/run/typescript", *planted, "--", *command]
+        return [
+            "measured-run",
+            "/run/typescript",
+            "--tracked",
+            *planted,
+            "--",
+            *command,
+        ]
 
 
 @fixture
@@ -331,12 +338,3 @@ def test_a_coverage_flag_of_its_own_is_refused(
     assert err.startswith("measured: --coverage.enabled=false is on the vitest run"), (
         err
     )
-
-
-@pytest.mark.usefixtures("measured_run_state")
-def test_no_separator_is_a_usage_error(capfd: pytest.CaptureFixture[str]) -> None:
-    """The command follows `--`; without it nothing is read."""
-    status = cj.main(["--measured-run", "/d"])
-    _out, err = capfd.readouterr()
-    assert status == 2
-    assert "usage" in err

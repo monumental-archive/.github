@@ -858,17 +858,32 @@ def test_fix_leaves_the_snapshot_byte_for_byte(
 
 # The entry point's argument guard.
 @pytest.mark.parametrize(
-    "argv", [[], ["check", "a"], ["check", "a", "b", "c"], ["diff", "a", "b"]]
+    ("argv", "error"),
+    [
+        ([], "belt pg-schema: error: the following arguments are required: mode"),
+        (
+            ["check", "a"],
+            "belt pg-schema check: error: the following arguments are required:"
+            " SNAPSHOT",
+        ),
+        (["check", "a", "b", "c"], "belt pg-schema: error: unrecognized arguments: c"),
+        (
+            ["diff", "a", "b"],
+            "belt pg-schema: error: argument mode: invalid choice: 'diff'"
+            " (choose from 'check', 'write')",
+        ),
+    ],
 )
 def test_wrong_arguments_are_red(
-    argv: object, capfd: pytest.CaptureFixture[str], as_task: Callable[[str], None]
+    argv: list[str], error: str, capfd: pytest.CaptureFixture[str]
 ) -> None:
-    """The task passes a mode and exactly two paths."""
-    as_task(FIX if argv[:1] == ["write"] else LINT)
-    status = pg_schema.main(argv)
+    """The task passes a mode and exactly two paths: argparse's exit 2."""
+    with pytest.raises(SystemExit) as ended:
+        pg_schema.main(argv)
     out, err = capfd.readouterr()
-    assert (status, out) == (1, "")
-    assert "usage:" in err
+    assert (ended.value.code, out) == (2, "")
+    assert err.startswith("usage: belt pg-schema"), err
+    assert err.splitlines()[-1] == error
 
 
 def without_sqlfluff() -> str:

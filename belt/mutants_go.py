@@ -159,20 +159,15 @@ class Report:
 
 
 class Args(argparse.Namespace):
-    """The shell half's arguments, each a string."""
+    """The command's arguments, each a string: `judge`'s, or `build-go`'s."""
 
+    mode: str
     label: str
     where: str
     shard: str
     root: str
     scratch: str
     summary_dir: str
-
-
-class BuildArgs(argparse.Namespace):
-    """`build-go`'s arguments, each a string."""
-
-    label: str
     gomu: str
     built: str
     running: str
@@ -185,9 +180,16 @@ def parse_args(argv: list[str]) -> Args:
         The parsed arguments.
 
     """
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        prog="belt mutants-go", description="Judge a shard of Go mutants"
+    )
+    modes = parser.add_subparsers(dest="mode", required=True)
+    judging = modes.add_parser("judge", help="judge one shard's reports")
     for name in ("label", "where", "shard", "root", "scratch", "summary-dir"):
-        parser.add_argument(f"--{name}", required=True)
+        judging.add_argument(f"--{name}", required=True)
+    building = modes.add_parser("build-go", help="refuse a gomu built by an older Go")
+    for name in ("label", "gomu", "built", "running"):
+        building.add_argument(f"--{name}", required=True)
     return parser.parse_args(argv, namespace=Args())
 
 
@@ -502,17 +504,13 @@ def older(built: str, running: str) -> bool:
     return have is None or (need is not None and have < need)
 
 
-def build_go(argv: list[str]) -> int:
+def build_go(args: Args) -> int:
     """Refuse a gomu built with an older Go than the toolchain it runs under.
 
     Returns:
         0 when it may run, 1 after printing the refusal.
 
     """
-    parser = argparse.ArgumentParser(prog="belt mutants-go build-go")
-    for name in ("label", "gomu", "built", "running"):
-        parser.add_argument(f"--{name}", required=True)
-    args = parser.parse_args(argv, namespace=BuildArgs())
     if not older(args.built, args.running):
         return 0
     spelled = args.built or "an unreadable Go"
@@ -548,9 +546,9 @@ def main(argv: list[str]) -> int:
         0 when nothing is unexplained, 1 otherwise.
 
     """
-    if argv[:1] == ["build-go"]:
-        return build_go(argv[1:])
     args = parse_args(argv)
+    if args.mode == "build-go":
+        return build_go(args)
     scratch = Path(args.scratch)
     shard = read_shard(args)
     verdict = Verdict()

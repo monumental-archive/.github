@@ -341,7 +341,7 @@ if [[ ${js[0]:-} == package.json && -n ${js[1]+set} ]]; then
   ts_dir="${run}/typescript"
   ts_argv="${run}/vitest-argv.$$"
   (cd "${root}" && "${ORG_PYTHON}" -I "${belt%/*}/belt" coverage-js-runner \
-    --measured-run "${ts_dir}" "${js[@]}" -- "$@") > "${ts_argv}" || {
+    measured-run "${ts_dir}" --tracked "${js[@]}" -- "$@") > "${ts_argv}" || {
     rm -f -- "${ts_argv}"
     exit 1
   }

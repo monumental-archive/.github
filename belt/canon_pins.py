@@ -29,19 +29,16 @@ or read error. Stdlib only.
 
 from __future__ import annotations
 
+import argparse
 import re
 from pathlib import Path
 
 from belt import findings
+from belt.arguments import repository
 
 EXIT_RED = 1
 EXIT_ERROR = 2
 # The four lists, split by three separators.
-SURFACES = 4
-USAGE = (
-    "usage: belt canon-pins OWNER/REPO YAML... -- LEFTHOOK... -- RENOVATE..."
-    " -- WORKFLOW..."
-)
 # POSIX [[:space:]] within one line.
 SPACE = r"[ \t\r\f\v]"
 VERSIONED = re.compile(r"@[0-9a-f]{40} # v[0-9]+\.[0-9]+\.[0-9]+")
@@ -148,20 +145,14 @@ class Lint:
         return 0
 
 
-def split(argv: list[str]) -> list[list[str]] | None:
-    """Split the file arguments into the four surfaces' lists.
+class Args(argparse.Namespace):
+    """The command's arguments, typed as parsed."""
 
-    Returns:
-        The lists, or None when there are not exactly three separators.
-
-    """
-    lists: list[list[str]] = [[]]
-    for arg in argv:
-        if arg == "--":
-            lists.append([])
-        else:
-            lists[-1].append(arg)
-    return lists if len(lists) == SURFACES else None
+    canon: str
+    yaml: list[str]
+    lefthook: list[str]
+    renovate: list[str]
+    workflows: list[str]
 
 
 def main(argv: list[str]) -> int:
@@ -172,12 +163,24 @@ def main(argv: list[str]) -> int:
         with every offender named, EXIT_ERROR on a usage or read error.
 
     """
-    owner, _, repo = argv[0].partition("/") if argv else ("", "", "")
-    lists = split(argv[1:])
-    if not owner or not repo or lists is None:
-        findings.finding("", USAGE)
-        return EXIT_ERROR
-    lint = Lint(argv[0])
+    parser = argparse.ArgumentParser(
+        prog="belt canon-pins",
+        description="Check every canon reference on the four surfaces",
+    )
+    parser.add_argument("canon", type=repository, metavar="OWNER/REPO")
+    parser.add_argument("--yaml", nargs="*", default=list[str](), metavar="YAML")
+    parser.add_argument(
+        "--lefthook", nargs="*", default=list[str](), metavar="LEFTHOOK"
+    )
+    parser.add_argument(
+        "--renovate", nargs="*", default=list[str](), metavar="RENOVATE"
+    )
+    parser.add_argument(
+        "--workflows", nargs="*", default=list[str](), metavar="WORKFLOW"
+    )
+    args = parser.parse_args(argv, namespace=Args())
+    lint = Lint(args.canon)
+    lists = (args.yaml, args.lefthook, args.renovate, args.workflows)
     checks = (lint.yaml, lint.lefthook, lint.renovate, lint.workflow)
     for check, names in zip(checks, lists, strict=True):
         for name in names:

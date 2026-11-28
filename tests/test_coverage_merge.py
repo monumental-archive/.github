@@ -344,7 +344,9 @@ def test_one_single_report_is_kept_as_the_file() -> None:
 
 
 def test_the_command_line() -> None:
-    """Two directories, or the usage exit."""
-    assert coverage_merge.main([]) == 2
+    """Two directories, or argparse's usage exit."""
+    with pytest.raises(SystemExit) as ended:
+        coverage_merge.main([])
+    assert ended.value.code == 2
     with tempfile.TemporaryDirectory() as scratch:
         assert coverage_merge.main([scratch, f"{scratch}/run"]) == 0

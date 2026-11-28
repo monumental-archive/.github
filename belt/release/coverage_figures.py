@@ -28,20 +28,19 @@ whichever way it arrived.
 stdlib and the belt's decoded.py only.
 """
 
+import argparse
 import io
 import re
 import sys
 import zipfile
 from dataclasses import dataclass
 
-from belt import decoded, findings
+from belt import decoded
 
 LABEL = "release:coverage-floor"
 FILE = "coverage-figures.txt"
 # The runs that judge the tree that lands.
 EVENTS = frozenset({"merge_group", "push"})
-# A subcommand and the commit it answers for, then one leg's name or not.
-ARGS = (2, 3)
 # A leg a pgrx job keeps alone (#1692).
 ONE_LEG = re.compile(r"pgrx-pg[0-9]+")
 # What the forge answered, piped in by the caller.
@@ -248,6 +247,46 @@ def answer(command: str, sha: str, data: bytes, leg: str = "") -> str:
     return figures(unpack(data), leg)
 
 
+def sha(text: str) -> str:
+    """Read a full commit sha.
+
+    Returns:
+        The sha.
+
+    Raises:
+        ArgumentTypeError: it is not 40 lowercase hex digits.
+
+    """
+    if not re.fullmatch(r"[0-9a-f]{40}", text):
+        msg = f"{text!r} is not a 40-hex sha"
+        raise argparse.ArgumentTypeError(msg)
+    return text
+
+
+def one_leg(text: str) -> str:
+    """Read one pgrx leg's name.
+
+    Returns:
+        The name.
+
+    Raises:
+        ArgumentTypeError: it is not `pgrx-pg<major>`.
+
+    """
+    if not ONE_LEG.fullmatch(text):
+        msg = f"{text!r} is not pgrx-pg<major>"
+        raise argparse.ArgumentTypeError(msg)
+    return text
+
+
+class Args(argparse.Namespace):
+    """The command's arguments, typed as parsed."""
+
+    mode: str
+    sha: str
+    leg: str | None
+
+
 def main(argv: list[str]) -> int:
     """Answer one subcommand over stdin, or say why the figure is refused.
 
@@ -256,24 +295,20 @@ def main(argv: list[str]) -> int:
         on a usage error.
 
     """
-    commands = ("choose", "judge", "figures")
-    if (
-        len(argv) not in ARGS
-        or argv[0] not in commands
-        or not re.fullmatch(r"[0-9a-f]{40}", argv[1])
-        or (len(argv) == max(ARGS) and not ONE_LEG.fullmatch(argv[-1]))
-    ):
-        findings.finding(
-            "",
-            f"usage: belt coverage-figures {{{','.join(commands)}}} <40-hex sha>"
-            " [pgrx-pg<major>]",
-        )
-        return 2
-    leg = argv[2] if len(argv) == max(ARGS) else ""
+    parser = argparse.ArgumentParser(
+        prog="belt coverage-figures", description="Read the gate's coverage figures"
+    )
+    modes = parser.add_subparsers(dest="mode", required=True)
+    for mode in ("choose", "judge", "figures"):
+        moded = modes.add_parser(mode)
+        moded.add_argument("sha", type=sha, metavar="SHA", help="40 hex digits")
+        moded.add_argument("leg", nargs="?", type=one_leg, metavar="pgrx-pg<major>")
+    args = parser.parse_args(argv, namespace=Args())
+    leg = args.leg or ""
     try:
         with open(STDIN, "rb", closefd=False) as stdin:
             data = stdin.read()
-        said = answer(argv[0], argv[1], data, leg)
+        said = answer(args.mode, args.sha, data, leg)
     except RefusedError as refused:
         print(f"{LABEL}: not reading the gate's figures: {refused}", file=sys.stderr)
         return 1

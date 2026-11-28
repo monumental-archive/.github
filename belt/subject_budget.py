@@ -23,6 +23,7 @@ helper consumes, so the walk obeys
 the standing rule in one place and this script starts no processes.
 """
 
+import argparse
 import os
 import re
 import sys
@@ -1455,9 +1456,9 @@ def main(argv: list[str]) -> int:
         range-declared one has no locked version to measure.
 
     """
-    if argv:
-        writer.finding("", f"takes no arguments, got {argv!r}")
-        return 2
+    argparse.ArgumentParser(
+        prog="belt subject-budget", description="Run the budget over this repository"
+    ).parse_args(argv)
     files = [Path(path) for path in stdin_paths()]
     if Path("renovate.json") not in files:
         print("lint:subject-budget: no renovate.json tracked, skipped")

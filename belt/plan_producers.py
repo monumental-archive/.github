@@ -398,7 +398,7 @@ def main(argv: list[str]) -> int:
         its obligation, 1 otherwise.
 
     """
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(prog="belt plan-producers", description=__doc__)
     parser.add_argument("--policy", required=True, type=Path)
     parser.add_argument("workflows", nargs="*", type=Path)
     args = parser.parse_args(argv, namespace=Args())

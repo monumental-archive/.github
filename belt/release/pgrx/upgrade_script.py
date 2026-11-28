@@ -17,6 +17,7 @@ change is handled there.
 Exit status: 0 written, 1 refused, 2 usage.
 """
 
+import argparse
 import os
 import re
 import sys
@@ -26,11 +27,6 @@ from pathlib import Path
 from belt import findings, workflow_command
 
 EXIT_REFUSED = 1
-EXIT_USAGE = 2
-USAGE = "usage: belt upgrade-script PREV NEW OUT [DATA]"
-# PREV NEW OUT, then the optional DATA.
-REQUIRED_ARGUMENTS = 3
-MOST_ARGUMENTS = 4
 
 DOLLAR = re.compile(r"\$[A-Za-z0-9_]*\$")
 BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.DOTALL)
@@ -562,6 +558,15 @@ def accepted(diff: Diff, release: Release, *, declared: bool) -> bool:
     return True
 
 
+class Args(argparse.Namespace):
+    """The command's arguments, typed as parsed."""
+
+    prev: str
+    new: str
+    out: str
+    data: str
+
+
 def main(argv: list[str]) -> int:
     """Run the derivation.
 
@@ -576,11 +581,15 @@ def main(argv: list[str]) -> int:
         The exit status: 0 written, 1 refused, 2 usage.
 
     """
-    if not REQUIRED_ARGUMENTS <= len(argv) <= MOST_ARGUMENTS:
-        findings.finding("", USAGE)
-        return EXIT_USAGE
-    prev_path, new_path, out_path = argv[:REQUIRED_ARGUMENTS]
-    data_path = argv[REQUIRED_ARGUMENTS] if len(argv) == MOST_ARGUMENTS else ""
+    parser = argparse.ArgumentParser(
+        prog="belt upgrade-script", description="Derive the extension's upgrade script"
+    )
+    parser.add_argument("prev", metavar="PREV")
+    parser.add_argument("new", metavar="NEW")
+    parser.add_argument("out", metavar="OUT")
+    parser.add_argument("data", nargs="?", default="", metavar="DATA")
+    args = parser.parse_args(argv, namespace=Args())
+    prev_path, new_path, out_path, data_path = args.prev, args.new, args.out, args.data
     release = Release(os.environ["EXT_NAME"], os.environ["PREV_V"], os.environ["NEW_V"])
     prev_text = Path(prev_path).read_text(encoding="utf-8")
     new_text = Path(new_path).read_text(encoding="utf-8")

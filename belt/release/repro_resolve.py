@@ -27,6 +27,7 @@ stdlib only.
 
 from __future__ import annotations
 
+import argparse
 import contextlib
 import json
 import os
@@ -167,9 +168,10 @@ def main(argv: list[str]) -> int:
         The step's exit status.
 
     """
-    if argv:
-        findings.finding("", f"takes no arguments, got {argv!r}")
-        return 2
+    argparse.ArgumentParser(
+        prog="belt repro-resolve",
+        description="Resolve the release and hand its facts to the next jobs",
+    ).parse_args(argv)
     try:
         tag, outputs = resolve(os.environ["GITHUB_REPOSITORY"])
     except StepError as err:

@@ -27,6 +27,7 @@ stdlib only.
 
 from __future__ import annotations
 
+import argparse
 import os
 
 from belt import findings, squash_message
@@ -52,7 +53,10 @@ def main(argv: list[str]) -> int:
         0, or 1 when `PR_TITLE` is unset.
 
     """
-    del argv  # the step reads its environment, not arguments
+    argparse.ArgumentParser(
+        prog="belt declared-break",
+        description="Print whether the pull request declares a break",
+    ).parse_args(argv)
     title = os.environ.get("PR_TITLE")
     if title is None:
         findings.finding(

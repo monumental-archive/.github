@@ -151,9 +151,15 @@ def test_both_architectures_staged(
     for arch in ("amd64", "arm64"):
         stage_state.plant("17", arch, link=True)
     monkeypatch.chdir(stage_state.root)
-    status = pgrx_images.main(
-        ["stage", "--pg", "17", "--version", VERSION, "--crate-dir", CRATE]
-    )
+    status = pgrx_images.main([
+        "stage",
+        "--pg",
+        "17",
+        "--version",
+        VERSION,
+        "--crate-dir",
+        CRATE,
+    ])
     out, err = capfd.readouterr()
     assert status == 0, err
     for arch in ("amd64", "arm64"):
@@ -181,9 +187,15 @@ def test_a_missing_tarball(
     """No amd64 tarball: the build did not produce the cell."""
     stage_state.plant("18", "arm64")
     monkeypatch.chdir(stage_state.root)
-    status = pgrx_images.main(
-        ["stage", "--pg", "18", "--version", VERSION, "--crate-dir", CRATE]
-    )
+    status = pgrx_images.main([
+        "stage",
+        "--pg",
+        "18",
+        "--version",
+        VERSION,
+        "--crate-dir",
+        CRATE,
+    ])
     out, err = capfd.readouterr()
     assert status == 1
     assert err == (
@@ -201,9 +213,15 @@ def test_a_missing_second_architecture(
     """amd64 stages, arm64 is missing and named."""
     stage_state.plant("18", "amd64")
     monkeypatch.chdir(stage_state.root)
-    status = pgrx_images.main(
-        ["stage", "--pg", "18", "--version", VERSION, "--crate-dir", CRATE]
-    )
+    status = pgrx_images.main([
+        "stage",
+        "--pg",
+        "18",
+        "--version",
+        VERSION,
+        "--crate-dir",
+        CRATE,
+    ])
     out, err = capfd.readouterr()
     assert status == 1
     assert err == (
@@ -222,9 +240,15 @@ def test_a_tarball_without_lib(
     shown = stage_state.plant("16", "amd64", lib=False)
     stage_state.plant("16", "arm64")
     monkeypatch.chdir(stage_state.root)
-    status = pgrx_images.main(
-        ["stage", "--pg", "16", "--version", VERSION, "--crate-dir", CRATE]
-    )
+    status = pgrx_images.main([
+        "stage",
+        "--pg",
+        "16",
+        "--version",
+        VERSION,
+        "--crate-dir",
+        CRATE,
+    ])
     out, err = capfd.readouterr()
     assert status == 1
     assert (
@@ -242,9 +266,15 @@ def test_a_tarball_without_extension(
     """No share/postgresql/<major>/extension: refused by path."""
     shown = stage_state.plant("15", "amd64", share=False)
     monkeypatch.chdir(stage_state.root)
-    status = pgrx_images.main(
-        ["stage", "--pg", "15", "--version", VERSION, "--crate-dir", CRATE]
-    )
+    status = pgrx_images.main([
+        "stage",
+        "--pg",
+        "15",
+        "--version",
+        VERSION,
+        "--crate-dir",
+        CRATE,
+    ])
     out, err = capfd.readouterr()
     assert status == 1
     assert (
@@ -330,19 +360,17 @@ PINNED = IMAGE + "@sha256:" + "a" * 64
 # `pgrx_images.py consumer-dockerfile`: the recipes, pinned or refused.
 def test_the_copy_recipe(capfd: pytest.CaptureFixture[str]) -> None:
     """The text the workflow's first heredoc wrote, byte for byte."""
-    status = pgrx_images.main(
-        [
-            "consumer-dockerfile",
-            "--recipe",
-            "copy",
-            "--image",
-            PINNED,
-            "--base",
-            build_image("17"),
-            "--pg",
-            "17",
-        ]
-    )
+    status = pgrx_images.main([
+        "consumer-dockerfile",
+        "--recipe",
+        "copy",
+        "--image",
+        PINNED,
+        "--base",
+        build_image("17"),
+        "--pg",
+        "17",
+    ])
     out, err = capfd.readouterr()
     assert status == 0, err
     assert (
@@ -355,19 +383,17 @@ def test_the_copy_recipe(capfd: pytest.CaptureFixture[str]) -> None:
 
 def test_the_path_recipe(capfd: pytest.CaptureFixture[str]) -> None:
     """The text the workflow's second heredoc wrote, byte for byte."""
-    status = pgrx_images.main(
-        [
-            "consumer-dockerfile",
-            "--recipe",
-            "path",
-            "--image",
-            PINNED,
-            "--base",
-            build_image("18"),
-            "--pg",
-            "18",
-        ]
-    )
+    status = pgrx_images.main([
+        "consumer-dockerfile",
+        "--recipe",
+        "path",
+        "--image",
+        PINNED,
+        "--base",
+        build_image("18"),
+        "--pg",
+        "18",
+    ])
     out, err = capfd.readouterr()
     assert status == 0, err
     assert (
@@ -382,19 +408,17 @@ def test_every_rendered_from_is_pinned(capfd: pytest.CaptureFixture[str]) -> Non
     rows = build_rows()
     for pg, base in rows.items():
         for recipe in ("copy", "path"):
-            status = pgrx_images.main(
-                [
-                    "consumer-dockerfile",
-                    "--recipe",
-                    recipe,
-                    "--image",
-                    PINNED,
-                    "--base",
-                    base,
-                    "--pg",
-                    pg,
-                ]
-            )
+            status = pgrx_images.main([
+                "consumer-dockerfile",
+                "--recipe",
+                recipe,
+                "--image",
+                PINNED,
+                "--base",
+                base,
+                "--pg",
+                pg,
+            ])
             out, err = capfd.readouterr()
             assert status == 0, err
             from_lines = [ln for ln in out.splitlines() if ln.startswith("FROM")]
@@ -405,19 +429,17 @@ def test_every_rendered_from_is_pinned(capfd: pytest.CaptureFixture[str]) -> Non
 
 def test_an_unpinned_extension_image(capfd: pytest.CaptureFixture[str]) -> None:
     """A tag, not a digest: refused, nothing rendered."""
-    status = pgrx_images.main(
-        [
-            "consumer-dockerfile",
-            "--recipe",
-            "copy",
-            "--image",
-            IMAGE + ":1.2.3-pg17-artifact",
-            "--base",
-            build_image("17"),
-            "--pg",
-            "17",
-        ]
-    )
+    status = pgrx_images.main([
+        "consumer-dockerfile",
+        "--recipe",
+        "copy",
+        "--image",
+        IMAGE + ":1.2.3-pg17-artifact",
+        "--base",
+        build_image("17"),
+        "--pg",
+        "17",
+    ])
     out, err = capfd.readouterr()
     assert (status, out) == (1, "")
     assert (
@@ -430,19 +452,17 @@ def test_an_unpinned_extension_image(capfd: pytest.CaptureFixture[str]) -> None:
 
 def test_an_unpinned_base_image(capfd: pytest.CaptureFixture[str]) -> None:
     """A stock postgres by tag: refused, nothing rendered."""
-    status = pgrx_images.main(
-        [
-            "consumer-dockerfile",
-            "--recipe",
-            "path",
-            "--image",
-            PINNED,
-            "--base",
-            "postgres:18-bookworm",
-            "--pg",
-            "18",
-        ]
-    )
+    status = pgrx_images.main([
+        "consumer-dockerfile",
+        "--recipe",
+        "path",
+        "--image",
+        PINNED,
+        "--base",
+        "postgres:18-bookworm",
+        "--pg",
+        "18",
+    ])
     out, err = capfd.readouterr()
     assert (status, out) == (1, "")
     assert err == (
@@ -638,9 +658,11 @@ def test_one_control_file_names_the_extension(
     """The stem of the one control file, SQL scripts beside it ignored."""
     (extension_name_state.tree / "edtf_postgres.control").write_text("")
     (extension_name_state.tree / "edtf_postgres--1.2.3.sql").write_text("")
-    status = pgrx_images.main(
-        ["extension-name", "--tree", str(extension_name_state.tree)]
-    )
+    status = pgrx_images.main([
+        "extension-name",
+        "--tree",
+        str(extension_name_state.tree),
+    ])
     out, err = capfd.readouterr()
     assert (status, out) == (0, "edtf_postgres\n")
 
@@ -650,9 +672,11 @@ def test_no_control_file(
 ) -> None:
     """An artifact that ships no extension is refused by name."""
     (extension_name_state.tree / "edtf_postgres--1.2.3.sql").write_text("")
-    status = pgrx_images.main(
-        ["extension-name", "--tree", str(extension_name_state.tree)]
-    )
+    status = pgrx_images.main([
+        "extension-name",
+        "--tree",
+        str(extension_name_state.tree),
+    ])
     out, err = capfd.readouterr()
     assert (status, out) == (1, "")
     assert (
@@ -668,9 +692,11 @@ def test_two_control_files(
     """Two control files: the proof cannot tell which it is proving."""
     (extension_name_state.tree / "edtf_postgres.control").write_text("")
     (extension_name_state.tree / "amcheck.control").write_text("")
-    status = pgrx_images.main(
-        ["extension-name", "--tree", str(extension_name_state.tree)]
-    )
+    status = pgrx_images.main([
+        "extension-name",
+        "--tree",
+        str(extension_name_state.tree),
+    ])
     out, err = capfd.readouterr()
     assert (status, out) == (1, "")
     assert (

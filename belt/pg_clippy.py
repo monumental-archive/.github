@@ -25,6 +25,7 @@ stdlib only.
 
 from __future__ import annotations
 
+import argparse
 import os
 import shutil
 from typing import TYPE_CHECKING, NamedTuple
@@ -33,8 +34,6 @@ from belt import findings, rust_task, rust_workspaces
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
-
-USAGE = "usage: belt pg-clippy"
 
 
 def derive(cargo: str, where: Sequence[str]) -> tuple[int, list[list[str]], str]:
@@ -165,9 +164,9 @@ def main(argv: list[str]) -> int:
         The task's status; 2 on a usage error.
 
     """
-    if argv:
-        findings.finding("", USAGE)
-        return 2
+    argparse.ArgumentParser(
+        prog="belt pg-clippy", description="Run the task's body"
+    ).parse_args(argv)
     cargo = shutil.which("cargo")
     if cargo is None:
         findings.finding("", rust_task.NO_CARGO)

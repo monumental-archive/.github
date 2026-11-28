@@ -25,7 +25,7 @@ The leg supports vitest. Any other runner is named, from the root
 package.json's dependencies or its `test` script, so a skip says what
 it skipped rather than reading as a tree with nothing to measure.
 
-`--measured-run <directory> <tracked…> -- <command…>` is the second
+`measured-run <directory> --tracked <tracked…> -- <command…>` is the second
 question, asked by `measured` (#2105): whether the command it was
 handed is the vitest run the leg measures. vitest's coverage has no
 environment switch, so the measurement rides the test command's own
@@ -51,6 +51,7 @@ lock-file update's subject with it, so the leg and the budget read a
 lockfile one way.
 """
 
+import argparse
 import json
 import re
 import sys
@@ -310,22 +311,14 @@ def measured_run(
     ]
 
 
-def answer_measured(argv: list[str]) -> int:
-    """Answer `--measured-run <directory> <tracked…> -- <command…>`.
+def answer_measured(directory: str, tracked: list[str], command: list[str]) -> int:
+    """Answer `measured-run <directory> --tracked <tracked…> -- <command…>`.
 
     Returns:
         0 with the run on stdout, NUL-separated, or nothing when the
         command goes unchanged; 1 with the refusal on stderr.
 
     """
-    if "--" not in argv[1:]:
-        sys.stderr.write(
-            "measured: usage: belt coverage-js-runner --measured-run"
-            " <directory> <tracked…> -- <command…>\n"
-        )
-        return 2
-    split = argv.index("--", 1)
-    directory, tracked, command = argv[0], argv[1:split], argv[split + 1 :]
     try:
         line = runner(tracked)
     except (OSError, decoded.UndecodableError) as exc:
@@ -368,22 +361,46 @@ def runner(tracked: Sequence[str]) -> str | None:
     return None
 
 
-def main(argv: list[str]) -> int:
-    """Print the runner line for the tree, or answer `--measured-run`.
+class Args(argparse.Namespace):
+    """The command's arguments, typed as parsed."""
 
-    `--measured-run` reads `measured`'s command (answer_measured); any
-    other arguments are the tracked files among package.json and the
-    lockfiles.
+    mode: str
+    tracked: list[str]
+    directory: str
+    command: list[str]
+
+
+def main(argv: list[str]) -> int:
+    """Print the runner line for the tree, or answer `measured-run`.
+
+    `measured-run` reads `measured`'s command (answer_measured); `runner`
+    is given the tracked files among package.json and the lockfiles.
 
     Returns:
         0, or 1 when the root package.json is not readable JSON;
-        answer_measured's status for `--measured-run`.
+        answer_measured's status for `measured-run`.
 
     """
-    if argv[:1] == ["--measured-run"]:
-        return answer_measured(argv[1:])
+    parser = argparse.ArgumentParser(
+        prog="belt coverage-js-runner",
+        description="Name the tree's TypeScript runner, or measure its command",
+    )
+    modes = parser.add_subparsers(dest="mode", required=True)
+    named = modes.add_parser("runner", help="print the runner line")
+    named.add_argument("tracked", nargs="*", metavar="TRACKED")
+    measuring = modes.add_parser("measured-run", help="the command, measured")
+    measuring.add_argument("directory", metavar="DIRECTORY")
+    measuring.add_argument(
+        "--tracked", nargs="*", default=list[str](), metavar="TRACKED"
+    )
+    measuring.add_argument(
+        "command", nargs="*", metavar="COMMAND", help="after --: the test command"
+    )
+    args = parser.parse_args(argv, namespace=Args())
+    if args.mode == "measured-run":
+        return answer_measured(args.directory, args.tracked, args.command)
     try:
-        line = runner(argv)
+        line = runner(args.tracked)
     except (OSError, decoded.UndecodableError) as exc:
         findings.finding("package.json", str(exc))
         return 1

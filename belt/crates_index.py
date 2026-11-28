@@ -16,6 +16,8 @@ As a command, `belt crates-index url <crate>` prints the record's URL, for
 a shell caller that keeps its own request.
 """
 
+import argparse
+
 from belt import findings
 
 INDEX = "https://index.crates.io"
@@ -55,6 +57,13 @@ def index_url(name: str) -> str:
     return f"{INDEX}/{index_path(name)}"
 
 
+class Args(argparse.Namespace):
+    """The command's arguments, typed as parsed."""
+
+    mode: str
+    crate: str
+
+
 def main(argv: list[str]) -> int:
     """Print one crate's record URL.
 
@@ -62,11 +71,14 @@ def main(argv: list[str]) -> int:
         0 on success, 2 on a usage error.
 
     """
-    if len(argv) != 2 or argv[0] != "url":  # ruff: ignore[magic-value-comparison] - `url <crate>`
-        findings.finding("", "usage: belt crates-index url <crate>")
-        return 2
+    parser = argparse.ArgumentParser(
+        prog="belt crates-index", description="Answer a crate's sparse-index URL"
+    )
+    modes = parser.add_subparsers(dest="mode", required=True)
+    modes.add_parser("url", help="print the crate's index URL").add_argument("crate")
+    args = parser.parse_args(argv, namespace=Args())
     try:
-        print(index_url(argv[1]))
+        print(index_url(args.crate))
     except ValueError as e:
         findings.finding("", str(e))
         return 2

@@ -320,14 +320,16 @@ def test_own_tasks_need_a_canon(
 ) -> None:
     """Own tasks and workflows with no canon to judge a caller by: exit 2."""
     rel = helper_state.plant("a.yml", "run: mise run audit:custom\n")
-    usage = (
-        "lint:audit-scheduled: usage: --canon OWNER/REPO is needed to judge own tasks"
-    )
     helper_state.enter(monkeypatch)
-    status = audit_scheduled.main(["--own", "audit:custom", "--canon", canon, rel])
-    _out, err = capfd.readouterr()
-    same(status, audit_scheduled.EXIT_ERROR)
-    same(err.splitlines(), [usage])
+    with pytest.raises(SystemExit) as ended:
+        audit_scheduled.main(["--own", "audit:custom", "--canon", canon, rel])
+    out, err = capfd.readouterr()
+    same((ended.value.code, out), (audit_scheduled.EXIT_ERROR, ""))
+    assert err.startswith("usage: belt audit-scheduled "), err
+    same(
+        err.splitlines()[-1],
+        "belt audit-scheduled: error: --canon OWNER/REPO is needed to judge own tasks",
+    )
 
 
 def test_not_utf8_is_an_error(
@@ -351,7 +353,12 @@ def test_no_own_flag_is_a_usage_error(
 ) -> None:
     """No `--own`: argparse refuses, exit 2."""
     helper_state.enter(monkeypatch)
-    status = audit_scheduled.main([])
-    _out, err = capfd.readouterr()
-    same(status, audit_scheduled.EXIT_ERROR)
-    assert "--own" in err
+    with pytest.raises(SystemExit) as ended:
+        audit_scheduled.main([])
+    out, err = capfd.readouterr()
+    same((ended.value.code, out), (audit_scheduled.EXIT_ERROR, ""))
+    assert err.startswith("usage: belt audit-scheduled "), err
+    same(
+        err.splitlines()[-1],
+        "belt audit-scheduled: error: the following arguments are required: --own",
+    )

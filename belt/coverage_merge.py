@@ -44,17 +44,14 @@ than the merged ones) is red by name: nothing is overwritten unseen.
 stdlib only.
 """
 
+import argparse
 import filecmp
 import json
 import math
 import shutil
-import sys
 from pathlib import Path
 
 from belt import findings
-
-USAGE = "usage: belt coverage-merge <rows-dir> <run-dir>"
-USAGE_EXIT = 2
 
 type Lcov = dict[str, tuple[dict[int, int], dict[tuple[str, str, str], int]]]
 
@@ -251,6 +248,13 @@ def merge(rows: list[Path], run: Path) -> list[str]:
     return red
 
 
+class Args(argparse.Namespace):
+    """The command's arguments, typed as parsed."""
+
+    rows: str
+    run: str
+
+
 def main(argv: list[str]) -> int:
     """Gather the rows.
 
@@ -258,10 +262,13 @@ def main(argv: list[str]) -> int:
         0, 1 after naming each defect, 2 for a malformed command line.
 
     """
-    if len(argv) != 2:  # ruff: ignore[magic-value-comparison] - the two directories
-        print(USAGE, file=sys.stderr)
-        return USAGE_EXIT
-    rows_dir, run = Path(argv[0]), Path(argv[1])
+    parser = argparse.ArgumentParser(
+        prog="belt coverage-merge", description="Gather the rows"
+    )
+    parser.add_argument("rows", metavar="ROWS_DIR")
+    parser.add_argument("run", metavar="RUN_DIR")
+    args = parser.parse_args(argv, namespace=Args())
+    rows_dir, run = Path(args.rows), Path(args.run)
     rows = (
         sorted(p for p in rows_dir.iterdir() if p.is_dir()) if rows_dir.is_dir() else []
     )

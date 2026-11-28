@@ -328,15 +328,13 @@ def test_the_child_sees_the_decoy_and_no_other_git(
         '|| { echo "env: $(env | grep ^GIT_)" >&2; exit 9; }'
     )
     helper.enter(monkeypatch)
-    status = gd.main(
-        [
-            "run",
-            str(helper.decoy),
-            "--",
-            BASH,
-            "-c",
-            script.replace("$D", str(helper.decoy.resolve())),
-        ]
-    )
+    status = gd.main([
+        "run",
+        str(helper.decoy),
+        "--",
+        BASH,
+        "-c",
+        script.replace("$D", str(helper.decoy.resolve())),
+    ])
     err = capfd.readouterr().err
     assert (status, err) == (0, "")

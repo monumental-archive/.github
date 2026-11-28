@@ -28,6 +28,7 @@ lines), the message carrying pinact's status. A pinact pin whose report
 moves turns `audit:action-pins` red until this moves with it.
 """
 
+import argparse
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -167,6 +168,12 @@ def read_report(output: bytes) -> tuple[Found, ...]:
         raise NotAReportError(msg) from err
 
 
+class Args(argparse.Namespace):
+    """The command's arguments, typed as parsed."""
+
+    args: list[str]
+
+
 def main(argv: list[str]) -> int:
     """Run pinact and record each result of its log.
 
@@ -176,10 +183,16 @@ def main(argv: list[str]) -> int:
         PATH.
 
     """
+    parser = argparse.ArgumentParser(
+        prog="belt pinact-findings",
+        description="Run pinact and record each result of its log",
+    )
+    parser.add_argument("args", nargs="*", metavar="ARGUMENT")
+    args = parser.parse_args(argv, namespace=Args())
     task = findings.task_name()
     try:
         ran = subprocess.run(
-            [PINACT, "run", "--format", "sarif", *argv],
+            [PINACT, "run", "--format", "sarif", *args.args],
             stdout=subprocess.PIPE,
             check=False,
         )

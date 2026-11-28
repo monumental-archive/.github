@@ -34,6 +34,7 @@ block comment can hold the text `#![allow(` without being an
 attribute. An inner `#![expect(…)]` stays legal everywhere.
 """
 
+import argparse
 import re
 from pathlib import Path
 
@@ -308,9 +309,10 @@ def main(argv: list[str]) -> int:
         A process exit status: 0 clean, 1 on any finding or refusal.
 
     """
-    if argv:
-        writer.finding("", f"takes no arguments, got {argv!r}")
-        return 2
+    argparse.ArgumentParser(
+        prog="belt rust-suppressions",
+        description="Check every path on stdin and report what clippy cannot see",
+    ).parse_args(argv)
     return check(stdin_paths())
 
 

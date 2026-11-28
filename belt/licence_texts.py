@@ -22,6 +22,7 @@ an untracked licence text never satisfies it, and reads each tracked
 with every finding on stderr, 0 with nothing to say.
 """
 
+import argparse
 import pathlib
 import re
 
@@ -139,9 +140,10 @@ def main(argv: list[str]) -> int:
         A process exit status.
 
     """
-    if argv:
-        writer.finding("", "usage: org_tracked | belt licence-texts")
-        return 2
+    argparse.ArgumentParser(
+        prog="belt licence-texts",
+        description="Read the tracked-file list on stdin and report",
+    ).parse_args(argv)
     listed = stdin_paths()
     out = findings(pathlib.Path.cwd(), listed)
     for message in out:

@@ -26,6 +26,7 @@ only, and stele on PATH.
 
 from __future__ import annotations
 
+import argparse
 import shutil
 
 from belt import findings, stele_findings
@@ -33,8 +34,6 @@ from belt import findings, stele_findings
 EXIT_RED = 1
 EXIT_ERROR = 2
 # The canon and at least one workflow.
-MIN_ARGS = 2
-USAGE = "usage: belt caller-permissions CANON_DIR WORKFLOW..."
 
 
 def assertion(canon: str) -> list[str]:
@@ -47,6 +46,7 @@ def assertion(canon: str) -> list[str]:
     return [
         "assert",
         "permissions",
+        "--",
         "--policy",
         f"{canon}/slsa/assert-policy.json",
         "--tree",
@@ -54,6 +54,13 @@ def assertion(canon: str) -> list[str]:
         "--callers",
         ".",
     ]
+
+
+class Args(argparse.Namespace):
+    """The command's arguments, typed as parsed."""
+
+    canon_dir: str
+    workflows: list[str]
 
 
 def main(argv: list[str]) -> int:
@@ -64,13 +71,19 @@ def main(argv: list[str]) -> int:
         is missing, EXIT_ERROR on a usage error.
 
     """
-    if len(argv) < MIN_ARGS or not argv[0]:
-        findings.finding("", USAGE)
-        return EXIT_ERROR
+    parser = argparse.ArgumentParser(
+        prog="belt caller-permissions",
+        description="Judge every caller's grant against its callee's requirement",
+    )
+    parser.add_argument("canon_dir", metavar="CANON_DIR")
+    parser.add_argument("workflows", nargs="+", metavar="WORKFLOW")
+    args = parser.parse_args(argv, namespace=Args())
+    if not args.canon_dir:
+        parser.error("the canon directory is empty")
     if shutil.which("stele") is None:
         findings.finding("", "stele missing from the belt")
         return EXIT_RED
-    if stele_findings.main(assertion(argv[0])):
+    if stele_findings.main(assertion(args.canon_dir)):
         findings.finding(
             "",
             "see above — grant what the pinned canon's",

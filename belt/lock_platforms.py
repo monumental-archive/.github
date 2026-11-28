@@ -461,7 +461,7 @@ def main(argv: list[str]) -> int:
         The exit status.
 
     """
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(prog="belt lock-platforms")
     parser.add_argument("--defaults", required=True, type=pathlib.Path)
     parser.add_argument("--config", type=pathlib.Path)
     parser.add_argument("--lock", type=pathlib.Path)

@@ -533,7 +533,9 @@ def main(argv: list[str], fetch: Fetch = gh_fetch) -> int:
         The process exit status.
 
     """
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(
+        prog="belt security-config", description=__doc__.splitlines()[0]
+    )
     parser.add_argument("--owner", required=True)
     parser.add_argument("--record", type=Path, required=True)
     parser.add_argument("--private-record", type=Path, required=True)

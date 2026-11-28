@@ -35,6 +35,7 @@ Exits 0 when every shipped language is adopted (or none is shipped),
 1 with one line per missing file otherwise.
 """
 
+import argparse
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
@@ -192,9 +193,10 @@ def main(argv: list[str]) -> int:
         0 when every shipped language is adopted, 1 when a file is missing.
 
     """
-    if argv:
-        writer.finding("", f"takes no arguments, got {argv!r}")
-        return 2
+    argparse.ArgumentParser(
+        prog="belt testing-adoption",
+        description="Judge the tracked tree read from standard input",
+    ).parse_args(argv)
     paths = stdin_paths()
     ships = shipped(paths)
     if not ships:

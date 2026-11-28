@@ -31,6 +31,7 @@ set. Exit 0 with one summary line, 1 with every finding. Stdlib only.
 
 from __future__ import annotations
 
+import argparse
 import os
 import re
 import shutil
@@ -254,9 +255,9 @@ def main(argv: list[str], *, net: Reads | None = None, top: Path | None = None) 
         0 when every citation resolves, EXIT_RED otherwise.
 
     """
-    if argv:
-        findings.finding("", f"takes no arguments, got {argv!r}")
-        return 2
+    argparse.ArgumentParser(
+        prog="belt citations", description="Resolve docs/'s citations"
+    ).parse_args(argv)
     top = top or Path.cwd()
     docs = documents(top)
     reached = connect(net) if docs is not None else None

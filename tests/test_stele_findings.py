@@ -332,7 +332,7 @@ def test_arguments_pass_unchanged_after_json(
     """The adapter calls `stele assert <target> --json` and the arguments."""
     args = ["--org", "an org", "--policy", "p.json", "--depth", "full", "--"]
     adapter.answer(monkeypatch, report("PASS"), 0)
-    status = stele_findings.main(["assert", "evidence", *args])
+    status = stele_findings.main(["assert", "evidence", "--", *args])
     out, err = capfd.readouterr()
     same(status, 0, err)
     same(
@@ -341,16 +341,26 @@ def test_arguments_pass_unchanged_after_json(
     )
 
 
+@pytest.mark.parametrize(
+    ("argv", "error"),
+    [
+        pytest.param(
+            ["inventory"],
+            "belt stele-findings: error: argument mode: invalid choice: 'inventory' (choose from 'assert')",
+            id='["inventory"]',
+        ),
+    ],
+)
 def test_no_assertion_is_a_usage_refusal(
-    adapter: Adapter, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+    argv: list[str], error: str, capfd: pytest.CaptureFixture[str]
 ) -> None:
-    """Arguments that name no assertion: usage, exit 1, stele not run."""
-    adapter.answer(monkeypatch, report("PASS"), 0)
-    status = stele_findings.main(["inventory"])
+    """Arguments that name no assertion: usage, exit 1, stele not run: argparse's exit 2, its usage and its error."""
+    with pytest.raises(SystemExit) as ended:
+        stele_findings.main(argv)
     out, err = capfd.readouterr()
-    same(status, 1, err)
-    assert "usage: belt stele-findings assert <target>" in err
-    assert not adapter.log.exists()
+    assert (ended.value.code, out) == (2, "")
+    assert err.startswith("usage: belt stele-findings "), err
+    assert err.splitlines()[-1] == error
 
 
 def test_no_stele_is_refused_by_name(

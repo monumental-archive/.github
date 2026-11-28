@@ -611,21 +611,47 @@ def test_a_cell_names_the_repository_without_its_tag(
 
 # A malformed command line is a usage error, never a plan.
 @pytest.mark.parametrize(
-    "argv",
+    ("argv", "error"),
     [
-        (),
-        ("targets", "oci-image", "x"),
-        ("targets", "go-binary"),
-        ("pgrx-images",),
-        ("base-images",),
-        ("pgrx-extension", MAPPING),
+        pytest.param(
+            [],
+            "belt matrix: error: the following arguments are required: mode",
+            id="nothing",
+        ),
+        pytest.param(
+            ["targets", "oci-image", "x"],
+            "belt matrix targets: error: argument CLASS: invalid choice: 'oci-image' (choose from 'go-binary', 'rust-binary')",
+            id='["targets", "oci-image", "x"]',
+        ),
+        pytest.param(
+            ["targets", "go-binary"],
+            "belt matrix targets: error: the following arguments are required: REQUEST",
+            id='["targets", "go-binary"]',
+        ),
+        pytest.param(
+            ["pgrx-images"],
+            "belt matrix pgrx-images: error: the following arguments are required: REQUEST",
+            id='["pgrx-images"]',
+        ),
+        pytest.param(
+            ["base-images"],
+            "belt matrix base-images: error: the following arguments are required: MAPPING",
+            id='["base-images"]',
+        ),
+        pytest.param(
+            ["pgrx-extension", MAPPING],
+            "belt matrix pgrx-extension: error: the following arguments are required: REQUEST",
+            id='["pgrx-extension", MAPPING]',
+        ),
     ],
 )
 def test_malformed_command_lines(
-    argv: object, capfd: pytest.CaptureFixture[str]
+    argv: list[str], error: str, capfd: pytest.CaptureFixture[str]
 ) -> None:
-    """A missing argument or an unknown class prints the usage."""
-    code = matrix.main([*argv])
+    """A missing argument or an unknown class prints the usage: argparse's exit 2, its usage and its error."""
+    with pytest.raises(SystemExit) as ended:
+        matrix.main(argv)
     out, err = capfd.readouterr()
-    assert (code, out) == (2, "")
-    assert err.startswith("matrix: usage: belt matrix targets")
+    assert (ended.value.code, out) == (2, "")
+    assert err.startswith("usage: belt matrix "), err
+    assert err.splitlines()[-1] == error

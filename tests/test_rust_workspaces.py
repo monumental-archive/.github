@@ -261,13 +261,36 @@ def test_resolved_is_the_roots_or_none_having_said_why(
     assert "lint:rust: git could not name the tree\n" in err
 
 
-@pytest.mark.parametrize("argv", [[], ["root"], ["roots", "x"]])
+@pytest.mark.parametrize(
+    ("argv", "error"),
+    [
+        pytest.param(
+            [],
+            "belt rust-workspaces: error: the following arguments are required: mode",
+            id="nothing",
+        ),
+        pytest.param(
+            ["root"],
+            "belt rust-workspaces: error: argument mode: invalid choice: 'root', maybe you meant 'roots'? (choose from 'roots')",
+            id='["root"]',
+        ),
+        pytest.param(
+            ["roots", "x"],
+            "belt rust-workspaces: error: unrecognized arguments: x",
+            id='["roots", "x"]',
+        ),
+    ],
+)
 def test_anything_but_roots_is_a_usage_error(
-    argv: list[str], capfd: pytest.CaptureFixture[str]
+    argv: list[str], error: str, capfd: pytest.CaptureFixture[str]
 ) -> None:
-    """No subcommand, or another: exit 2 and the usage line."""
-    assert rust_workspaces.main(argv) == 2
-    assert capfd.readouterr() == ("", "usage: belt rust-workspaces roots\n")
+    """No subcommand, or another: exit 2 and the usage line: argparse's exit 2, its usage and its error."""
+    with pytest.raises(SystemExit) as ended:
+        rust_workspaces.main(argv)
+    out, err = capfd.readouterr()
+    assert (ended.value.code, out) == (2, "")
+    assert err.startswith("usage: belt rust-workspaces "), err
+    assert err.splitlines()[-1] == error
 
 
 # org_rust_workspace_roots fills the array, or fails.

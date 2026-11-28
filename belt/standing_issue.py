@@ -1384,7 +1384,9 @@ def main(argv: list[str]) -> int:
         write failed.
 
     """
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(
+        prog="belt standing-issue", description=__doc__.splitlines()[0]
+    )
     parser.add_argument("--workflow", required=True)
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--ref", required=True)

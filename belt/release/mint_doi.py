@@ -1042,7 +1042,9 @@ def main(argv: list[str], env: Mapping[str, str] | None = None) -> int:
         The exit status: 0 published (or converged), 1 refused.
 
     """
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(
+        prog="belt mint-doi", description=__doc__.splitlines()[0]
+    )
     parser.add_argument(
         "--pipeline",
         required=True,

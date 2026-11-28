@@ -18,6 +18,7 @@ tree the leg recorded.
 Exit status: 0 every stamp holds, 1 refused, else go's or git's own.
 """
 
+import argparse
 import re
 import subprocess
 from pathlib import Path
@@ -160,9 +161,9 @@ def main(argv: list[str]) -> int:
         The exit status: 0 every stamp holds, 1 refused, else the tool's.
 
     """
-    if argv:
-        findings.finding("", f"takes no arguments, got {argv!r}")
-        return 2
+    argparse.ArgumentParser(
+        prog="belt check-go-stamps", description="Run the step"
+    ).parse_args(argv)
     try:
         check_staged()
     except RefusedError as e:

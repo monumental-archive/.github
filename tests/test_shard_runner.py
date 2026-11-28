@@ -535,16 +535,24 @@ def test_no_shard_passes_through(
     assert argv_of("vitest", "run") == words(out)
 
 
-def test_usage(
-    as_task: Callable[[str], None], capfd: pytest.CaptureFixture[str]
-) -> None:
-    """No `--`: the usage exit."""
-    as_task("test")
-    status = shard_runner.main(["vitest"])
-    assert status == USAGE
-    assert capfd.readouterr().err == (
-        "test: usage: belt shard-runner -- <command> [<argument>…]\n"
-    )
+@pytest.mark.parametrize(
+    ("argv", "error"),
+    [
+        pytest.param(
+            [],
+            "belt shard-runner: error: the following arguments are required: COMMAND",
+            id="nothing",
+        ),
+    ],
+)
+def test_usage(argv: list[str], error: str, capfd: pytest.CaptureFixture[str]) -> None:
+    """No `--`: the usage exit: argparse's exit 2, its usage and its error."""
+    with pytest.raises(SystemExit) as ended:
+        shard_runner.main(argv)
+    out, err = capfd.readouterr()
+    assert (ended.value.code, out) == (2, "")
+    assert err.startswith("usage: belt shard-runner "), err
+    assert err.splitlines()[-1] == error
 
 
 @pytest.mark.parametrize(

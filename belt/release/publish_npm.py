@@ -39,6 +39,7 @@ exists to read (`npm verb publish`, the OIDC calls) carry no credentials,
 so the masking cannot eat the evidence.
 """
 
+import argparse
 import os
 import re
 import subprocess
@@ -183,6 +184,12 @@ def run(package: str, env: Mapping[str, str], cwd: Path) -> int:
     return rc
 
 
+class Args(argparse.Namespace):
+    """The command's arguments, typed as parsed."""
+
+    spec: str
+
+
 def main(argv: list[str]) -> int:
     """Publish argv's one package from the job's environment.
 
@@ -190,7 +197,10 @@ def main(argv: list[str]) -> int:
         The exit code.
 
     """
-    if len(argv) != 1 or not argv[0]:
-        say("usage: belt publish-npm <name@version>")
-        return 2
-    return run(argv[0], os.environ, Path.cwd())
+    parser = argparse.ArgumentParser(
+        prog="belt publish-npm",
+        description="Publish argv's one package from the job's environment",
+    )
+    parser.add_argument("spec", metavar="NAME@VERSION")
+    args = parser.parse_args(argv, namespace=Args())
+    return run(args.spec, os.environ, Path.cwd())

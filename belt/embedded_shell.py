@@ -952,7 +952,7 @@ def main(argv: list[str]) -> int:
         The process exit status.
 
     """
-    ap = argparse.ArgumentParser(description=__doc__)
+    ap = argparse.ArgumentParser(prog="belt embedded-shell", description=__doc__)
     ap.add_argument("files", nargs="*")
     ap.add_argument("--no-format", action="store_true")
     ap.add_argument("--no-lint", action="store_true")

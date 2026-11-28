@@ -169,12 +169,10 @@ def test_guarded_without_the_mark_reds(
     capfd: pytest.CaptureFixture[str], plant: Callable[..., list[str]]
 ) -> None:
     """The guard alone turns every clean run into a failure."""
-    paths = plant(
-        (
-            "a.sh",
-            script("tmp=$(mktemp)", GUARDED, "echo ok"),
-        )
-    )
+    paths = plant((
+        "a.sh",
+        script("tmp=$(mktemp)", GUARDED, "echo ok"),
+    ))
     status = et.main(paths)
     lines, shaped = said(capfd.readouterr().err, paths)
     assert (status, shaped) == (1, True)
@@ -198,9 +196,10 @@ def test_guard_on_a_combined_signal_list_reds(
     capfd: pytest.CaptureFixture[str], plant: Callable[..., list[str]]
 ) -> None:
     """The shape is EXIT alone; `EXIT INT` is a different trap."""
-    paths = plant(
-        ("a.sh", script(GUARDED.replace("' EXIT", "' EXIT INT"), "org_done=1"))
-    )
+    paths = plant((
+        "a.sh",
+        script(GUARDED.replace("' EXIT", "' EXIT INT"), "org_done=1"),
+    ))
     status = et.main(paths)
     lines, shaped = said(capfd.readouterr().err, paths)
     assert (status, shaped) == (1, True)
@@ -212,20 +211,18 @@ def test_guarded_and_marked_is_clean(
     capfd: pytest.CaptureFixture[str], plant: Callable[..., list[str]]
 ) -> None:
     """The two lines, with comments and blanks after the mark."""
-    paths = plant(
-        (
-            "a.sh",
-            script(
-                "tmp=$(mktemp)",
-                et.PREASSIGN,
-                GUARDED,
-                "echo ok",
-                "org_done=1  # the last statement",
-                "",
-                "# trailing prose",
-            ),
-        )
-    )
+    paths = plant((
+        "a.sh",
+        script(
+            "tmp=$(mktemp)",
+            et.PREASSIGN,
+            GUARDED,
+            "echo ok",
+            "org_done=1  # the last statement",
+            "",
+            "# trailing prose",
+        ),
+    ))
     status = et.main(paths)
     lines, shaped = said(capfd.readouterr().err, paths)
     assert (status, lines, shaped) == (0, [], False)

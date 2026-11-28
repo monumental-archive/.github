@@ -31,9 +31,9 @@ stdlib only.
 
 from __future__ import annotations
 
+import argparse
 import os
 import subprocess
-import sys
 from dataclasses import dataclass
 
 
@@ -100,9 +100,9 @@ def main(argv: list[str]) -> int:
         `gh issue create`'s exit status.
 
     """
-    if argv:
-        print(f"takes no arguments, got {argv!r}", file=sys.stderr)
-        return 2
+    argparse.ArgumentParser(
+        prog="belt repro-issue", description="File the issue"
+    ).parse_args(argv)
     env = os.environ
     repo, run_id = env["GITHUB_REPOSITORY"], env["GITHUB_RUN_ID"]
     title, body = issue(

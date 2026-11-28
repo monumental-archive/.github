@@ -717,7 +717,9 @@ def main(argv: list[str]) -> int:
         A process exit status.
 
     """
-    parser = argparse.ArgumentParser(description="the org's MSRV verification plan")
+    parser = argparse.ArgumentParser(
+        prog="belt msrv-plan", description="the org's MSRV verification plan"
+    )
     parser.add_argument("--toolchains", type=Path)
     parser.add_argument("--floor", type=Path)
     parser.add_argument("--exclude", default="")

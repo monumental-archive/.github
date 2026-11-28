@@ -20,10 +20,12 @@ mise/test_gate_stub.py run this helper and then the lint on its output,
 so the two cannot drift apart.
 """
 
+import argparse
 import re
 from pathlib import Path
 
 from belt import findings
+from belt.arguments import repository
 
 NAME = "fix:gate-stub"
 
@@ -113,6 +115,13 @@ def fix(text: str) -> str | None:
     return "".join(lines)
 
 
+class Args(argparse.Namespace):
+    """The command's arguments, typed as parsed."""
+
+    canon: str
+    files: list[str]
+
+
 def main(argv: list[str]) -> int:
     """Fix every gate caller named on the command line.
 
@@ -121,7 +130,14 @@ def main(argv: list[str]) -> int:
         no concurrency block to rewrite.
 
     """
-    canon, *paths = argv
+    parser = argparse.ArgumentParser(
+        prog="belt gate-stub-fix",
+        description="Fix every gate caller named on the command line",
+    )
+    parser.add_argument("canon", type=repository, metavar="OWNER/REPO")
+    parser.add_argument("files", nargs="*", metavar="WORKFLOW")
+    args = parser.parse_args(argv, namespace=Args())
+    canon, paths = args.canon, args.files
     refused = []
     for path in map(Path, paths):
         text = path.read_text(encoding="utf-8")

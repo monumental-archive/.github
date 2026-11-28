@@ -28,15 +28,16 @@ message, 2 on a usage or read error. Stdlib only.
 
 from __future__ import annotations
 
+import argparse
 import re
 from pathlib import Path
 
 from belt import findings, gate_stub_fix
+from belt.arguments import repository
 
 EXIT_RED = 1
 EXIT_ERROR = 2
 # The canon and at least one workflow.
-MIN_ARGS = 2
 # grep's [[:space:]] within one line.
 SPACE = r"[ \t\r\f\v]"
 PULL_REQUEST = re.compile(rf"^{SPACE}*pull_request")
@@ -162,6 +163,13 @@ def report(bad: str, unqueued: str, ungrouped: str) -> int:
     return 0
 
 
+class Args(argparse.Namespace):
+    """The command's arguments, typed as parsed."""
+
+    canon: str
+    workflows: list[str]
+
+
 def main(argv: list[str]) -> int:
     """Judge every gate caller named.
 
@@ -170,18 +178,20 @@ def main(argv: list[str]) -> int:
         one does not, EXIT_ERROR on a usage or read error.
 
     """
-    owner, _, repo = argv[0].partition("/") if argv else ("", "", "")
-    if not owner or not repo or len(argv) < MIN_ARGS:
-        findings.finding("", "usage: belt gate-stub OWNER/REPO WORKFLOW...")
-        return EXIT_ERROR
+    parser = argparse.ArgumentParser(
+        prog="belt gate-stub", description="Judge every gate caller named"
+    )
+    parser.add_argument("canon", type=repository, metavar="OWNER/REPO")
+    parser.add_argument("workflows", nargs="+", metavar="WORKFLOW")
+    args = parser.parse_args(argv, namespace=Args())
     bad = unqueued = ungrouped = ""
-    for name in argv[1:]:
+    for name in args.workflows:
         try:
             lines = read(Path(name))
         except ValueError as err:
             findings.finding("", str(err))
             return EXIT_ERROR
-        if not caller(lines, argv[0]):
+        if not caller(lines, args.canon):
             continue
         if not any(EDITED.search(line) for line in lines):
             bad += f" {name}"

@@ -479,12 +479,10 @@ def test_unfinished_sibling_changes_nothing(
     stubbed: Stubbed, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Green so far with a caller's job still running: nothing is read."""
-    stubbed.jobs(
-        [
-            job(1, "records / links", "success"),
-            job(3, "citations", None, "in_progress"),
-        ]
-    )
+    stubbed.jobs([
+        job(1, "records / links", "success"),
+        job(3, "citations", None, "in_progress"),
+    ])
     stubbed.env["STUB_LIST"] = issues((42, "red: links (records)", previous(FIRST, 3)))
     argv = stubbed.enter(monkeypatch)
     status = standing.main(argv)
@@ -498,13 +496,11 @@ def test_unfinished_sibling_keeps_red_and_closes_nothing(
     stubbed: Stubbed, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A red job is kept with a sibling running; no green job is closed."""
-    stubbed.jobs(
-        [
-            job(1, "plan", "success"),
-            job(2, "caller permissions", "failure"),
-            job(3, "citations", None, "in_progress"),
-        ]
-    )
+    stubbed.jobs([
+        job(1, "plan", "success"),
+        job(2, "caller permissions", "failure"),
+        job(3, "citations", None, "in_progress"),
+    ])
     stubbed.env["STUB_LIST"] = issues((41, "red: plan (slsa)", previous(FIRST, 3)))
     argv = stubbed.enter(monkeypatch)
     status = standing.main(argv)
@@ -570,12 +566,10 @@ def test_two_red_jobs_open_two_issues(
     per_job: PerJob, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Two red jobs in one run: two issues, each titled for its job."""
-    per_job.jobs(
-        [
-            job(1, "rust branch coverage holds its floor", "failure"),
-            job(2, "every source chain link verifies", "failure"),
-        ]
-    )
+    per_job.jobs([
+        job(1, "rust branch coverage holds its floor", "failure"),
+        job(2, "every source chain link verifies", "failure"),
+    ])
     per_job.log(1, failing("mise run coverage", "below the floor"))
     per_job.log(2, failing("mise run chain", "link 3 does not verify"))
     argv = per_job.enter(monkeypatch)
@@ -605,12 +599,10 @@ def test_a_reusable_workflow_leg_is_named_for_its_job(
 ) -> None:
     """`deep-tests / x (3/8)` under deep-tests is a leg of the job `x`."""
     same(standing.job_name("deep-tests / x (3/8)", "deep-tests"), "x")
-    per_job.jobs(
-        [
-            job(1, "deep-tests / x (3/8)", "failure"),
-            job(2, "deep-tests / x (4/8)", "success"),
-        ]
-    )
+    per_job.jobs([
+        job(1, "deep-tests / x (3/8)", "failure"),
+        job(2, "deep-tests / x (4/8)", "success"),
+    ])
     per_job.log(1, failing("mise run x", "boom"))
     argv = per_job.enter(monkeypatch, workflow="deep-tests")
     status = standing.main(argv)
@@ -1299,13 +1291,11 @@ def test_each_record_reaches_the_job_whose_step_ran_it(
 ) -> None:
     """A's record in A's issue only; verdict by its command; the rest in all."""
     verdict = '"${ORG_PYTHON}" -I belt verdict --report r.json'
-    stubbed.jobs(
-        [
-            job(1, "a", "failure"),
-            job(2, "b", "failure"),
-            job(3, "watch (leg 1)", "failure"),
-        ]
-    )
+    stubbed.jobs([
+        job(1, "a", "failure"),
+        job(2, "b", "failure"),
+        job(3, "watch (leg 1)", "failure"),
+    ])
     stubbed.log(1, failing("mise run lint:a", "a broke"))
     stubbed.log(2, failing("mise run lint:b", "b broke"))
     stubbed.log(3, failing(verdict, "a certificate did not reconcile"))

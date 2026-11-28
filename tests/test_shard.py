@@ -127,12 +127,37 @@ def test_a_task_the_plan_did_not_shard() -> None:
 
 
 def test_the_command_line() -> None:
-    """`union` reads the directory; a malformed count is the usage exit."""
+    """`union` reads the directory and each task's count."""
     with tempfile.TemporaryDirectory() as scratch:
         assert shard.main(["union", scratch, "t=1"]) == 0
         assert shard.main(["union", scratch, "t=2"]) == 1
-        assert shard.main(["union", scratch, "t=0"]) == 2
-        assert shard.main(["union"]) == 2
+
+
+@pytest.mark.parametrize(
+    ("argv", "error"),
+    [
+        (
+            ["union", ".", "t=0"],
+            "belt shard union: error: argument TASK=SHARDS: 't=0' is not"
+            " <task>=<shards>",
+        ),
+        (
+            ["union"],
+            "belt shard union: error: the following arguments are required:"
+            " REPORTS_DIR",
+        ),
+    ],
+)
+def test_a_malformed_command_line_is_a_usage_error(
+    argv: list[str], error: str, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A count that is no positive number, or no directory: argparse's exit 2."""
+    with pytest.raises(SystemExit) as ended:
+        shard.main(argv)
+    out, err = capfd.readouterr()
+    assert (ended.value.code, out) == (2, "")
+    assert err.startswith("usage: belt shard union "), err
+    assert err.splitlines()[-1] == error
 
 
 SUITE = {f"test_{name}.py": "def test_it():\n    pass\n" for name in "abcde"}

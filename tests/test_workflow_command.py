@@ -149,7 +149,8 @@ def test_a_masked_value_with_a_newline_is_one_line(
     out = capfd.readouterr().out
     assert out == "::add-mask::abc%0Adef%25\n"
     assert (
-        out.removeprefix("::add-mask::")
+        out
+        .removeprefix("::add-mask::")
         .removesuffix("\n")
         .replace("%0A", "\n")
         .replace("%25", "%")
@@ -194,15 +195,13 @@ def test_the_refusal_is_one_line(
         monkeypatch.setenv("MISE_TASK_NAME", "")
         monkeypatch.setenv("ORG_FINDINGS", "")
         monkeypatch.setattr(sys, "argv", ["pgrx_images.py"])
-        code = pgrx_images.main(
-            [
-                "base-image",
-                "--pg",
-                "a\n::error::b",
-                "--table",
-                str(table),
-            ]
-        )
+        code = pgrx_images.main([
+            "base-image",
+            "--pg",
+            "a\n::error::b",
+            "--table",
+            str(table),
+        ])
         err = capfd.readouterr().err
     assert code == 1
     assert err == (

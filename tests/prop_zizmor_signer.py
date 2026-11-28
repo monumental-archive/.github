@@ -31,15 +31,13 @@ from belt.typed_hypothesis import given
 
 SIGNER = "Org/Signer"
 WORKFLOW = f"{SIGNER}/.github/workflows/sign.yml"
-REPO = st.sampled_from(
-    [
-        "Org/Signer",
-        "org/signer",
-        "ORG/SIGNER",
-        "org/other",
-        "else/signer",
-    ]
-)
+REPO = st.sampled_from([
+    "Org/Signer",
+    "org/signer",
+    "ORG/SIGNER",
+    "org/other",
+    "else/signer",
+])
 SHA = st.from_regex(r"[0-9a-f]{40}", fullmatch=True)
 IDENT = st.sampled_from([*zs.AUDITS, "unpinned-uses", "excessive-permissions"])
 
@@ -66,12 +64,10 @@ def draw_finding(draw: st.DrawFn) -> Drawn:
         locations.append({"symbolic": {"kind": kind}, "concrete": {"feature": feature}})
     if draw(st.booleans()):
         other = "Hidden" if kind == "Primary" else "Primary"
-        locations.append(
-            {
-                "symbolic": {"kind": other},
-                "concrete": {"feature": "else/where@main"},
-            }
-        )
+        locations.append({
+            "symbolic": {"kind": other},
+            "concrete": {"feature": "else/where@main"},
+        })
     on = ident in zs.AUDITS and all(r.lower() == SIGNER.lower() for r in repos)
     return {"ident": ident, "locations": locations}, on
 

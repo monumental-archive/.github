@@ -34,6 +34,7 @@ Exits 0 when clean, 1 on a finding or an unreadable lock file, 2 on a
 usage error.
 """
 
+import argparse
 import os
 import posixpath
 import random
@@ -164,6 +165,13 @@ def seed(given: str) -> int | None:
     return int(given)
 
 
+class Args(argparse.Namespace):
+    """The command's arguments, typed as parsed."""
+
+    mode: str
+    files: list[str]
+
+
 def main(argv: list[str]) -> int:
     """Run one subcommand.
 
@@ -171,14 +179,23 @@ def main(argv: list[str]) -> int:
         The exit status.
 
     """
-    if not argv or argv[0] not in {"locked", "lint", "seed"}:
-        findings.finding("", "expected locked, lint or seed")
-        return EXIT_USAGE
-    command, files = argv[0], argv[1:]
+    parser = argparse.ArgumentParser(
+        prog="belt rust-properties", description="Read or judge the proptest pins"
+    )
+    modes = parser.add_subparsers(dest="mode", required=True)
+    for mode, said in (("locked", "print each pin"), ("lint", "red below 1.7.0")):
+        modes.add_parser(mode, help=said).add_argument(
+            "files", nargs="*", metavar="CARGO_LOCK"
+        )
+    modes.add_parser("seed", help="print ORG_PROPERTY_SEED's seed").set_defaults(
+        files=list[str]()
+    )
+    args = parser.parse_args(argv, namespace=Args())
+    command, files = args.mode, args.files
     if command == "seed":
         given = os.environ.get("ORG_PROPERTY_SEED", "")
         chosen = seed(given)
-        if chosen is None or files:
+        if chosen is None:
             findings.finding(
                 "",
                 f"ORG_PROPERTY_SEED must be an integer from 0 to 2^64-1, got '{given}'",

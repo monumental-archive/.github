@@ -342,14 +342,31 @@ def test_only_the_last_300_lines_survive() -> None:
 
 
 # The command's one argument.
-@pytest.mark.parametrize("argv", [[], [""], ["a", "b"]])
+@pytest.mark.parametrize(
+    ("argv", "error"),
+    [
+        pytest.param(
+            [],
+            "belt publish-npm: error: the following arguments are required: NAME@VERSION",
+            id="nothing",
+        ),
+        pytest.param(
+            ["a", "b"],
+            "belt publish-npm: error: unrecognized arguments: b",
+            id='["a", "b"]',
+        ),
+    ],
+)
 def test_a_missing_package_is_a_usage_error(
-    argv: object, capfd: pytest.CaptureFixture[str]
+    argv: list[str], error: str, capfd: pytest.CaptureFixture[str]
 ) -> None:
-    """No package, or an empty one, exits 2 with the usage line."""
-    assert publish_npm.main(argv) == 2
-    out = capfd.readouterr().out
-    assert out == "usage: belt publish-npm <name@version>\n"
+    """No package, or an empty one, exits 2 with the usage line: argparse's exit 2, its usage and its error."""
+    with pytest.raises(SystemExit) as ended:
+        publish_npm.main(argv)
+    out, err = capfd.readouterr()
+    assert (ended.value.code, out) == (2, "")
+    assert err.startswith("usage: belt publish-npm "), err
+    assert err.splitlines()[-1] == error
 
 
 def test_the_package_reaches_run_with_the_job_s_environment(

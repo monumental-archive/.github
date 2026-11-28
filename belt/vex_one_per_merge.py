@@ -158,7 +158,9 @@ def main(argv: list[str]) -> int:
         The count's status, or 0 after a listing.
 
     """
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(
+        prog="belt vex-one-per-merge", description=__doc__.splitlines()[0]
+    )
     parser.add_argument("--list", metavar="RANGE", dest="revisions")
     args = parser.parse_args(argv, namespace=Args())
     if args.revisions is None:

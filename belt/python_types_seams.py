@@ -25,6 +25,7 @@ tokenized or parsed is named as unreadable; mypy names its syntax.
         prints `path:line: reason` per finding; exits 1 if any.
 """
 
+import argparse
 import ast
 import io
 import re
@@ -92,6 +93,12 @@ def findings(path: Path) -> list[tuple[int, str]]:
         return [(0, f"cannot be read: {type(e).__name__}")]
 
 
+class Args(argparse.Namespace):
+    """The command's arguments, typed as parsed."""
+
+    files: list[str]
+
+
 def main(argv: list[str]) -> int:
     """Name every seam in the files given.
 
@@ -99,8 +106,13 @@ def main(argv: list[str]) -> int:
         1 when any file has one, else 0.
 
     """
+    parser = argparse.ArgumentParser(
+        prog="belt python-types-seams", description="Name every seam in the files given"
+    )
+    parser.add_argument("files", nargs="*", metavar="FILE")
+    args = parser.parse_args(argv, namespace=Args())
     found = False
-    for arg in argv:
+    for arg in args.files:
         for line, reason in findings(Path(arg)):
             print(f"{arg}:{line}: {reason}")
             found = True

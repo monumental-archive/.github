@@ -707,7 +707,9 @@ def parse_args(argv: list[str] | None) -> Args:
         The parsed arguments.
 
     """
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(
+        prog="belt mutants-rust", description=__doc__.splitlines()[0]
+    )
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("reasons").add_argument("config", type=Path)
     sub.add_parser("records")

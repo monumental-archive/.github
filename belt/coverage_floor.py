@@ -1211,7 +1211,9 @@ def main(argv: list[str]) -> int:
         A process exit status.
 
     """
-    parser = argparse.ArgumentParser(description="the derived coverage floor")
+    parser = argparse.ArgumentParser(
+        prog="belt coverage-floor", description="the derived coverage floor"
+    )
     parser.add_argument("--path", type=Path, default=DEFAULT_PATH)
     sub = parser.add_subparsers(dest="command", required=True)
     reader = sub.add_parser(

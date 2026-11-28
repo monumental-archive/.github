@@ -1198,17 +1198,26 @@ def test_no_extension_and_no_exclusion_print_neither_line(
     assert "excluded" not in out
 
 
+@pytest.mark.parametrize(
+    ("argv", "error"),
+    [
+        pytest.param(
+            [],
+            "belt rust-lint: error: the following arguments are required: mode",
+            id="nothing",
+        ),
+    ],
+)
 def test_no_subcommand_is_a_usage_error(
-    planted_state: Planted,
-    capfd: pytest.CaptureFixture[str],
-    monkeypatch: pytest.MonkeyPatch,
+    argv: list[str], error: str, capfd: pytest.CaptureFixture[str]
 ) -> None:
-    """No task named: status 2, the usage."""
-    planted_state.enter(monkeypatch)
-    status = rust_lint.main([])
+    """No task named: status 2, the usage: argparse's exit 2, its usage and its error."""
+    with pytest.raises(SystemExit) as ended:
+        rust_lint.main(argv)
     out, err = capfd.readouterr()
-    assert status == 2, out + err
-    assert planted_state.finding("usage: belt rust-lint lint|fix") in err
+    assert (ended.value.code, out) == (2, "")
+    assert err.startswith("usage: belt rust-lint "), err
+    assert err.splitlines()[-1] == error
 
 
 class FixBranches(Planted):

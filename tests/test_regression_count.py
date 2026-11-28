@@ -450,18 +450,16 @@ def test_summary_lists_only_recent_no_test(
     report.repo.commit("fix: tested", {"t.py": "1\n", "test_t.py": "1\n"})
     with tempfile.TemporaryDirectory() as tmp:
         summary = pathlib.Path(tmp) / "summary.md"
-        status = rc.main(
-            [
-                "--repo",
-                str(report.repo.root),
-                "--since",
-                "2019-01-01",
-                "--recent",
-                "2021-01-01",
-                "--summary",
-                str(summary),
-            ]
-        )
+        status = rc.main([
+            "--repo",
+            str(report.repo.root),
+            "--since",
+            "2019-01-01",
+            "--recent",
+            "2021-01-01",
+            "--summary",
+            str(summary),
+        ])
         text = summary.read_text(encoding="utf-8")
     assert status == 0
     assert "since 2019-01-01: **1 of 3 (33.3%)**" in text

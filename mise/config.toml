@@ -4246,7 +4246,7 @@ for m in "${mods[@]}"; do
     org_finding "" "${m} names no module"
     exit 1
   }
-  "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" stele-findings assert advisories --scan "${scan}" --vex "${vex}" --subject "${module}"
+  "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" stele-findings assert advisories -- --scan "${scan}" --vex "${vex}" --subject "${module}"
 done
 org_done=1
 '''
@@ -4291,7 +4291,7 @@ command -v stele > /dev/null || {
   exit 1
 }
 : "${GITHUB_REPOSITORY_OWNER:?audit:blast-radius walks an org the environment names (#579) — Actions sets it; a local run exports it}"
-"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" stele-findings assert blast-radius \
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" stele-findings assert blast-radius -- \
   --org "${GITHUB_REPOSITORY_OWNER}" \
   --policy slsa/assert-policy.json \
   --vex security/vex
@@ -4335,7 +4335,7 @@ command -v stele > /dev/null || {
   exit 1
 }
 : "${GITHUB_REPOSITORY_OWNER:?audit:attestations walks an org the environment names (#579) — Actions sets it; a local run exports it}"
-"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" stele-findings assert evidence \
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" stele-findings assert evidence -- \
   --org "${GITHUB_REPOSITORY_OWNER}" \
   --policy slsa/assert-policy.json \
   --depth full \
@@ -4378,7 +4378,7 @@ command -v stele > /dev/null || {
   exit 1
 }
 : "${GITHUB_REPOSITORY_OWNER:?audit:source-vsa walks an org the environment names (#579) — Actions sets it; a local run exports it}"
-"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" stele-findings assert chains \
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" stele-findings assert chains -- \
   --org "${GITHUB_REPOSITORY_OWNER}" \
   --policy slsa/assert-policy.json \
   --verify-policy slsa/verify-policy.json
@@ -4477,7 +4477,7 @@ names=() && org_tracked_read names ":!vendor/**" "*.md" "*.markdown"
 if [[ -z ${names[0]+set} ]]; then
   echo "audit:links: no markdown tracked, skipped"
 else
-  "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" lychee-findings --no-progress --include-fragments --config "${ORG_BELT_DIR}/lychee.toml" "${names[@]}"
+  "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" lychee-findings -- --no-progress --include-fragments --config "${ORG_BELT_DIR}/lychee.toml" "${names[@]}"
 fi
 '''
 
@@ -6340,7 +6340,7 @@ files=() && action_files files
   echo "audit:action-pins: no workflows or actions, skipped"
   exit 0
 }
-"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" pinact-findings --config "${ORG_BELT_DIR}/pinact.yaml" --fix=false --verify-comment --verify-min-age "${files[@]}"
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" pinact-findings -- --config "${ORG_BELT_DIR}/pinact.yaml" --fix=false --verify-comment --verify-min-age "${files[@]}"
 '''
 
 [tasks."audit:caller-permissions"]
@@ -6371,7 +6371,7 @@ command -v stele > /dev/null || {
   exit 1
 }
 : "${GITHUB_REPOSITORY_OWNER:?audit:caller-permissions walks an org the environment names (#579) — Actions sets it; a local run exports it}"
-if ! "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" stele-findings assert permissions \
+if ! "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" stele-findings assert permissions -- \
   --policy slsa/assert-policy.json \
   --tree . \
   --org "${GITHUB_REPOSITORY_OWNER}"; then
@@ -6601,7 +6601,7 @@ command -v stele > /dev/null || {
   exit 1
 }
 : "${GITHUB_REPOSITORY_OWNER:?audit:release-tags walks an org the environment names (#579) — Actions sets it; a local run exports it}"
-"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" stele-findings assert tags \
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" stele-findings assert tags -- \
   --org "${GITHUB_REPOSITORY_OWNER}" \
   --policy slsa/assert-policy.json
 '''
@@ -8495,7 +8495,7 @@ templates=() && workflow_template_files templates
 }
 # The two checks and their message: mise/runner_pin.py (#1911).
 "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" runner-pin \
-  ${workflows[@]+"${workflows[@]}"} -- ${templates[@]+"${templates[@]}"}
+  --workflows ${workflows[@]+"${workflows[@]}"} --templates ${templates[@]+"${templates[@]}"}
 '''
 
 [tasks."lint:canon-pins"]
@@ -8531,8 +8531,8 @@ presets=() && org_tracked_read presets ':!vendor/**' "renovate.json" "*/renovate
 workflows=() && workflow_files workflows
 # The four surfaces, the skip and the message: mise/canon_pins.py (#1911).
 "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" canon-pins "${canon_owner}/${canon_repo}" \
-  ${yml[@]+"${yml[@]}"} -- ${hooks[@]+"${hooks[@]}"} -- ${presets[@]+"${presets[@]}"} -- \
-  ${workflows[@]+"${workflows[@]}"}
+  --yaml ${yml[@]+"${yml[@]}"} --lefthook ${hooks[@]+"${hooks[@]}"} \
+  --renovate ${presets[@]+"${presets[@]}"} --workflows ${workflows[@]+"${workflows[@]}"}
 '''
 
 [tasks."lint:hook-jobs"]
@@ -8665,6 +8665,6 @@ flows=() && workflow_files flows
   echo "lint:bash-portability: nothing to check, skipped"
   exit 0
 }
-"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" bash-portability ${flows[@]+"${flows[@]}"} -- \
-  ${scripts[@]+"${scripts[@]}"} -- ${configs[@]+"${configs[@]}"}
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" bash-portability --workflows ${flows[@]+"${flows[@]}"} \
+  --scripts ${scripts[@]+"${scripts[@]}"} --configs ${configs[@]+"${configs[@]}"}
 '''

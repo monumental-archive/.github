@@ -181,8 +181,7 @@ def main(argv: list[str]) -> int:
     args = parser.parse_args(argv, namespace=Args())
     own = [t for t in args.own.split("\n") if t]
     if own and args.workflows and "/" not in args.canon.strip("/"):
-        findings.finding("", "usage: --canon OWNER/REPO is needed to judge own tasks")
-        return EXIT_ERROR
+        parser.error("--canon OWNER/REPO is needed to judge own tasks")
     try:
         lines = [line for name in args.workflows for line in read(Path(name))]
         # The belt half applies where git tracks a belt config (#2013).

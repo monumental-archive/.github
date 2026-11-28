@@ -287,7 +287,7 @@ def test_arguments_pass_unchanged_after_the_format(
     """The adapter calls `lychee --format json` and the arguments, once."""
     args = ["--no-progress", "--config", "a b.toml", "a.md", "b.md"]
     adapter.answer(monkeypatch, report({}), 0)
-    status = lychee_findings.main([*args])
+    status = lychee_findings.main(["--", *args])
     out, err = capfd.readouterr()
     same(status, 0, err)
     same(

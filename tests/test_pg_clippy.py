@@ -201,18 +201,26 @@ def finding(*lines: str) -> str:
     return f"{TASK}: {head}\n" + "".join(f"  {line}\n" for line in detail)
 
 
+@pytest.mark.parametrize(
+    ("argv", "error"),
+    [
+        pytest.param(
+            ["lint"],
+            "belt pg-clippy: error: unrecognized arguments: lint",
+            id='["lint"]',
+        ),
+    ],
+)
 def test_an_argument_is_a_usage_error(
-    planted_state: Planted,
-    capfd: pytest.CaptureFixture[str],
-    monkeypatch: pytest.MonkeyPatch,
+    argv: list[str], error: str, capfd: pytest.CaptureFixture[str]
 ) -> None:
-    """The task passes none; anything else is a caller's mistake."""
-    planted_state.enter(monkeypatch)
-    status = pg_clippy.main(["lint"])
+    """The task passes none; anything else is a caller's mistake: argparse's exit 2, its usage and its error."""
+    with pytest.raises(SystemExit) as ended:
+        pg_clippy.main(argv)
     out, err = capfd.readouterr()
-    assert status == 2, out + err
-    assert finding("usage: belt pg-clippy") in err
-    planted_state.assert_logged()
+    assert (ended.value.code, out) == (2, "")
+    assert err.startswith("usage: belt pg-clippy "), err
+    assert err.splitlines()[-1] == error
 
 
 def test_cargo_missing_is_red(

@@ -412,28 +412,43 @@ def test_not_utf8_is_an_error(
     assert err.startswith(f"lint:signer-pin: {rel}: cannot be read as UTF-8:"), err
 
 
+@pytest.mark.parametrize(
+    ("argv", "error"),
+    [
+        pytest.param(
+            [],
+            "belt signer-pin: error: the following arguments are required: OWNER/REPO, SIGNER-WORKFLOW, WORKFLOW",
+            id="nothing",
+        ),
+        pytest.param(
+            [CANON_NAME, signer()],
+            "belt signer-pin: error: the following arguments are required: WORKFLOW",
+            id="[CANON_NAME, signer()]",
+        ),
+        pytest.param(
+            ["/x", signer(), "a.yml"],
+            "belt signer-pin: error: argument OWNER/REPO: '/x' is not OWNER/REPO",
+            id='["/x", signer(), "a.yml"]',
+        ),
+        pytest.param(
+            ["x/", signer(), "a.yml"],
+            "belt signer-pin: error: argument OWNER/REPO: 'x/' is not OWNER/REPO",
+            id='["x/", signer(), "a.yml"]',
+        ),
+        pytest.param(
+            [CANON_NAME, "", "a.yml"],
+            "belt signer-pin: error: the signer workflow is empty",
+            id='[CANON_NAME, "", "a.yml"]',
+        ),
+    ],
+)
 def test_usage_errors(
-    branches: Branches,
-    capfd: pytest.CaptureFixture[str],
-    monkeypatch: pytest.MonkeyPatch,
+    argv: list[str], error: str, capfd: pytest.CaptureFixture[str]
 ) -> None:
-    """No workflow, an empty owner, repo or signer: the usage line."""
-    usage = [
-        (
-            "lint:signer-pin: usage: belt signer-pin OWNER/REPO SIGNER-WORKFLOW"
-            " WORKFLOW..."
-        )
-    ]
-    rows = {
-        "nothing": [],
-        "no workflow": [CANON_NAME, signer()],
-        "no owner": ["/x", signer(), "a.yml"],
-        "no repo": ["x/", signer(), "a.yml"],
-        "no signer": [CANON_NAME, "", "a.yml"],
-    }
-    for argv in rows.values():
-        branches.enter(monkeypatch)
-        status = signer_pin.main([*argv])
-        _out, err = capfd.readouterr()
-        assert status == signer_pin.EXIT_ERROR
-        assert usage == err.splitlines()
+    """No workflow, an empty owner, repo or signer: the usage line: argparse's exit 2, its usage and its error."""
+    with pytest.raises(SystemExit) as ended:
+        signer_pin.main(argv)
+    out, err = capfd.readouterr()
+    assert (ended.value.code, out) == (2, "")
+    assert err.startswith("usage: belt signer-pin "), err
+    assert err.splitlines()[-1] == error

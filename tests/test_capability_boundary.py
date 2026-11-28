@@ -250,15 +250,23 @@ def test_missing_file_is_an_error(
     ), err
 
 
+@pytest.mark.parametrize(
+    ("argv", "error"),
+    [
+        pytest.param(
+            [],
+            "belt capability-boundary: error: the following arguments are required: WORKFLOW",
+            id="nothing",
+        ),
+    ],
+)
 def test_no_workflows_is_a_usage_error(
-    boundary: Boundary,
-    capfd: pytest.CaptureFixture[str],
-    monkeypatch: pytest.MonkeyPatch,
+    argv: list[str], error: str, capfd: pytest.CaptureFixture[str]
 ) -> None:
-    """No workflow named: exit 2 with the usage line."""
-    boundary.enter(monkeypatch)
-    status = capability_boundary.main([])
-    _out, err = capfd.readouterr()
-    same(status, capability_boundary.EXIT_ERROR)
-    usage = "lint:capability-boundary: usage: belt capability-boundary WORKFLOW..."
-    same(err.splitlines(), [usage])
+    """No workflow named: exit 2 with the usage line: argparse's exit 2, its usage and its error."""
+    with pytest.raises(SystemExit) as ended:
+        capability_boundary.main(argv)
+    out, err = capfd.readouterr()
+    assert (ended.value.code, out) == (2, "")
+    assert err.startswith("usage: belt capability-boundary "), err
+    assert err.splitlines()[-1] == error

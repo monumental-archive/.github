@@ -297,7 +297,9 @@ def main(argv: list[str]) -> int:
         The process exit status.
 
     """
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(
+        prog="belt bestpractices-drift", description=__doc__.splitlines()[0]
+    )
     parser.add_argument("file", help="the repository's .bestpractices.json")
     parser.add_argument("repo", help="the repository, for the findings")
     parser.add_argument("readme", help="the tracked README, or empty for none")

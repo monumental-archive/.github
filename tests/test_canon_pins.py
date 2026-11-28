@@ -185,7 +185,17 @@ class Planted:
             The arguments that check them.
 
         """
-        return [CANON, *yml, "--", *hooks, "--", *presets, "--", *flows]
+        return [
+            CANON,
+            "--yaml",
+            *yml,
+            "--lefthook",
+            *hooks,
+            "--renovate",
+            *presets,
+            "--workflows",
+            *flows,
+        ]
 
     def task(self) -> subprocess.CompletedProcess[str]:
         """Run the task body in the planted tree.
@@ -428,18 +438,18 @@ def test_a_missing_file_is_an_error(
 def test_a_bad_call_is_a_usage_error(
     planted: Planted, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """No canon, half a canon, or not three separators: exit 2."""
-    usage = f"{TASK}: {canon_pins.USAGE}"
-    calls: list[list[str]] = [
-        [],
-        [CANON, "--", "--"],
-        ["/repo", "--", "--", "--"],
-        ["owner/", "--", "--", "--"],
-        [CANON, "--", "--", "--", "--"],
+    """No canon, half a canon, or a file no option names: argparse's exit 2."""
+    calls: list[tuple[list[str], str]] = [
+        ([], "the following arguments are required: OWNER/REPO"),
+        (["/repo"], "argument OWNER/REPO: '/repo' is not OWNER/REPO"),
+        (["owner/"], "argument OWNER/REPO: 'owner/' is not OWNER/REPO"),
+        ([CANON, "a.yml"], "unrecognized arguments: a.yml"),
     ]
-    for argv in calls:
+    for argv, error in calls:
         planted.enter(monkeypatch)
-        status = canon_pins.main([*argv])
+        with pytest.raises(SystemExit) as ended:
+            canon_pins.main(argv)
         _out, err = capfd.readouterr()
-        same(status, canon_pins.EXIT_ERROR)
-        same(err.splitlines(), [usage])
+        same(ended.value.code, canon_pins.EXIT_ERROR)
+        assert err.startswith("usage: belt canon-pins "), err
+        same(err.splitlines()[-1], f"belt canon-pins: error: {error}")
