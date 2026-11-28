@@ -37,6 +37,8 @@ MUTATION = "tracking it adopts the leg; docs/tooling-verdicts.md says what it ho
 ADOPT = "mise run coverage:adopt writes it"
 SKIPPED = f"{TASK}: ships none of Rust, Go, Python, TypeScript, skipped\n"
 GUARD = re.compile(r'^if ! org_tracked_has "\$\{(\w+)\}"', re.MULTILINE)
+# The Python leg is a belt command: its adoption file is a constant.
+SETUP = re.compile(r'^SETUP = "([^"]+)"$', re.MULTILINE)
 
 
 def body() -> str:
@@ -100,6 +102,9 @@ def guarded(text: str) -> str | None:
         guard reads, or None when the leg has no guard.
 
     """
+    setup = SETUP.search(text)
+    if setup is not None:
+        return setup.group(1)
     found = GUARD.search(text)
     if found is None:
         return None
@@ -115,7 +120,9 @@ def legs() -> dict[str, str]:
 
     """
     return {
-        language.leg: (BELT / language.leg).read_text(encoding="utf-8")
+        language.leg: (
+            (hermetic.PACKAGE if language.leg.endswith(".py") else BELT) / language.leg
+        ).read_text(encoding="utf-8")
         for language in testing_adoption.LANGUAGES
     }
 
@@ -168,7 +175,7 @@ class TestAdoption:
             f"{TASK}: ships Rust (Cargo.toml) but tracks no"
             f" .cargo/mutants.toml — {MUTATION}\n"
             f"{TASK}: ships Python (tools/x.py) but tracks no"
-            f" cosmic-ray.toml — {MUTATION}\n"
+            f" setup.cfg — {MUTATION}\n"
             f"{TASK}: ships Rust (Cargo.toml), Python (tools/x.py)"
             f" but tracks no {FLOOR} — {ADOPT}\n"
         ) == done.stderr
@@ -179,13 +186,13 @@ class TestAdoption:
         assert done.returncode == 0, done.stderr
         assert done.stdout == SKIPPED
 
-    def test_python_without_cosmic_ray_is_red(self) -> None:
-        """One non-test `.py` is shipped Python: red without `cosmic-ray.toml`."""
+    def test_python_without_a_mutmut_section_is_red(self) -> None:
+        """One non-test `.py` is shipped Python: red without `setup.cfg`."""
         done = lint(["tools/x.py", FLOOR])
         assert done.returncode == 1, done.stdout
         assert (
             f"{TASK}: ships Python (tools/x.py) but tracks no"
-            f" cosmic-ray.toml — {MUTATION}\n"
+            f" setup.cfg — {MUTATION}\n"
         ) == done.stderr
 
     def test_typescript_without_stryker_is_red(self) -> None:
@@ -221,7 +228,7 @@ class TestAdoption:
         (
             ("Rust", ["Cargo.toml", ".cargo/mutants.toml"]),
             ("Go", ["go.mod", ".gomuignore"]),
-            ("Python", ["tools/x.py", "cosmic-ray.toml"]),
+            ("Python", ["tools/x.py", "setup.cfg"]),
             ("TypeScript", ["src/a.ts", "stryker.config.json"]),
         ),
     )
@@ -270,12 +277,10 @@ class TestTableAgainstLegs:
     def test_a_leg_without_a_guard_is_red(self) -> None:
         """A leg that lost its guard reads as no file, not as agreement."""
         texts = legs()
-        text = texts["mutants-python.sh"]
+        text = texts["mutants-rust.sh"]
         unguarded = text.replace("org_tracked_has", "org_tracked")
         assert text != unguarded
-        texts["mutants-python.sh"] = unguarded
-        line = (
-            "Python: the table names cosmic-ray.toml, mutants-python.sh guards on None"
-        )
+        texts["mutants-rust.sh"] = unguarded
+        line = "Rust: the table names .cargo/mutants.toml, mutants-rust.sh guards on None"
         expected: list[str] = [line]
         assert expected == drift(texts)

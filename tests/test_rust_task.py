@@ -16,13 +16,15 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
-from unittest import mock
+from typing import TYPE_CHECKING
 
 import pytest
 
-from belt import rust_task
+from belt import gate_surface, pgrx_postgres, rust_task
 from tests import hermetic
-import contextlib
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 ALL: list[str] = ["--all-features"]
 PREPARED: list[str] = ["prepare 17"]
@@ -56,10 +58,6 @@ printf 'mise %s\n' "$*" >> "${PLANT_DIR}/log"
 echo '[installed]'
 exit "${PLANT_MISE_STATUS:-0}"
 """
-PYTHON_STUB = r"""#!/usr/bin/env bash
-printf '%s %s <%s>\n' "$(basename "$1")" "${*:2}" "$(cat)" >> "${PLANT_DIR}/log"
-exit "${PLANT_PYTHON_STATUS:-0}"
-"""
 LADDER = r"""
 org_clippy_ladder() { echo "-D warnings  -W x"; return "${PLANT_LADDER_STATUS:-0}"; }
 org_clippy_contradiction_count() {
@@ -77,23 +75,43 @@ printf 'cargo %s\n' "$*" >> "${PLANT_DIR}/log"
 echo '{"meta": 1}'
 exit "${PLANT_CARGO_STATUS:-0}"
 """
+
+
+def stand_in(command: str) -> Callable[[list[str]], int]:
+    """Stand in for a belt command `rust_task` calls in process.
+
+    It logs `belt <command> <argv> <stdin>` beside the planted stubs and
+    answers PLANT_PYTHON_STATUS.
+
+    Returns:
+        The command's `main`.
+
+    """
+
+    def main(argv: list[str]) -> int:
+        line = f"belt {command} {' '.join(argv)} <{sys.stdin.read().rstrip()}>\n"
+        with Path(os.environ["PLANT_DIR"], "log").open("a", encoding="utf-8") as log:
+            log.write(line)
+        return int(os.environ.get("PLANT_PYTHON_STATUS", "0"))
+
+    return main
+
+
 # Prints what a compile under at_major would see.
 SHOW = 'echo "major=${PLANT_MAJOR-unset} sdk=${PLANT_SDK-unset}"; exit "${1:-0}"'
 
 
-@pytest.mark.usefixtures("_stack", "_set_up_test_planted")
+@pytest.mark.usefixtures("_set_up_test_planted")
 class TestPlanted:
     """A planted belt, the stubs, and the row's environment."""
     
     @pytest.fixture
-    def _stack(self, request: pytest.FixtureRequest) -> None:
-        """Hold the row's cleanups, undone last first after it ends."""
-        self.stack = contextlib.ExitStack()
-        request.addfinalizer(self.stack.close)
-
-    @pytest.fixture
-    def _set_up_test_planted(self, tmp_path: Path) -> None:
+    def _set_up_test_planted(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Plant the belt, the stubs and the row's environment."""
+        monkeypatch.setattr(gate_surface, "main", stand_in("gate-surface"))
+        monkeypatch.setattr(pgrx_postgres, "main", stand_in("pgrx-postgres"))
         self.tmp = tmp_path
         self.belt = self.tmp / "belt"
         self.belt.mkdir()
@@ -103,7 +121,6 @@ class TestPlanted:
         bins.mkdir()
         stubs = {
             "mise": MISE_STUB,
-            "python": PYTHON_STUB,
             "rustup": RUSTUP_STUB,
             "cargo": CARGO_STUB,
         }
@@ -113,19 +130,17 @@ class TestPlanted:
             stub.chmod(0o755)
         (self.tmp / "log").touch()
         env = hermetic.env()
-        patched = mock.patch.dict(
-            os.environ,
+        hermetic.patch_env(
+            monkeypatch,
             env
             | {
                 "PATH": f"{bins}:{env['PATH']}",
                 "ORG_BELT_DIR": str(self.belt),
-                "ORG_PYTHON": str(bins / "python"),
                 "PLANT_DIR": str(self.tmp),
                 "PLANT_KEPT": "same",
             },
             clear=True,
         )
-        self.stack.enter_context(patched)
 
     def logged(self) -> list[str]:
         """Read the stubs' log, the belt masked.
@@ -141,22 +156,13 @@ class TestPlanted:
 class TestBasics(TestPlanted):
     """The belt, its Python, names, features, commands and components."""
 
-    def test_the_belt_is_org_belt_dir_else_this_modules_directory(self) -> None:
-        """ORG_BELT_DIR when set; this module's own directory unset or empty."""
+    def test_the_belt_is_org_belt_dir_else_the_trees_own(self) -> None:
+        """ORG_BELT_DIR when set; the package's tree's mise/ unset or empty."""
         assert self.belt == rust_task.belt()
         os.environ["ORG_BELT_DIR"] = ""
-        assert Path(rust_task.__file__).parent == rust_task.belt()
+        assert hermetic.MISE == rust_task.belt()
         del os.environ["ORG_BELT_DIR"]
-        assert Path(rust_task.__file__).parent == rust_task.belt()
-
-    def test_the_belts_python_is_org_python_else_this_interpreter(self) -> None:
-        """ORG_PYTHON when set; this interpreter when it is unset or empty."""
-        os.environ["ORG_PYTHON"] = "/belt/python"
-        assert rust_task.python() == "/belt/python"
-        os.environ["ORG_PYTHON"] = ""
-        assert sys.executable == rust_task.python()
-        del os.environ["ORG_PYTHON"]
-        assert sys.executable == rust_task.python()
+        assert hermetic.MISE == rust_task.belt()
 
     def test_a_specs_name_is_before_its_last_at(self) -> None:
         """`${spec%@*}`: the last `@` only, and a spec with none is whole."""
@@ -256,7 +262,7 @@ class TestBeltCalls(TestPlanted):
         assert want == self.logged()
 
     def test_the_surfaces_status_is_the_helpers_else_cargos(self) -> None:
-        """gate_surface.py's status first, as pipefail reads the pipe."""
+        """gate-surface's status first, as pipefail read the pipe."""
         cargo = str(self.tmp / "bin" / "cargo")
         rows = {("0", "5"): 5, ("3", "0"): 3, ("3", "5"): 5}
         for (meta, helper), want in rows.items():
@@ -296,7 +302,7 @@ class TestPgrx(TestPlanted):
         assert status == 1
 
     def test_registering_prepares_then_checks_every_majors_postgres(self) -> None:
-        """The prepare's exports, the listing on pgrx_postgres.py's stdin."""
+        """The prepare's exports, the listing on pgrx-postgres's stdin."""
         assert rust_task.register("16,17") == (0, {"PLANT_SDK": "sdk"})
         want = [
             "prepare 16,17",
@@ -312,7 +318,7 @@ class TestPgrx(TestPlanted):
         assert self.logged() == PREPARED
 
     def test_registrations_status_is_the_check_else_the_listing(self) -> None:
-        """pgrx_postgres.py's status first, as pipefail reads the pipe."""
+        """pgrx-postgres's status first, as pipefail read the pipe."""
         rows = {("0", "5"): 5, ("3", "0"): 3, ("3", "5"): 5}
         for (listing, check), want in rows.items():
             os.environ |= {

@@ -21,7 +21,6 @@ from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest import mock
 
 import pytest
 
@@ -283,8 +282,16 @@ class TestMain:
             assert publish_npm.main(argv) == 2
         assert out.getvalue() == "usage: belt publish-npm <name@version>\n"
 
-    def test_the_package_reaches_run_with_the_job_s_environment(self) -> None:
+    def test_the_package_reaches_run_with_the_job_s_environment(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """One argument: the job's own environment and directory."""
-        with mock.patch.object(publish_npm, "run", return_value=0) as run:
-            assert publish_npm.main([PACKAGE]) == 0
-        run.assert_called_once_with(PACKAGE, os.environ, Path.cwd())
+        asked: list[tuple[object, ...]] = []
+
+        def run(*args: object) -> int:
+            asked.append(args)
+            return 0
+
+        monkeypatch.setattr(publish_npm, "run", run)
+        assert publish_npm.main([PACKAGE]) == 0
+        assert asked == [(PACKAGE, os.environ, Path.cwd())]

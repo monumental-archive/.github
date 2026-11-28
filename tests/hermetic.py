@@ -86,8 +86,10 @@ answers for RUSTUP_TOOLCHAIN, `stable` when unset, as the rustup proxy
 selects, so a leg's per-command toolchain reaches it.
 """
 
+import ast
 import io
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -97,7 +99,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from belt import decoded
+from belt import decoded, launcher
 from belt.belt_scripts import script
 
 if TYPE_CHECKING:
@@ -112,6 +114,64 @@ CANON = Path(__file__).resolve().parent.parent
 MISE = CANON / "mise"
 RELEASE = CANON / "release"
 PACKAGE = CANON / "belt"
+
+# A belt command as a call site names it (#2177): the launcher's
+# directory, then the command, `"${ORG_PYTHON}" -I "${ORG_CANON_DIR}/belt"
+# subject-budget`. The directory may be spelled any way that ends `/belt`.
+LAUNCHED = re.compile(r'/belt"?\s+([a-z][a-z0-9]*(?:-[a-z0-9]+)*)\b')
+
+
+def launched(text: str) -> list[str]:
+    """Name every belt command a text runs through the launcher.
+
+    Returns:
+        The commands, in text order.
+
+    """
+    return [m.group(1) for m in LAUNCHED.finditer(text)]
+
+
+def command_module(command: str, package: Path = PACKAGE) -> Path | None:
+    """Find the module `belt <command>` runs, as the launcher searches.
+
+    Returns:
+        Its file under `package`, or None when no module answers.
+
+    """
+    stem = command.replace("-", "_")
+    for name in launcher.PACKAGES:
+        path = package.joinpath(*name.split(".")[1:], f"{stem}.py")
+        if path.is_file():
+            return path
+    return None
+
+
+def belt_modules(source: str, package: Path = PACKAGE) -> list[Path]:
+    """Name the belt modules a module's text imports, as files.
+
+    `from belt import x`, `from belt.release import y`, `from belt.x import
+    name` and `import belt.x` each name the module's file under `package`.
+
+    Returns:
+        The files, each once, in import order.
+
+    """
+    out: list[Path] = []
+    for node in ast.walk(ast.parse(source)):
+        dotted: list[str] = []
+        if isinstance(node, ast.Import):
+            dotted = [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            dotted = [f"{node.module}.{alias.name}" for alias in node.names]
+            dotted.append(node.module)
+        for name in dotted:
+            parts = name.split(".")
+            if parts[0] != "belt" or len(parts) == 1:
+                continue
+            path = package.joinpath(*parts[1:]).with_suffix(".py")
+            if path.is_file() and path not in out:
+                out.append(path)
+    return out
 
 # What every fixture inherits, by name, and why.
 INHERITED: dict[str, str] = {

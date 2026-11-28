@@ -3,11 +3,8 @@
 #1384 moved the step "Build the archive twice and prove determinism"
 out of build-source-archive.yml into the helper, refusals unchanged.
 
-WHAT RUNS. The helper's `main`, called in this process (#1698), with a
-stub `git` first on PATH. One row starts the helper as the job runs it
-instead, through a `.org-canon` link to this tree: the script contract
-(it starts, and exits with git's own status and message). The
-stub answers `archive` by copying the row's planted .tar.gz for each
+WHAT RUNS. The command's `main`, called in this process (#1698, #2177),
+with a stub `git` first on PATH. The stub answers `archive` by copying the row's planted .tar.gz for each
 call in turn (the first build, then the check build) to the `-o` path,
 and `ls-files` with the row's count of tracked paths. The archives are
 real gzip tarballs, so the helper counts real entries.
@@ -33,7 +30,9 @@ from tests import hermetic
 
 CANON = hermetic.CANON
 WORKFLOW = CANON / ".github" / "workflows" / "build-source-archive.yml"
-HELPER = ".org-canon/release/source_archive.py"
+# The job runs the command from its `.org-canon` link to this tree.
+STEP = '"${ORG_PYTHON}" -I .org-canon/belt source-archive'
+COMMAND = "source-archive"
 VERSION = "1.3.4"
 
 GIT_STUB = """#!/usr/bin/env bash
@@ -109,11 +108,8 @@ def run_helper(
     repo: str = "monumental-archive/edtf",
     *,
     fail: bool = False,
-    script: bool = False,
 ) -> Run:
-    """Run the helper with two planted builds and a tracked count.
-
-    In this process unless `script`, which starts it as the job does.
+    """Call the command with two planted builds and a tracked count.
 
     Returns:
         Its status, output, the git log and what dist/ holds.
@@ -140,22 +136,9 @@ def run_helper(
             STUB_TRACKED=str(tracked),
             STUB_FAIL="1" if fail else "",
         )
-        result: subprocess.CompletedProcess[str] | hermetic.Called
-        if script:
-            result = subprocess.run(
-                [HELPER],
-                env=env,
-                capture_output=True,
-                text=True,
-                check=False,
-                cwd=work,
-            )
-        else:
-
-            def call() -> int:
-                return source_archive.main([])
-
-            result = hermetic.call(call, env=env, cwd=work)
+        result = hermetic.call(
+            lambda: source_archive.main([]), env=env, cwd=work, command=COMMAND
+        )
         dist = work / "dist"
         return Run(
             result.returncode,
@@ -189,7 +172,7 @@ class TestBuildStepIsTheHelper:
             if s.get("name") == "Build the archive twice and prove determinism"
         ]
         # Under the belt's Python (#1543), on one line.
-        assert f'"${{ORG_PYTHON}}" {HELPER}' == step["run"]
+        assert step["run"] == STEP
         used: list[object] = [s.get("uses") for s in before]
         assert "$/.github/actions/canon" in used
 
@@ -265,10 +248,10 @@ class TestRefuses:
     def test_a_failing_git_fails_the_step_with_its_status(self) -> None:
         """A tag git cannot archive: git's status and message.
 
-        The script row: git's message is on the child's own stderr.
+        git's message is its own stderr, which the call reads.
         """
         data = tarball(1)
-        run = run_helper((data, data), tracked=1, fail=True, script=True)
+        run = run_helper((data, data), tracked=1, fail=True)
         assert run.returncode == 128
         assert run.stderr == "fatal: not a valid object\n"
         assert run.stdout == ""

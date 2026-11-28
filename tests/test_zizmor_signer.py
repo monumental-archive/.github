@@ -39,7 +39,6 @@ import sys
 import tempfile
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
-from unittest import mock
 
 import pytest
 
@@ -435,22 +434,29 @@ class TestRecords:
             "ORG_FINDINGS": str(self.file),
         }
 
-    def main(self, ran: signer.Ran) -> tuple[int, str, str, mock.MagicMock]:
+    def main(self, ran: signer.Ran) -> tuple[int, str, str, list[list[str]]]:
         """Run the CLI with zizmor answering `ran`.
 
         Returns:
-            The status, stdout, stderr, and the stand-in zizmor.
+            The status, stdout, stderr, and each argument list zizmor got.
 
         """
+        asked: list[list[str]] = []
+
+        def zizmor(argv: list[str]) -> signer.Ran:
+            asked.append(list(argv))
+            return ran
+
         out, err = io.StringIO(), io.StringIO()
         with (
-            mock.patch.object(signer, "run_zizmor", return_value=ran) as fake,
-            mock.patch.dict(os.environ, self.env),
+            pytest.MonkeyPatch.context() as patched,
             redirect_stdout(out),
             redirect_stderr(err),
         ):
+            patched.setattr(signer, "run_zizmor", zizmor)
+            hermetic.patch_env(patched, self.env)
             status = signer.main(["--signer-workflow", SIGNER_WORKFLOW, *ARGS])
-        return status, out.getvalue(), err.getvalue(), fake
+        return status, out.getvalue(), err.getvalue(), asked
 
     def records(self) -> list[object]:
         """Read every record appended.
@@ -473,9 +479,9 @@ class TestRecords:
         third = repointed(REAL[0], "actions/checkout@" + "d" * 40)
         both: list[dict[str, object]] = [*REAL, third]
         doc = json.dumps(both).encode()
-        status, out, err, fake = self.main(signer.Ran(11, doc, b" INFO zizmor\n"))
+        status, out, err, asked = self.main(signer.Ran(11, doc, b" INFO zizmor\n"))
         assert status == 11, err
-        fake.assert_called_once_with(ARGS)
+        assert asked == [list(ARGS)]
         path = ".github/workflows/continuous.yml"
         want: list[object] = [
             {
@@ -518,9 +524,9 @@ class TestRecords:
     def test_no_token_is_a_finding_before_zizmor_runs(self) -> None:
         """GH_TOKEN unset: the blindness finding, 1, zizmor never run."""
         self.env["GH_TOKEN"] = ""
-        status, _, _, fake = self.main(signer.Ran(0, b"[]", b""))
+        status, _, _, asked = self.main(signer.Ran(0, b"[]", b""))
         assert status == 1
-        fake.assert_not_called()
+        assert asked == []
         want: list[object] = [
             {
                 "v": 1,
@@ -619,18 +625,9 @@ class TestPinnedZizmor:
         (tmp / ".github" / "workflows").mkdir(parents=True)
         (tmp / ".github" / "workflows" / "a.yml").write_text(workflow, encoding="utf-8")
         file = tmp / "findings.jsonl"
-        done = subprocess.run(
-            [
-                sys.executable,
-                str(HERE / "zizmor_signer.py"),
-                "--signer-workflow",
-                SIGNER_WORKFLOW,
-                "--offline",
-                *ARGS,
-            ],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
+        argv = ["--signer-workflow", SIGNER_WORKFLOW, "--offline", *ARGS]
+        done = hermetic.call(
+            lambda: signer.main(argv),
             env=hermetic.env(
                 GH_TOKEN=STANDIN,
                 MISE_TASK_NAME=TASK,
@@ -638,7 +635,6 @@ class TestPinnedZizmor:
                 PYTHONUTF8="1",
             ),
             cwd=tmp,
-            check=False,
         )
         lines = file.read_text(encoding="utf-8").splitlines() if file.exists() else []
         got: list[object] = [decoded.load_json(line) for line in lines]
@@ -716,6 +712,8 @@ class TestTask:
         (root / ".github" / "workflows").mkdir(parents=True)
         (root / ".github" / "workflows" / "a.yml").write_text("on: push\n")
         (root / "security").mkdir()
+        # The task runs the command from the tree it names the canon.
+        (root / "belt").symlink_to(hermetic.PACKAGE)
         (root / "security" / "identity.toml").write_text(
             f'signer-workflow = "{SIGNER_WORKFLOW}"\n', encoding="utf-8"
         )

@@ -43,10 +43,14 @@ SUBPROCESS = frozenset(
 )
 
 # The calls that find a tool by its command name.
-LOOKUPS = frozenset({"shutil.which", "hermetic.tool", "hermetic.optional_tool"})
+LOOKUPS = frozenset({
+    "shutil.which",
+    "tests.hermetic.tool",
+    "tests.hermetic.optional_tool",
+})
 
-# The one way a helper names a script it runs (mise/belt_scripts.py).
-LOCATOR = "belt_scripts.script"
+# The one way a helper names a script it runs (belt/belt_scripts.py).
+LOCATOR = "belt.belt_scripts.script"
 
 # Its arguments: the directory, then the script's file name.
 LOCATOR_ARGS = 2

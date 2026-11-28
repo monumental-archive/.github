@@ -26,8 +26,9 @@ opened), from the names the belt already keys on:
   siblings), `*.test.*` or `*.spec.*`.
 
 Each row of `LANGUAGES` names the mutation leg whose guard it mirrors,
-and mise/test_testing_adoption.py reads that guard out of the leg, so the
-rule and the leg cannot name different files.
+and tests/test_testing_adoption.py reads that guard out of the leg (the
+Python leg's `SETUP`), so the rule and the leg cannot name different
+files.
 
 Usage: `org_tracked | belt testing-adoption`, from the repository's root.
 Exits 0 when every shipped language is adopted (or none is shipped),

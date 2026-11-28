@@ -21,8 +21,8 @@ its run measured. The suite says it is measured by running its test
 command through the belt's `measured`. The rows run the belt's real
 `ci` and `coverage:*` tasks under a real mise in a planted python
 repository whose suite runs from a `depends` with a `PYTHONPATH` of its
-own and starts a bare `python3` child: one suite run, the task's path
-kept, the child measured, the figures printed; the same tree with no
+own, on two xdist workers: one suite run, the task's path kept, both
+workers measured, the figures printed; the same tree with no
 floor measures nothing; coverage:check alone runs `test` once; a suite
 not run through `measured` is red by the floor's own record (#1666);
 and `measured` reaches a file task.
@@ -334,15 +334,46 @@ LEG_LINE = re.compile(r"^leg ([a-z]+)$", re.MULTILINE)
 
 
 def leg_files() -> list[str]:
-    """Name the delivered legs, mise/mutants-<language>.sh.
+    """Name the delivered legs: mise/mutants-<language>.sh, belt mutants-<language>.
 
     Returns:
         The languages, sorted.
 
     """
-    return sorted(
-        path.stem.removeprefix("mutants-") for path in BELT.glob("mutants-*.sh")
-    )
+    # A shell leg may keep its own helper in the package (mutants_go.py
+    # beside mutants-go.sh); a language with no shell leg is a command.
+    shell = {path.stem.removeprefix("mutants-") for path in BELT.glob("mutants-*.sh")}
+    package = {
+        path.stem.removeprefix("mutants_")
+        for path in hermetic.PACKAGE.glob("mutants_*.py")
+    }
+    return sorted(shell | package)
+
+
+# A command leg's stand-in: says it ran, red when the row plants one.
+STUB_COMMAND_LEG = """\
+import os
+
+
+def main(argv: list[str]) -> int:
+    print("ran {lang}")
+    return 1 if os.environ.get("PLANT_RED") else 0
+"""
+
+
+def leg_stub(lang: str) -> tuple[str, str]:
+    """Plant one leg that only says it ran, where the belt keeps it.
+
+    Returns:
+        The stub's path in the planted belt and its text.
+
+    """
+    if (BELT / f"mutants-{lang}.sh").exists():
+        return (
+            f"mutants-{lang}.sh",
+            f'echo "ran {lang}"\n[[ -z ${{PLANT_RED:-}} ]]\n',
+        )
+    return f"belt/mutants_{lang}.py", STUB_COMMAND_LEG.replace("{lang}", lang)
 
 
 class TestMutants:
@@ -383,7 +414,7 @@ class TestMutants:
         assert f'mutation-totals.sh "${{SUMMARIES}}" {lang}\n' in own
 
     def test_every_leg_is_one_line_of_the_task(self) -> None:
-        """Each mise/mutants-<language>.sh is exactly one `leg` line.
+        """Each delivered leg is exactly one `leg` line.
 
         A leg file nobody runs cannot exist, nor a line naming a missing leg.
         """
@@ -407,10 +438,7 @@ class TestSelection:
         tmp = tmp_path
         self.belt = hermetic.belt(
             tmp / "belt",
-            stubs={
-                f"mutants-{lang}.sh": f'echo "ran {lang}"\n[[ -z ${{PLANT_RED:-}} ]]\n'
-                for lang in leg_files()
-            },
+            stubs=dict(leg_stub(lang) for lang in leg_files()),
         )
 
     def run_task(self, **env: str) -> subprocess.CompletedProcess[str]:
@@ -459,51 +487,33 @@ class TestSelection:
         want: list[str] = [
             (
                 "audit:mutants: MUTANTS_LEG='cobol' names no leg"
-                " (mise/mutants-<language>.sh)"
+                " (mise/mutants-<language>.sh or belt mutants-<language>)"
             ),
         ]
         assert done.stderr.splitlines() == want
 
 
-# The planted repository's code: `half` takes one branch in the unittest
-# process and the other in a bare `python3` child, which alone calls
-# `child_only`, so 100% of statements and branches means the child was
-# measured. The child imports `pkg` through the task's own
+# The planted repository's code and suite: each test takes one branch of
+# `half`, and the suite runs on two xdist workers, so 100% of statements
+# and branches means both workers were measured (the rc file's `patch =
+# subprocess`, #2177). The suite imports `pkg` through the task's own
 # PYTHONPATH=src, so it runs at all only where that entry was kept.
 LIB = """\
 def half(x):
     if x > 0:
         return x / 2
     return 0
-
-
-def child_only():
-    return "child"
-"""
-HELPER = """\
-import sys
-
-from pkg.lib import child_only, half
-
-print(half(int(sys.argv[1])), child_only())
 """
 SUITE = """\
-import subprocess
-import unittest
-
 from pkg.lib import half
 
 
-class Lib(unittest.TestCase):
-    def test_in_process(self):
-        self.assertEqual(2, half(4))
+def test_positive():
+    assert half(4) == 2
 
-    def test_bare_child(self):
-        out = subprocess.run(
-            ["python3", "src/pkg/helper.py", "-1"],
-            capture_output=True, text=True, check=True,
-        )
-        self.assertEqual("0 child\\n", out.stdout)
+
+def test_negative():
+    assert half(-1) == 0
 """
 # A floor the derived-state law accepts, recording the python legs.
 FLOOR = (
@@ -511,7 +521,7 @@ FLOOR = (
     "# python measured: 52.0\npython 50.0\n"
     "# python-branches measured: 52.0\npython-branches 50.0\n"
 )
-SUITE_COMMAND = "python3 -m unittest discover -s tests -t ."
+SUITE_COMMAND = "pytest -q -p no:cacheprovider -n 2 tests"
 
 
 def plant(base: Path, name: str, *, floor: bool = True, measured: bool = True) -> Path:
@@ -533,7 +543,6 @@ def plant(base: Path, name: str, *, floor: bool = True, measured: bool = True) -
     (tree / "tests").mkdir()
     (tree / "src" / "pkg" / "__init__.py").write_text("", encoding="utf-8")
     (tree / "src" / "pkg" / "lib.py").write_text(LIB, encoding="utf-8")
-    (tree / "src" / "pkg" / "helper.py").write_text(HELPER, encoding="utf-8")
     (tree / "tests" / "__init__.py").write_text("", encoding="utf-8")
     (tree / "tests" / "test_lib.py").write_text(SUITE, encoding="utf-8")
     command = (
@@ -610,8 +619,8 @@ class TestOneRun:
         "coverage:check: python-branches leg holds its floor 50.0 (100.0%)",
     )
 
-    def test_ci_runs_the_suite_once_and_measures_the_bare_child(self) -> None:
-        """One run: the depend's own path kept, the child measured, the figures."""
+    def test_ci_runs_the_suite_once_and_measures_every_worker(self) -> None:
+        """One run: the depend's own path kept, both workers measured, the figures."""
         with tempfile.TemporaryDirectory() as tmp:
             tree = plant(Path(tmp), "py")
             done = self.run_mise(tree, "ci")
@@ -670,12 +679,13 @@ class TestOneRun:
             tasks_dir.mkdir()
             probe = tasks_dir / "probe"
             probe.write_text(
-                '#!/bin/sh\nexec "$ORG_BELT_DIR/measured" sh -c'
-                ' \'printf "%s\\n" "$COVERAGE_PROCESS_START"\'\n',
+                '#!/bin/sh\nPYTHONPATH=src "$ORG_BELT_DIR/measured" python3 -m pytest -q'
+                ' -p no:cacheprovider tests && ls "$ORG_COVERAGE_RUN"\n',
                 encoding="utf-8",
             )
             probe.chmod(0o755)
             done = self.run_mise(tree, "probe")
             out = done.stdout + done.stderr
             assert done.returncode == 0, out
-            assert re.search(r"/org-coverage-[0-9]+/coverage\.rc\n", done.stdout)
+            assert "2 passed" in done.stdout, out
+            assert "coverage.rc\n" in done.stdout, out

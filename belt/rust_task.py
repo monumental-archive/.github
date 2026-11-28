@@ -61,12 +61,12 @@ def belt() -> Path:
     """Name the belt the task runs from.
 
     ORG_BELT_DIR, which the belt's [env] sets for every task and the
-    bodies read; an imported module's own path is the belt's real
-    directory, never a planted one.
+    bodies read; the package's own tree is the belt's real directory,
+    never a planted one.
 
     Returns:
-        The belt directory; this module's own where ORG_BELT_DIR is
-        unset or empty.
+        The belt directory; the package's tree's `mise/` where
+        ORG_BELT_DIR is unset or empty.
 
     """
     return Path(os.environ.get("ORG_BELT_DIR") or MISE)

@@ -49,7 +49,6 @@ import sys
 import tempfile
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
-from unittest import mock
 
 import pytest
 
@@ -285,27 +284,20 @@ def git(root: Path, *args: str) -> None:
     )
 
 
-@pytest.mark.usefixtures("_stack", "_set_up_test_in_repo")
+@pytest.mark.usefixtures("_set_up_test_in_repo")
 class TestInRepo:
     """A fresh git repository as the working directory for each row."""
     
     @pytest.fixture
-    def _stack(self, request: pytest.FixtureRequest) -> None:
-        """Hold the row's cleanups, undone last first after it ends."""
-        self.stack = contextlib.ExitStack()
-        request.addfinalizer(self.stack.close)
-
-    @pytest.fixture
     def _set_up_test_in_repo(
-        self, tmp_path: Path, request: pytest.FixtureRequest
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Make the repository and the extension directory, and enter it."""
         self.root = tmp_path
         git(self.root, "init", "-q")
         (self.root / "crates" / "ext").mkdir(parents=True)
-        self.stack.enter_context(mock.patch.dict(os.environ, scrubbed(), clear=True))
-        request.addfinalizer(functools.partial(os.chdir, Path.cwd()))
-        os.chdir(self.root)
+        hermetic.patch_env(monkeypatch, scrubbed(), clear=True)
+        monkeypatch.chdir(self.root)
 
     def track(self, text: str) -> None:
         """Commit-stage a snapshot with the given content."""
