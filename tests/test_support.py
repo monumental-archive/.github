@@ -12,7 +12,6 @@ tracks instead of calling support.tracked (#1618).
 import ast
 import os
 import subprocess
-import sys
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
@@ -20,7 +19,7 @@ from unittest import mock
 
 import pytest
 
-from belt import call_names, typed_std
+from belt import call_names
 from tests import support
 
 if TYPE_CHECKING:
@@ -684,15 +683,19 @@ EXCEPTED = frozenset({"tests/support.py", "tests/test_support.py"})
 class TestEnv:
     """What support.env lets through."""
 
-    def test_planted_variables_do_not_reach_a_fixture(self) -> None:
+    def test_planted_variables_do_not_reach_a_fixture(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """The job's inputs and git's own variables stay with the suite."""
-        with pytest.MonkeyPatch.context() as patched:
-            support.patch_env(patched, PLANTED)
-            env = support.env("/fixture-home")
+        for name, value in PLANTED.items():
+            monkeypatch.setenv(name, value)
+        env = support.env("/fixture-home")
         reached = sorted(set(PLANTED) & set(env))
         assert reached == NOTHING
 
-    def test_only_the_allow_list_is_inherited(self) -> None:
+    def test_only_the_allow_list_is_inherited(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Every inherited name is INHERITED's, or one the helper sets."""
         set_here = {
             "HOME",
@@ -703,36 +706,40 @@ class TestEnv:
             "GIT_COMMITTER_NAME",
             "GIT_COMMITTER_EMAIL",
         }
-        with pytest.MonkeyPatch.context() as patched:
-            support.patch_env(patched, PLANTED)
-            env = support.env()
+        for name, value in PLANTED.items():
+            monkeypatch.setenv(name, value)
+        env = support.env()
         extra = set(env) - set(support.INHERITED) - set_here
         assert extra == NO_NAMES
 
-    def test_a_rows_override_reaches_the_fixture(self) -> None:
+    def test_a_rows_override_reaches_the_fixture(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """A row states its own input, and that wins over the suite's."""
-        with pytest.MonkeyPatch.context() as patched:
-            support.patch_env(patched, PLANTED)
-            env = support.env("/fixture-home", VERSION="2.0.0")
+        for name, value in PLANTED.items():
+            monkeypatch.setenv(name, value)
+        env = support.env("/fixture-home", VERSION="2.0.0")
         assert env["VERSION"] == "2.0.0"
 
-    def test_home_is_the_fixtures_or_the_suites(self) -> None:
+    def test_home_is_the_fixtures_or_the_suites(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """A given home wins; without one the suite's HOME is kept."""
-        suite: dict[str, str] = {"HOME": "/suite-home"}
-        with pytest.MonkeyPatch.context() as patched:
-            support.patch_env(patched, suite)
-            assert support.env("/fixture-home")["HOME"] == "/fixture-home"
-            assert support.env()["HOME"] == "/suite-home"
+        monkeypatch.setenv("HOME", "/suite-home")
+        assert support.env("/fixture-home")["HOME"] == "/fixture-home"
+        assert support.env()["HOME"] == "/suite-home"
 
-    def test_each_tool_adds_exactly_its_names(self) -> None:
+    def test_each_tool_adds_exactly_its_names(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """A tool extension adds its variables and nothing else."""
         every = {n for names in support.TOOLS.values() for n in names}
         planted = dict.fromkeys(every | set(support.INHERITED), "x")
-        with pytest.MonkeyPatch.context() as patched:
-            support.patch_env(patched, planted)
-            base = set(support.env())
-            for tool, names in support.TOOLS.items():
-                assert set(names) - base == set(support.env(tools=(tool,))) - base
+        for name, value in planted.items():
+            monkeypatch.setenv(name, value)
+        base = set(support.env())
+        for tool, names in support.TOOLS.items():
+            assert set(names) - base == set(support.env(tools=(tool,))) - base
 
     def test_an_unknown_tool_is_refused(self) -> None:
         """A tool nobody measured has no extension to borrow."""
@@ -1324,58 +1331,3 @@ class TestTheLaw:
         }
         for name, source in allowed.items():
             assert list[int]() == plain_listings(source)
-
-
-def _echo_main(argv: list[str]) -> int:
-    """Stand for a helper's main: read every input a child would have.
-
-    Returns:
-        The status the row asks for, as argv's first word.
-
-    Raises:
-        SystemExit: when the row asks the stand-in to exit.
-
-    """
-    given = typed_std.stdin_text()
-    print(f"cwd={Path.cwd().name} env={os.environ.get('PLANTED')} in={given}")
-    print("to stderr", file=sys.stderr)
-    if argv[:1] == ["exit"]:
-        raise SystemExit(int(argv[1]))
-    if argv[:1] == ["refuse"]:
-        sys.exit("refused by name")
-    return int(argv[0])
-
-
-class TestCallMain:
-    """`call_main` hands a helper what a child had, then restores it."""
-
-    def test_inputs_reach_the_call_and_are_restored(self) -> None:
-        """Environment, working directory and stdin, each put back."""
-        with tempfile.TemporaryDirectory() as tmp:
-            where = Path(tmp) / "tree"
-            where.mkdir()
-            before = (dict(os.environ), Path.cwd(), sys.stdin)
-            done = support.call(
-                lambda: _echo_main(["3"]),
-                env={"PLANTED": "yes"},
-                cwd=where,
-                stdin="data",
-            )
-            after = (dict(os.environ), Path.cwd(), sys.stdin)
-        assert support.Called(3, "cwd=tree env=yes in=data\n", "to stderr\n") == done
-        assert before == after
-
-    def test_a_system_exit_is_the_status(self) -> None:
-        """An exit code, or a message, as a child's would be."""
-        assert support.call(lambda: _echo_main(["exit", "4"])).returncode == 4
-        refused = support.call(lambda: _echo_main(["refuse"]))
-        assert refused.returncode == 1
-        assert refused.stderr.endswith("refused by name\n"), refused.stderr
-
-    def test_no_env_leaves_the_environment_as_it_is(self) -> None:
-        """Without `env`, the call sees this process's own variables."""
-        kept: dict[str, str] = {"PLANTED": "kept"}
-        with pytest.MonkeyPatch.context() as patched:
-            support.patch_env(patched, kept)
-            done = support.call(lambda: _echo_main(["0"]))
-        assert "env=kept" in done.stdout

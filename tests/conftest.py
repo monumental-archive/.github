@@ -20,9 +20,6 @@ And these are asked for by name:
 
 - `env`: `support.env`, the one environment a process a test starts
   is given, for the processes that remain (git, stele, a shell body);
-- `call_main`: a belt command's `main` called in this process, its
-  environment, directory and standard input the row's for the call,
-  both streams read, a `SystemExit` its status;
 - `as_task`: the task a helper runs under, named for the finding
   writer, with nothing recorded.
 """
@@ -38,8 +35,6 @@ from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-
-    from tests.support import Called
 
 # The fixture tests run pytest on planted trees (tests/test_conftest.py,
 # tests/test_pytest_config.py).
@@ -105,22 +100,6 @@ def env() -> Callable[..., dict[str, str]]:
 
     """
     return support.env
-
-
-@pytest.fixture
-def call_main() -> Callable[..., Called]:
-    """Call a command's `main` in this process, as a script row ran it.
-
-    `support.call`: `run` makes the call, written out in the test
-    (`lambda: helper.main([...])`); `env`, `cwd`, `stdin` and `command`
-    are the child's it stands for, each restored afterwards; a
-    `SystemExit` (argparse's usage error) is the status.
-
-    Returns:
-        The caller.
-
-    """
-    return support.call
 
 
 @pytest.fixture

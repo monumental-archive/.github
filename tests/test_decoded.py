@@ -210,11 +210,16 @@ class TestLoadJson:
         decoded.within_depth(counted())
         assert len(text) == len(visits)
 
-    def test_a_stack_too_small_for_the_bound_is_refused(self) -> None:
+    def test_a_stack_too_small_for_the_bound_is_refused(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """The backstop: RecursionError under the bound is still a refusal."""
-        with pytest.MonkeyPatch.context() as patched:
-            patched.setattr("json.loads", support.raising(RecursionError))
-            assert self.refused("[]") == "nested too deep to decode"
+
+        def too_deep(*_args: object, **_kwargs: object) -> object:
+            raise RecursionError
+
+        monkeypatch.setattr("json.loads", too_deep)
+        assert self.refused("[]") == "nested too deep to decode"
 
     def test_bytes_that_are_not_utf8_are_refused(self) -> None:
         """Only UTF-8; json's own UTF-16 and UTF-32 detection is not used."""
