@@ -54,14 +54,14 @@ class Once:
         self.marker = self.tmp / "rust"
         monkeypatch.setenv("LOG", str(self.log))
 
-    def call(self, line: str) -> int:
-        """Run the helper on a shell line to the end, its marker the row's.
+    def argv(self, line: str) -> list[str]:
+        """Spell the helper's argv for a shell line, its marker the row's.
 
         Returns:
-            Its exit status.
+            The argv.
 
         """
-        return once.main([str(self.marker), "--", SH, "-c", line])
+        return [str(self.marker), "--", SH, "-c", line]
 
     def ran(self) -> list[str]:
         """Read the row's log.
@@ -83,23 +83,23 @@ def test_the_first_call_runs_the_command_and_writes_the_marker(
     once_state: Once,
 ) -> None:
     """No marker: the command runs, then the marker is made."""
-    assert once_state.call('echo ran >> "${LOG}"') == 0
+    assert once.main(once_state.argv('echo ran >> "${LOG}"')) == 0
     assert lines("ran") == once_state.ran()
     assert once_state.marker.is_dir()
 
 
 def test_a_second_call_skips_the_command(once_state: Once) -> None:
     """The marker present: 0 at once, the command not run."""
-    assert once_state.call('echo ran >> "${LOG}"') == 0
-    assert once_state.call('echo again >> "${LOG}"') == 0
+    assert once.main(once_state.argv('echo ran >> "${LOG}"')) == 0
+    assert once.main(once_state.argv('echo again >> "${LOG}"')) == 0
     assert lines("ran") == once_state.ran()
 
 
 def test_a_failure_is_the_status_and_the_next_call_runs_again(once_state: Once) -> None:
     """Exit 3: the helper's status is 3, no marker, and the next call runs."""
-    assert once_state.call('echo failed >> "${LOG}"; exit 3') == 3
+    assert once.main(once_state.argv('echo failed >> "${LOG}"; exit 3')) == 3
     assert not once_state.marker.exists()
-    assert once_state.call('echo ran >> "${LOG}"') == 0
+    assert once.main(once_state.argv('echo ran >> "${LOG}"')) == 0
     assert lines("failed", "ran") == once_state.ran()
     assert once_state.marker.is_dir()
 
@@ -108,7 +108,8 @@ def test_two_concurrent_callers_run_it_once(once_state: Once) -> None:
     """Side by side: one runs it, the other waits for it and skips."""
     line = 'echo start >> "${LOG}"; sleep 1; echo end >> "${LOG}"'
     with ThreadPoolExecutor(max_workers=2) as pool:
-        statuses = list(pool.map(once_state.call, [line, line]))
+        argv = once_state.argv(line)
+        statuses = list(pool.map(once.main, [argv, argv]))
     assert statuses == [0, 0]
     assert lines("start", "end") == once_state.ran()
 

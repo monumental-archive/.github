@@ -137,14 +137,14 @@ def test_the_command_line() -> None:
 
 SUITE = {f"test_{name}.py": "def test_it():\n    pass\n" for name in "abcde"}
 PYTEST = support.tool("pytest")
+# The suite's pytest run, as the task hands it to the shard runner.
+PYTEST_SHARE = ["--", PYTEST, "-q", "-p", "no:cacheprovider", "suite"]
 
 
 class Guarded:
     """A pytest run takes a share, run for real at 1/2 and 2/2."""
 
-    def __init__(
-        self, tmp_path: Path, capfd: pytest.CaptureFixture[str], *, env: support.Env
-    ) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Plant five test files and a reports directory."""
         self.make_env = env
         self.root = Path(str(tmp_path))
@@ -152,35 +152,24 @@ class Guarded:
         for name, body in SUITE.items():
             (self.root / "suite" / name).write_text(body, encoding="utf-8")
         self.reports = self.root / "reports"
-        self.capfd = capfd
 
-    def shard_run(self, spec: str) -> subprocess.CompletedProcess[str]:
-        """Hand the suite's pytest run one shard, then run that share.
+    def enter(self, monkeypatch: pytest.MonkeyPatch, spec: str) -> None:
+        """Hand the suite's pytest run the shard `spec`, in the planted tree."""
+        for name, value in {
+            "ORG_SHARD": spec,
+            "ORG_SHARD_TASK": "test:py",
+            "ORG_SHARD_REPORTS": str(self.reports),
+        }.items():
+            monkeypatch.setenv(name, value)
+        monkeypatch.chdir(self.root)
+
+    def share(self, out: str) -> subprocess.CompletedProcess[str]:
+        """Run the share the runner named, as the task's shell does.
 
         Returns:
-            The share's run; for a share that could not be named, the
-            runner's status and what it wrote.
+            The share's run.
 
         """
-        with pytest.MonkeyPatch.context() as patched:
-            for name, value in {
-                "ORG_SHARD": spec,
-                "ORG_SHARD_TASK": "test:py",
-                "ORG_SHARD_REPORTS": str(self.reports),
-            }.items():
-                patched.setenv(name, value)
-            patched.chdir(self.root)
-            status = shard_runner.main([
-                "--",
-                PYTEST,
-                "-q",
-                "-p",
-                "no:cacheprovider",
-                "suite",
-            ])
-        out, err = self.capfd.readouterr()
-        if status != 0:
-            return subprocess.CompletedProcess([], status, out, err)
         return subprocess.run(
             [word for word in out.split("\0") if word],
             cwd=self.root,
@@ -192,14 +181,14 @@ class Guarded:
 
 
 @fixture
-def guarded(
-    tmp_path: Path, capfd: pytest.CaptureFixture[str], env: support.Env
-) -> Guarded:
+def guarded(tmp_path: Path, env: support.Env) -> Guarded:
     """Give each row its own Guarded."""
-    return Guarded(tmp_path, capfd, env=env)
+    return Guarded(tmp_path, env=env)
 
 
-def test_two_shards_run_the_whole_suite_once(guarded: Guarded) -> None:
+def test_two_shards_run_the_whole_suite_once(
+    guarded: Guarded, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """1/2 and 2/2 between them run every file, none twice.
 
     The run's own `-q` makes pytest's listing `-qq`, a count per
@@ -207,7 +196,11 @@ def test_two_shards_run_the_whole_suite_once(guarded: Guarded) -> None:
     and ran `true`.
     """
     for spec in ("1/2", "2/2"):
-        done = guarded.shard_run(spec)
+        guarded.enter(monkeypatch, spec)
+        status = shard_runner.main(PYTEST_SHARE)
+        out, err = capfd.readouterr()
+        assert status == 0, err
+        done = guarded.share(out)
         assert done.returncode == 0, done.stderr
     reports = shard.load(guarded.reports)
     assert len(reports) == 2
@@ -222,19 +215,28 @@ def test_two_shards_run_the_whole_suite_once(guarded: Guarded) -> None:
     assert none == shard.union(reports, {"test:py": 2})
 
 
-def test_one_shard_alone_is_red(guarded: Guarded) -> None:
+def test_one_shard_alone_is_red(
+    guarded: Guarded, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """Only 1/2 ran: the union names shard 2 and every file it held."""
-    assert guarded.shard_run("1/2").returncode == 0
+    guarded.enter(monkeypatch, "1/2")
+    status = shard_runner.main(PYTEST_SHARE)
+    out, err = capfd.readouterr()
+    assert status == 0, err
+    assert guarded.share(out).returncode == 0
     got = shard.union(shard.load(guarded.reports), {"test:py": 2})
     assert len(got) == 2, got
     assert "shard(s) 2 of 2 reported nothing" in got[0]
     assert "ran on no shard: " in got[1]
 
 
-def test_a_malformed_shard_is_refused(guarded: Guarded) -> None:
+def test_a_malformed_shard_is_refused(
+    guarded: Guarded, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """ORG_SHARD=0/2: exit 1, the value named, nothing run."""
+    guarded.enter(monkeypatch, "0/2")
     with pytest.raises(SystemExit) as ended:
-        guarded.shard_run("0/2")
-    _out, err = guarded.capfd.readouterr()
+        shard_runner.main(PYTEST_SHARE)
+    err = capfd.readouterr().err
     assert ended.value.code == 1
     assert "ORG_SHARD='0/2' is not a shard (k/n, 1 <= k <= n)" in err
