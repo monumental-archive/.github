@@ -26,6 +26,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -33,6 +34,9 @@ from belt import decoded
 from belt import deny_advisories as da
 from belt.typed_pytest import fixture
 from tests import support
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 BELT = support.MISE
 BASH = support.tool("bash")
@@ -61,71 +65,77 @@ def refused(*advisories: str) -> str:
     )
 
 
-def lint(
-    text: str | None, *, capfd: pytest.CaptureFixture[str], env: support.Env
-) -> tuple[int, str, str]:
-    """Run the helper over a deny.toml holding `text`.
+@fixture
+def deny(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, env: support.Env
+) -> Callable[[str | None], None]:
+    """Write a row's deny.toml and step into its tree, as lint:deny runs.
 
     Returns:
-        The status and both streams.
+        A function that writes `text` (None writes an empty file).
 
     """
-    with tempfile.TemporaryDirectory() as tmp:
-        path = Path(tmp) / "deny.toml"
-        path.write_text(text or "", encoding="utf-8")
+
+    def write(text: str | None) -> None:
+        (tmp_path / "deny.toml").write_text(text or "", encoding="utf-8")
         environ = env(MISE_TASK_NAME="lint:deny", ORG_FINDINGS="")
-        with pytest.MonkeyPatch.context() as patched:
-            for name, value in environ.items():
-                patched.setenv(name, value)
-            patched.chdir(tmp)
-            status = da.main(["deny.toml"])
-        out, err = capfd.readouterr()
-        return status, out, err
+        for name, value in environ.items():
+            monkeypatch.setenv(name, value)
+        monkeypatch.chdir(tmp_path)
+
+    return write
 
 
 # An advisory ignore is red by name; a crate ignore and none are green.
 def assert_red(
-    text: str, *advisories: str, capfd: pytest.CaptureFixture[str], env: support.Env
+    text: str,
+    *advisories: str,
+    capfd: pytest.CaptureFixture[str],
+    deny: Callable[[str | None], None],
 ) -> None:
     """Assert exit 1 with exactly the message naming `advisories`."""
-    status, out, err = lint(text, capfd=capfd, env=env)
+    deny(text)
+    status = da.main(["deny.toml"])
+    out, err = capfd.readouterr()
     assert status == 1, out + err
     assert err == refused(*advisories)
     assert out == ""
 
 
 def assert_green(
-    text: str, *, capfd: pytest.CaptureFixture[str], env: support.Env
+    text: str, *, capfd: pytest.CaptureFixture[str], deny: Callable[[str | None], None]
 ) -> None:
     """Assert exit 0 with nothing said."""
-    status, out, err = lint(text, capfd=capfd, env=env)
+    deny(text)
+    status = da.main(["deny.toml"])
+    out, err = capfd.readouterr()
     assert status == 0, err
     assert (out, err) == ("", "")
 
 
 def test_a_bare_id_is_red_by_name(
-    capfd: pytest.CaptureFixture[str], env: support.Env
+    capfd: pytest.CaptureFixture[str], deny: Callable[[str | None], None]
 ) -> None:
     """`ignore = ["RUSTSEC-…"]`, edtf's and release-lab's shape."""
     assert_red(
-        f'[advisories]\nignore = ["{ADVISORY}"]\n', ADVISORY, capfd=capfd, env=env
+        f'[advisories]\nignore = ["{ADVISORY}"]\n', ADVISORY, capfd=capfd, deny=deny
     )
 
 
 def test_a_table_with_an_id_is_red(
-    capfd: pytest.CaptureFixture[str], env: support.Env
+    capfd: pytest.CaptureFixture[str], deny: Callable[[str | None], None]
 ) -> None:
     """The scaffold's old commented shape, written out."""
     assert_red(
         f'[advisories]\nignore = [{{ id = "{ADVISORY}", reason = "x" }}]\n',
         ADVISORY,
         capfd=capfd,
-        env=env,
+        deny=deny,
     )
 
 
 def test_every_advisory_is_named(
-    capfd: pytest.CaptureFixture[str], env: support.Env
+    capfd: pytest.CaptureFixture[str], deny: Callable[[str | None], None]
 ) -> None:
     """Two entries, both named, in the file's order; a crate between."""
     assert_red(
@@ -137,51 +147,53 @@ def test_every_advisory_is_named(
         "RUSTSEC-2026-0543",
         "RUSTSEC-2026-0542",
         capfd=capfd,
-        env=env,
+        deny=deny,
     )
 
 
 def test_a_crate_entry_is_green(
-    capfd: pytest.CaptureFixture[str], env: support.Env
+    capfd: pytest.CaptureFixture[str], deny: Callable[[str | None], None]
 ) -> None:
     """A yanked version names no advisory, so no decision could stand for it."""
     assert_green(
         '[advisories]\nignore = [{ crate = "a@1.0.0", reason = "x" }]\n',
         capfd=capfd,
-        env=env,
+        deny=deny,
     )
 
 
 def test_an_empty_array_is_green(
-    capfd: pytest.CaptureFixture[str], env: support.Env
+    capfd: pytest.CaptureFixture[str], deny: Callable[[str | None], None]
 ) -> None:
     """`ignore = []` keeps nothing."""
-    assert_green("[advisories]\nignore = []\n", capfd=capfd, env=env)
+    assert_green("[advisories]\nignore = []\n", capfd=capfd, deny=deny)
 
 
 def test_no_advisories_table_is_green(
-    capfd: pytest.CaptureFixture[str], env: support.Env
+    capfd: pytest.CaptureFixture[str], deny: Callable[[str | None], None]
 ) -> None:
     """A deny.toml with no `[advisories]` keeps nothing."""
-    assert_green('[bans]\nwildcards = "deny"\n', capfd=capfd, env=env)
+    assert_green('[bans]\nwildcards = "deny"\n', capfd=capfd, deny=deny)
 
 
 def test_the_scaffold_is_green(
-    capfd: pytest.CaptureFixture[str], env: support.Env
+    capfd: pytest.CaptureFixture[str], deny: Callable[[str | None], None]
 ) -> None:
     """The stub every repository copies passes the rule it is held to."""
     assert_green(
         (BELT.parent / "scaffold" / "deny.toml").read_text(encoding="utf-8"),
         capfd=capfd,
-        env=env,
+        deny=deny,
     )
 
 
 def test_an_ignore_that_is_not_an_array_is_refused_by_name(
-    capfd: pytest.CaptureFixture[str], env: support.Env
+    capfd: pytest.CaptureFixture[str], deny: Callable[[str | None], None]
 ) -> None:
     """A shape cargo-deny would refuse is never read as no ignore."""
-    status, _out, err = lint('[advisories]\nignore = "x"\n', capfd=capfd, env=env)
+    deny('[advisories]\nignore = "x"\n')
+    status = da.main(["deny.toml"])
+    err = capfd.readouterr().err
     assert status == 1
     assert "advisories.ignore" in err
 
