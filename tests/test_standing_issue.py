@@ -243,19 +243,19 @@ class Stubbed:
         """Serve a job's log."""
         (self.logs / f"{number}.log").write_text(text, encoding="utf-8")
 
-    def run_report(
+    def enter(
         self,
+        monkeypatch: pytest.MonkeyPatch,
         *,
         ref: str = "refs/heads/main",
         default: str = "main",
         findings: Path | None = None,
         workflow: str = WORKFLOW,
-        capfd: pytest.CaptureFixture[str],
-    ) -> tuple[int, str, str]:
-        """Run the report as the job runs it.
+    ) -> list[str]:
+        """Set the world the report runs in, as the job runs it.
 
         Returns:
-            The status and what it printed.
+            The argv the run is given.
 
         """
         argv = [
@@ -270,12 +270,9 @@ class Stubbed:
         ]
         if findings is not None:
             argv += ["--findings", str(findings)]
-        with pytest.MonkeyPatch.context() as patched:
-            for name, value in self.env.items():
-                patched.setenv(name, value)
-            status = standing.main(argv)
-        out, err = capfd.readouterr()
-        return status, out, err
+        for name, value in self.env.items():
+            monkeypatch.setenv(name, value)
+        return argv
 
     def gh_calls(self) -> list[list[str]]:
         """Read every argv the stub gh received.
@@ -315,10 +312,12 @@ def body_of(call: list[str]) -> str:
 
 
 def test_red_creates_with_title_and_label(
-    stubbed: Stubbed, capfd: pytest.CaptureFixture[str]
+    stubbed: Stubbed, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Red, none open: one issue, the job's title, the label."""
-    status, out, err = stubbed.run_report(capfd=capfd)
+    argv = stubbed.enter(monkeypatch)
+    status = standing.main(argv)
+    out, err = capfd.readouterr()
     same(status, 0, err)
     calls = stubbed.gh_calls()
     same(calls[:3], [JOBS, LIST, LABELS])
@@ -341,11 +340,13 @@ def test_red_creates_with_title_and_label(
 
 
 def test_red_with_one_open_replaces_and_keeps_since(
-    stubbed: Stubbed, capfd: pytest.CaptureFixture[str]
+    stubbed: Stubbed, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Red, one open: its body is replaced, Red since kept, the run counted."""
     stubbed.env["STUB_LIST"] = issues((42, TITLE, previous(FIRST, 3)))
-    status, out, err = stubbed.run_report(capfd=capfd)
+    argv = stubbed.enter(monkeypatch)
+    status = standing.main(argv)
+    out, err = capfd.readouterr()
     same(status, 0, err)
     calls = stubbed.gh_calls()
     same(calls[:2], [JOBS, LIST])
@@ -359,23 +360,27 @@ def test_red_with_one_open_replaces_and_keeps_since(
 
 
 def test_same_run_is_counted_once(
-    stubbed: Stubbed, capfd: pytest.CaptureFixture[str]
+    stubbed: Stubbed, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A second report in one run does not count the run twice."""
     stubbed.env["STUB_LIST"] = issues((42, TITLE, previous(FIRST, 3, RUN)))
-    status, _out, err = stubbed.run_report(capfd=capfd)
+    argv = stubbed.enter(monkeypatch)
+    status = standing.main(argv)
+    err = capfd.readouterr().err
     same(status, 0, err)
     assert "- Red runs: 3\n" in body_of(stubbed.gh_calls()[2])
 
 
 def test_green_closes_with_the_run(
-    stubbed: Stubbed, capfd: pytest.CaptureFixture[str]
+    stubbed: Stubbed, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A job green, its issue open: closed, naming the run."""
     stubbed.jobs([job(1, "plan", "success"), job(2, "source-vsa", "skipped")])
     open_one = (42, "red: source-vsa (slsa)", previous(FIRST, 3))
     stubbed.env["STUB_LIST"] = issues(open_one)
-    status, out, err = stubbed.run_report(capfd=capfd)
+    argv = stubbed.enter(monkeypatch)
+    status = standing.main(argv)
+    out, err = capfd.readouterr()
     same(status, 0, err)
     comment = f"Green: {RUN} ran every leg of this job green or skipped."
     closed = ["issue", "close", "42", "--repo", REPO, "--comment", comment]
@@ -384,32 +389,38 @@ def test_green_closes_with_the_run(
 
 
 def test_green_with_none_open_writes_nothing(
-    stubbed: Stubbed, capfd: pytest.CaptureFixture[str]
+    stubbed: Stubbed, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Green, none open: the two reads and nothing else."""
     stubbed.jobs([job(1, "plan", "success")])
-    status, out, err = stubbed.run_report(capfd=capfd)
+    argv = stubbed.enter(monkeypatch)
+    status = standing.main(argv)
+    out, err = capfd.readouterr()
     same(status, 0, err)
     same(stubbed.gh_calls(), [JOBS, LIST])
     assert "red-check: nothing to change" in out
 
 
 def test_other_branch_calls_nothing(
-    stubbed: Stubbed, capfd: pytest.CaptureFixture[str]
+    stubbed: Stubbed, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A run on another branch changes nothing, and asks nothing."""
-    status, out, err = stubbed.run_report(ref="refs/heads/feature", capfd=capfd)
+    argv = stubbed.enter(monkeypatch, ref="refs/heads/feature")
+    status = standing.main(argv)
+    out, err = capfd.readouterr()
     same(status, 0, err)
     same(stubbed.gh_calls(), [])
     assert "refs/heads/feature is not the default branch (main)" in out
 
 
 def test_failed_listing_files_nothing(
-    stubbed: Stubbed, capfd: pytest.CaptureFixture[str]
+    stubbed: Stubbed, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A listing that fails exits 2 by name and files nothing."""
     stubbed.env["STUB_LIST_FAIL"] = "1"
-    status, _out, err = stubbed.run_report(capfd=capfd)
+    argv = stubbed.enter(monkeypatch)
+    status = standing.main(argv)
+    err = capfd.readouterr().err
     same(status, 2)
     same(stubbed.gh_calls(), [JOBS, LIST])
     assert (
@@ -418,34 +429,40 @@ def test_failed_listing_files_nothing(
 
 
 def test_two_open_is_a_named_error(
-    stubbed: Stubbed, capfd: pytest.CaptureFixture[str]
+    stubbed: Stubbed, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Two open issues with one job's title: a named error, nothing filed."""
     stubbed.jobs([job(1, "plan", "failure"), job(2, "caller permissions", "failure")])
     both = [(n, TITLE, previous(FIRST, 1)) for n in (41, 42)]
     stubbed.env["STUB_LIST"] = issues(*both)
-    status, _out, err = stubbed.run_report(capfd=capfd)
+    argv = stubbed.enter(monkeypatch)
+    status = standing.main(argv)
+    err = capfd.readouterr().err
     same(status, 2)
     same(stubbed.gh_calls(), [JOBS, LIST])
     assert f"2 open issues are titled exactly '{TITLE}' (#41, #42)" in err
 
 
 def test_resembling_title_is_not_the_issue(
-    stubbed: Stubbed, capfd: pytest.CaptureFixture[str]
+    stubbed: Stubbed, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A title that only resembles is never edited."""
     stubbed.env["STUB_LIST"] = issues((7, f"{TITLE} again", ""))
-    status, _out, err = stubbed.run_report(capfd=capfd)
+    argv = stubbed.enter(monkeypatch)
+    status = standing.main(argv)
+    err = capfd.readouterr().err
     same(status, 0, err)
     same(stubbed.gh_calls()[-1][:2], ["issue", "create"])
 
 
 def test_missing_label_is_created_from_the_baseline(
-    stubbed: Stubbed, capfd: pytest.CaptureFixture[str]
+    stubbed: Stubbed, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """No red-check label: created from settings/repo-baseline.json first."""
     stubbed.env["STUB_LABELS"] = labels("hold")
-    status, out, err = stubbed.run_report(capfd=capfd)
+    argv = stubbed.enter(monkeypatch)
+    status = standing.main(argv)
+    out, err = capfd.readouterr()
     same(status, 0, err)
     label = standing.label_definition()
     made = [
@@ -459,41 +476,53 @@ def test_missing_label_is_created_from_the_baseline(
 
 
 def test_unfinished_sibling_changes_nothing(
-    stubbed: Stubbed, capfd: pytest.CaptureFixture[str]
+    stubbed: Stubbed, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Green so far with a caller's job still running: nothing is read."""
-    stubbed.jobs([
-        job(1, "records / links", "success"),
-        job(3, "citations", None, "in_progress"),
-    ])
+    stubbed.jobs(
+        [
+            job(1, "records / links", "success"),
+            job(3, "citations", None, "in_progress"),
+        ]
+    )
     stubbed.env["STUB_LIST"] = issues((42, "red: links (records)", previous(FIRST, 3)))
-    status, out, err = stubbed.run_report(capfd=capfd)
+    argv = stubbed.enter(monkeypatch)
+    status = standing.main(argv)
+    out, err = capfd.readouterr()
     same(status, 0, err)
     same(stubbed.gh_calls(), [JOBS])
     assert "neither red nor green yet" in out
 
 
 def test_unfinished_sibling_keeps_red_and_closes_nothing(
-    stubbed: Stubbed, capfd: pytest.CaptureFixture[str]
+    stubbed: Stubbed, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A red job is kept with a sibling running; no green job is closed."""
-    stubbed.jobs([
-        job(1, "plan", "success"),
-        job(2, "caller permissions", "failure"),
-        job(3, "citations", None, "in_progress"),
-    ])
+    stubbed.jobs(
+        [
+            job(1, "plan", "success"),
+            job(2, "caller permissions", "failure"),
+            job(3, "citations", None, "in_progress"),
+        ]
+    )
     stubbed.env["STUB_LIST"] = issues((41, "red: plan (slsa)", previous(FIRST, 3)))
-    status, _out, err = stubbed.run_report(capfd=capfd)
+    argv = stubbed.enter(monkeypatch)
+    status = standing.main(argv)
+    err = capfd.readouterr().err
     same(status, 0, err)
     calls = stubbed.gh_calls()
     same([c[:2] for c in calls[2:]], [["label", "list"], ["issue", "create"]])
 
 
-def test_timed_out_is_red(stubbed: Stubbed, capfd: pytest.CaptureFixture[str]) -> None:
+def test_timed_out_is_red(
+    stubbed: Stubbed, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A job that timed out is red."""
     stubbed.jobs([job(4, "watch (leg 1)", "timed_out")])
     stubbed.log(4, logged("reading"))
-    status, _out, err = stubbed.run_report(capfd=capfd)
+    argv = stubbed.enter(monkeypatch)
+    status = standing.main(argv)
+    err = capfd.readouterr().err
     same(status, 0, err)
     create = stubbed.gh_calls()[-1]
     same(create[5], "red: watch (slsa)")
@@ -538,16 +567,20 @@ def per_job(tmp_path: Path, request: pytest.FixtureRequest, env: support.Env) ->
 
 
 def test_two_red_jobs_open_two_issues(
-    per_job: PerJob, capfd: pytest.CaptureFixture[str]
+    per_job: PerJob, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Two red jobs in one run: two issues, each titled for its job."""
-    per_job.jobs([
-        job(1, "rust branch coverage holds its floor", "failure"),
-        job(2, "every source chain link verifies", "failure"),
-    ])
+    per_job.jobs(
+        [
+            job(1, "rust branch coverage holds its floor", "failure"),
+            job(2, "every source chain link verifies", "failure"),
+        ]
+    )
     per_job.log(1, failing("mise run coverage", "below the floor"))
     per_job.log(2, failing("mise run chain", "link 3 does not verify"))
-    status, _out, err = per_job.run_report(capfd=capfd)
+    argv = per_job.enter(monkeypatch)
+    status = standing.main(argv)
+    err = capfd.readouterr().err
     same(status, 0, err)
     calls = per_job.gh_calls()
     same(calls[:3], [JOBS, LIST, LABELS])
@@ -568,16 +601,20 @@ def test_two_red_jobs_open_two_issues(
 
 
 def test_a_reusable_workflow_leg_is_named_for_its_job(
-    per_job: PerJob, capfd: pytest.CaptureFixture[str]
+    per_job: PerJob, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """`deep-tests / x (3/8)` under deep-tests is a leg of the job `x`."""
     same(standing.job_name("deep-tests / x (3/8)", "deep-tests"), "x")
-    per_job.jobs([
-        job(1, "deep-tests / x (3/8)", "failure"),
-        job(2, "deep-tests / x (4/8)", "success"),
-    ])
+    per_job.jobs(
+        [
+            job(1, "deep-tests / x (3/8)", "failure"),
+            job(2, "deep-tests / x (4/8)", "success"),
+        ]
+    )
     per_job.log(1, failing("mise run x", "boom"))
-    status, _out, err = per_job.run_report(workflow="deep-tests", capfd=capfd)
+    argv = per_job.enter(monkeypatch, workflow="deep-tests")
+    status = standing.main(argv)
+    err = capfd.readouterr().err
     same(status, 0, err)
     create = per_job.gh_calls()[-1]
     same(create[5], "red: x (deep-tests)")
@@ -588,14 +625,16 @@ def test_a_reusable_workflow_leg_is_named_for_its_job(
 
 
 def test_fourteen_legs_with_one_output_are_one_excerpt(
-    per_job: PerJob, capfd: pytest.CaptureFixture[str]
+    per_job: PerJob, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Fourteen red legs, one output: one issue, one excerpt, 14 links."""
     name = "fuzz targets survive a bounded run"
     per_job.jobs([job(n, f"{name} (leg {n})", "failure") for n in range(1, 15)])
     for n in range(1, 15):
         per_job.log(n, failing("mise run fuzz", "llvm-tools is not installed"))
-    status, _out, err = per_job.run_report(capfd=capfd)
+    argv = per_job.enter(monkeypatch)
+    status = standing.main(argv)
+    err = capfd.readouterr().err
     same(status, 0, err)
     creates = [c for c in per_job.gh_calls() if c[:2] == ["issue", "create"]]
     same(len(creates), 1)
@@ -608,14 +647,16 @@ def test_fourteen_legs_with_one_output_are_one_excerpt(
 
 
 def test_one_red_leg_of_fourteen_is_red(
-    per_job: PerJob, capfd: pytest.CaptureFixture[str]
+    per_job: PerJob, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """One leg red and thirteen green: the job is red."""
     legs = [job(1, "shard (1)", "failure")]
     legs += [job(n, f"shard ({n})", "success") for n in range(2, 15)]
     per_job.jobs(legs)
     per_job.log(1, failing("mise run shard", "one shard failed"))
-    status, _out, err = per_job.run_report(capfd=capfd)
+    argv = per_job.enter(monkeypatch)
+    status = standing.main(argv)
+    err = capfd.readouterr().err
     same(status, 0, err)
     create = per_job.gh_calls()[-1]
     same(create[:2], ["issue", "create"])
@@ -624,13 +665,15 @@ def test_one_red_leg_of_fourteen_is_red(
 
 
 def test_every_leg_green_or_skipped_closes(
-    per_job: PerJob, capfd: pytest.CaptureFixture[str]
+    per_job: PerJob, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Every leg green or skipped: the job's issue is closed."""
     legs = [job(n, f"shard ({n})", "success") for n in range(1, 14)]
     per_job.jobs([*legs, job(14, "shard (14)", "skipped")])
     per_job.env["STUB_LIST"] = issues((42, "red: shard (slsa)", previous(FIRST, 2)))
-    status, _out, err = per_job.run_report(capfd=capfd)
+    argv = per_job.enter(monkeypatch)
+    status = standing.main(argv)
+    err = capfd.readouterr().err
     same(status, 0, err)
     comment = f"Green: {RUN} ran every leg of this job green or skipped."
     closed = ["issue", "close", "42", "--repo", REPO, "--comment", comment]
@@ -638,19 +681,21 @@ def test_every_leg_green_or_skipped_closes(
 
 
 def test_a_cancelled_leg_with_no_red_leg_changes_nothing(
-    per_job: PerJob, capfd: pytest.CaptureFixture[str]
+    per_job: PerJob, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A cancelled leg, the rest green: the job's issue is unchanged."""
     per_job.jobs([job(1, "shard (1)", "success"), job(2, "shard (2)", "cancelled")])
     per_job.env["STUB_LIST"] = issues((42, "red: shard (slsa)", previous(FIRST, 2)))
-    status, out, err = per_job.run_report(capfd=capfd)
+    argv = per_job.enter(monkeypatch)
+    status = standing.main(argv)
+    out, err = capfd.readouterr()
     same(status, 0, err)
     same(per_job.gh_calls(), [JOBS, LIST])
     assert "neither red nor green, unchanged: shard" in out
 
 
 def test_green_job_closed_and_red_job_replaced(
-    per_job: PerJob, capfd: pytest.CaptureFixture[str]
+    per_job: PerJob, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Job A green and job B red: A's issue closed, B's body replaced."""
     per_job.jobs([job(1, "a", "success"), job(2, "b", "failure")])
@@ -659,7 +704,9 @@ def test_green_job_closed_and_red_job_replaced(
         (41, "red: a (slsa)", previous(FIRST, 1)),
         (42, "red: b (slsa)", previous(FIRST, 1)),
     )
-    status, _out, err = per_job.run_report(capfd=capfd)
+    argv = per_job.enter(monkeypatch)
+    status = standing.main(argv)
+    err = capfd.readouterr().err
     same(status, 0, err)
     calls = per_job.gh_calls()
     same(len(calls), 4)
@@ -671,7 +718,7 @@ def test_green_job_closed_and_red_job_replaced(
 
 
 def test_a_job_not_in_the_run_is_closed_saying_so(
-    per_job: PerJob, capfd: pytest.CaptureFixture[str]
+    per_job: PerJob, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """`red: gone` labelled is closed; the same shape unlabelled is not."""
     per_job.jobs([job(1, "plan", "success")])
@@ -682,7 +729,9 @@ def test_a_job_not_in_the_run_is_closed_saying_so(
         *decoded.as_array(decoded.load_json(unlabelled), "unlabelled"),
     ]
     per_job.env["STUB_LIST"] = json.dumps(listing)
-    status, _out, err = per_job.run_report(capfd=capfd)
+    argv = per_job.enter(monkeypatch)
+    status = standing.main(argv)
+    err = capfd.readouterr().err
     same(status, 0, err)
     comment = (
         f"Not in the run: {RUN} lists no job named `gone`; it was renamed or removed."
@@ -693,7 +742,10 @@ def test_a_job_not_in_the_run_is_closed_saying_so(
 
 @pytest.mark.parametrize("red", [True, False])
 def test_the_old_issue_is_closed_red_or_green(
-    per_job: PerJob, red: object, capfd: pytest.CaptureFixture[str]
+    per_job: PerJob,
+    red: object,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """An open `<workflow> is red` is closed on a red run and a green one."""
     comment = (
@@ -707,7 +759,9 @@ def test_the_old_issue_is_closed_red_or_green(
         per_job.jobs([job(1, "plan", "success")])
     old = (30, OLD, previous(FIRST, 5))
     per_job.env["STUB_LIST"] = issues(old, label=False)
-    status, _out, err = per_job.run_report(capfd=capfd)
+    argv = per_job.enter(monkeypatch)
+    status = standing.main(argv)
+    err = capfd.readouterr().err
     same(status, 0, err)
     calls = per_job.gh_calls()
     same(calls[-1], closed)
@@ -716,14 +770,16 @@ def test_the_old_issue_is_closed_red_or_green(
 
 
 def test_red_since_and_runs_carry_per_issue(
-    per_job: PerJob, capfd: pytest.CaptureFixture[str]
+    per_job: PerJob, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Each job's issue carries its own Red since and run count."""
     per_job.jobs([job(1, "a", "failure"), job(2, "b", "failure")])
     per_job.log(1, failing("mise run a", "a broke"))
     per_job.log(2, failing("mise run b", "b broke"))
     per_job.env["STUB_LIST"] = issues((41, "red: a (slsa)", previous(FIRST, 3)))
-    status, _out, err = per_job.run_report(capfd=capfd)
+    argv = per_job.enter(monkeypatch)
+    status = standing.main(argv)
+    err = capfd.readouterr().err
     same(status, 0, err)
     calls = per_job.gh_calls()
     edit = next(c for c in calls if c[:3] == ["issue", "edit", "41"])
@@ -735,11 +791,13 @@ def test_red_since_and_runs_carry_per_issue(
 
 
 def test_unreadable_log_is_named(
-    stubbed: Stubbed, capfd: pytest.CaptureFixture[str]
+    stubbed: Stubbed, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A log the forge will not serve is named in the entry, not fatal."""
     stubbed.jobs([job(5, "drafts", "failure")])
-    status, _out, err = stubbed.run_report(capfd=capfd)
+    argv = stubbed.enter(monkeypatch)
+    status = standing.main(argv)
+    err = capfd.readouterr().err
     same(status, 0, err)
     assert (
         "_Log tail unknown: the log could not be read: GET"
@@ -747,20 +805,26 @@ def test_unreadable_log_is_named(
     ) in body_of(stubbed.gh_calls()[-1])
 
 
-def test_no_token_is_named(stubbed: Stubbed, capfd: pytest.CaptureFixture[str]) -> None:
+def test_no_token_is_named(
+    stubbed: Stubbed, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
     """No GH_TOKEN: named in the entry, not fatal, nothing requested."""
     del stubbed.env["GH_TOKEN"]
-    status, _out, err = stubbed.run_report(capfd=capfd)
+    argv = stubbed.enter(monkeypatch)
+    status = standing.main(argv)
+    err = capfd.readouterr().err
     same(status, 0, err)
     assert "GH_TOKEN is not set_" in body_of(stubbed.gh_calls()[-1])
     same(stubbed.seen, [])
 
 
 def test_log_is_read_without_gh(
-    stubbed: Stubbed, capfd: pytest.CaptureFixture[str]
+    stubbed: Stubbed, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The log comes from the endpoint; gh never reads one."""
-    status, _out, err = stubbed.run_report(capfd=capfd)
+    argv = stubbed.enter(monkeypatch)
+    status = standing.main(argv)
+    err = capfd.readouterr().err
     same(status, 0, err)
     reads = [
         call
@@ -773,10 +837,12 @@ def test_log_is_read_without_gh(
 
 
 def test_token_never_reaches_the_blob_host(
-    stubbed: Stubbed, capfd: pytest.CaptureFixture[str]
+    stubbed: Stubbed, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The API read carries the token; the redirected read does not."""
-    status, _out, err = stubbed.run_report(capfd=capfd)
+    argv = stubbed.enter(monkeypatch)
+    status = standing.main(argv)
+    err = capfd.readouterr().err
     same(status, 0, err)
     same(
         stubbed.seen,
@@ -1212,12 +1278,14 @@ def test_an_empty_directory_writes_the_body_without_findings(
 
 
 def test_records_reach_the_issue(
-    stubbed: Stubbed, capfd: pytest.CaptureFixture[str]
+    stubbed: Stubbed, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The run's records are listed, and the red job points at them."""
     found = stubbed.dir / "findings"
     records(found, "job.jsonl", standing.Finding("lint:caller", "edtf", "caller-grant"))
-    status, _out, err = stubbed.run_report(findings=found, capfd=capfd)
+    argv = stubbed.enter(monkeypatch, findings=found)
+    status = standing.main(argv)
+    err = capfd.readouterr().err
     same(status, 0, err)
     text = body_of(stubbed.gh_calls()[3])
     assert "### lint:caller (1)\n" in text
@@ -1227,15 +1295,17 @@ def test_records_reach_the_issue(
 
 
 def test_each_record_reaches_the_job_whose_step_ran_it(
-    stubbed: Stubbed, capfd: pytest.CaptureFixture[str]
+    stubbed: Stubbed, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A's record in A's issue only; verdict by its command; the rest in all."""
     verdict = '"${ORG_PYTHON}" -I belt verdict --report r.json'
-    stubbed.jobs([
-        job(1, "a", "failure"),
-        job(2, "b", "failure"),
-        job(3, "watch (leg 1)", "failure"),
-    ])
+    stubbed.jobs(
+        [
+            job(1, "a", "failure"),
+            job(2, "b", "failure"),
+            job(3, "watch (leg 1)", "failure"),
+        ]
+    )
     stubbed.log(1, failing("mise run lint:a", "a broke"))
     stubbed.log(2, failing("mise run lint:b", "b broke"))
     stubbed.log(3, failing(verdict, "a certificate did not reconcile"))
@@ -1248,7 +1318,9 @@ def test_each_record_reaches_the_job_whose_step_ran_it(
         standing.Finding("verdict", "leg 1", "finding of the watch"),
         standing.Finding("audit:loose", "", "finding of no failing step"),
     )
-    status, _out, err = stubbed.run_report(findings=found, capfd=capfd)
+    argv = stubbed.enter(monkeypatch, findings=found)
+    status = standing.main(argv)
+    err = capfd.readouterr().err
     same(status, 0, err)
     made = {
         c[5]: body_of(c) for c in stubbed.gh_calls() if c[:2] == ["issue", "create"]
@@ -1269,9 +1341,11 @@ def test_each_record_reaches_the_job_whose_step_ran_it(
 
 
 def test_without_the_flag_no_findings_are_read(
-    stubbed: Stubbed, capfd: pytest.CaptureFixture[str]
+    stubbed: Stubbed, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """No `--findings`: the body has no findings section."""
-    status, _out, err = stubbed.run_report(capfd=capfd)
+    argv = stubbed.enter(monkeypatch)
+    status = standing.main(argv)
+    err = capfd.readouterr().err
     same(status, 0, err)
     assert "## Findings" not in body_of(stubbed.gh_calls()[3])

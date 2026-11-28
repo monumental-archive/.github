@@ -171,27 +171,18 @@ class StepHarness:
             env["PR_BODY"] = body
         return env
 
-    def squash(
+    def enter(
         self,
+        monkeypatch: pytest.MonkeyPatch,
         title: str,
         body: str | None,
         *,
         verdict: int = 0,
-        capfd: pytest.CaptureFixture[str],
-    ) -> tuple[int, str, str]:
-        """Call the helper in-process on one pull request (#1697).
-
-        Returns:
-            The status and both streams.
-
-        """
-        with pytest.MonkeyPatch.context() as patched:
-            for name, value in (self.step_env(title, body, verdict)).items():
-                patched.setenv(name, value)
-            patched.setattr(sys, "argv", [STEP])
-            status = squash_message.main([])
-        out, err = capfd.readouterr()
-        return status, out, err
+    ) -> None:
+        """Set the step's world on one pull request, in this process (#1697)."""
+        for name, value in (self.step_env(title, body, verdict)).items():
+            monkeypatch.setenv(name, value)
+        monkeypatch.setattr(sys, "argv", [STEP])
 
     def checked(self) -> str:
         """Read the message `commits:check` was handed.
@@ -212,24 +203,28 @@ def step_harness(tmp_path: Path, env: support.Env) -> StepHarness:
 
 
 def test_title_ending_in_its_own_reference(
-    step_harness: StepHarness, capfd: pytest.CaptureFixture[str]
+    step_harness: StepHarness,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """#800: the merge would append the PR's number a second time."""
-    status, out, err = step_harness.squash(
-        "fix(ci): hold the title (#812)", "Body.", capfd=capfd
-    )
+    step_harness.enter(monkeypatch, "fix(ci): hold the title (#812)", "Body.")
+    status = squash_message.main([])
+    out, err = capfd.readouterr()
     assert status == 1, out + err
     assert err == OWN_REF
     assert not (step_harness.tmp / "mise-args").exists()
 
 
 def test_title_ending_in_the_issue_reference_is_the_convention(
-    step_harness: StepHarness, capfd: pytest.CaptureFixture[str]
+    step_harness: StepHarness,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Only this PR's own number is refused, never the issue's."""
-    status, out, err = step_harness.squash(
-        "fix(ci): hold the title (#800)", "Closes #800", capfd=capfd
-    )
+    step_harness.enter(monkeypatch, "fix(ci): hold the title (#800)", "Closes #800")
+    status = squash_message.main([])
+    out, err = capfd.readouterr()
     assert status == 0, out + err
     assert out == PASSES
     assert (
@@ -242,52 +237,70 @@ def test_title_ending_in_the_issue_reference_is_the_convention(
 
 
 def test_body_with_carriage_returns(
-    step_harness: StepHarness, capfd: pytest.CaptureFixture[str]
+    step_harness: StepHarness,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """#880: the API's CRLF body is measured without its CRs."""
-    status, out, err = step_harness.squash(
-        "fix: x", "First line.\r\n\r\nSecond.\r\n", capfd=capfd
-    )
+    step_harness.enter(monkeypatch, "fix: x", "First line.\r\n\r\nSecond.\r\n")
+    status = squash_message.main([])
+    out, err = capfd.readouterr()
     assert status == 0, out + err
     assert step_harness.checked() == "fix: x (#812)\n\nFirst line.\n\nSecond.\n\n"
 
 
 def test_empty_body_composes_the_subject_alone(
-    step_harness: StepHarness, capfd: pytest.CaptureFixture[str]
+    step_harness: StepHarness,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """No body: the subject and nothing after it."""
-    status, out, err = step_harness.squash("fix: x", "", capfd=capfd)
+    step_harness.enter(monkeypatch, "fix: x", "")
+    status = squash_message.main([])
+    out, err = capfd.readouterr()
     assert status == 0, out + err
     assert step_harness.checked() == "fix: x (#812)\n"
 
 
 def test_absent_body_composes_the_subject_alone(
-    step_harness: StepHarness, capfd: pytest.CaptureFixture[str]
+    step_harness: StepHarness,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A pull request with no body at all reads as an empty one."""
-    status, out, err = step_harness.squash("fix: x", None, capfd=capfd)
+    step_harness.enter(monkeypatch, "fix: x", None)
+    status = squash_message.main([])
+    out, err = capfd.readouterr()
     assert status == 0, out + err
     assert step_harness.checked() == "fix: x (#812)\n"
 
 
 def test_whitespace_only_body_composes_the_subject_alone(
-    step_harness: StepHarness, capfd: pytest.CaptureFixture[str]
+    step_harness: StepHarness,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Blank lines and CRs are no body."""
-    status, out, err = step_harness.squash("fix: x", " \r\n\t\r\n", capfd=capfd)
+    step_harness.enter(monkeypatch, "fix: x", " \r\n\t\r\n")
+    status = squash_message.main([])
+    out, err = capfd.readouterr()
     assert status == 0, out + err
     assert step_harness.checked() == "fix: x (#812)\n"
 
 
 def test_body_line_beginning_with_committer(
-    step_harness: StepHarness, capfd: pytest.CaptureFixture[str]
+    step_harness: StepHarness,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """#1529: GitHub splices its signature after such a line."""
     body = (
         "Then `HOME`, the git identity (the author and\r\n"
         "committer) and the row's own overrides.\r\n"
     )
-    status, out, err = step_harness.squash("fix: x", body, capfd=capfd)
+    step_harness.enter(monkeypatch, "fix: x", body)
+    status = squash_message.main([])
+    out, err = capfd.readouterr()
     assert status == 1, out + err
     assert err == (
         f"::error::{STEP}: PR body line 2 begins with 'committer':"
@@ -301,33 +314,41 @@ def test_body_line_beginning_with_committer(
 
 
 def test_committer_as_a_bare_prefix(
-    step_harness: StepHarness, capfd: pytest.CaptureFixture[str]
+    step_harness: StepHarness,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """#1529: no delimiter is needed; `committerx y` was spliced too."""
-    status, out, err = step_harness.squash(
-        "fix: x", "Plain line.\ncommitterx y", capfd=capfd
-    )
+    step_harness.enter(monkeypatch, "fix: x", "Plain line.\ncommitterx y")
+    status = squash_message.main([])
+    out, err = capfd.readouterr()
     assert status == 1, out + err
     assert "PR body line 2 begins with 'committer'" in err
 
 
 def test_committer_inside_a_line_is_not_a_header(
-    step_harness: StepHarness, capfd: pytest.CaptureFixture[str]
+    step_harness: StepHarness,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The measured verified shapes: mid-line, indented, capitalised."""
     body = "the committer) x\n    committer x\nCommitter x\nauthor x\n"
-    status, out, err = step_harness.squash("fix: x", body, capfd=capfd)
+    step_harness.enter(monkeypatch, "fix: x", body)
+    status = squash_message.main([])
+    out, err = capfd.readouterr()
     assert status == 0, out + err
     assert out == PASSES
 
 
 def test_failing_commit_check(
-    step_harness: StepHarness, capfd: pytest.CaptureFixture[str]
+    step_harness: StepHarness,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """#411: the canon's refusal names what to fix, the title or the body."""
-    status, out, err = step_harness.squash(
-        "Fix: Capitalised", "Body.", verdict=1, capfd=capfd
-    )
+    step_harness.enter(monkeypatch, "Fix: Capitalised", "Body.", verdict=1)
+    status = squash_message.main([])
+    out, err = capfd.readouterr()
     assert status == 1, out + err
     assert err == FAILS_CANON
     assert step_harness.checked() == "Fix: Capitalised (#812)\n\nBody.\n"
@@ -337,18 +358,16 @@ class BreakingFooter(StepHarness):
     """#1924: the break's footer ends the body, as stele will read it."""
 
     def assert_refused(
-        self, row: str, number: int, line: str, *, capfd: pytest.CaptureFixture[str]
+        self, number: int, line: str, status: int, out: str, err: str
     ) -> None:
-        """Assert a row is refused, naming its line, before the canon."""
-        status, out, err = self.squash("feat: x", BREAKING_ROWS[row][0], capfd=capfd)
+        """Assert a row's run was refused, naming its line, before the canon."""
         assert status == 1, out + err
         assert err == refusal(number, line)
         assert not (self.tmp / "mise-args").exists()
 
-    def assert_passes(self, row: str, *, capfd: pytest.CaptureFixture[str]) -> None:
-        """Assert a row reaches the commit canon and passes."""
+    def assert_passes(self, row: str, status: int, out: str, err: str) -> None:
+        """Assert a row's run reached the commit canon and passed."""
         body = BREAKING_ROWS[row][0]
-        status, out, err = self.squash("feat: x", body, capfd=capfd)
         assert status == 0, out + err
         assert out == PASSES
         assert self.checked() == f"feat: x (#812)\n\n{body}\n"
@@ -361,77 +380,139 @@ def breaking_footer_state(tmp_path: Path, env: support.Env) -> BreakingFooter:
 
 
 def test_edtf_316_as_it_was_names_the_attribution(
-    breaking_footer_state: BreakingFooter, capfd: pytest.CaptureFixture[str]
+    breaking_footer_state: BreakingFooter,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """#1924: the attribution line was published as part of the break."""
-    breaking_footer_state.assert_refused(
-        "edtf#316 as it was", 17, ATTRIBUTION, capfd=capfd
+    breaking_footer_state.enter(
+        monkeypatch, "feat: x", BREAKING_ROWS["edtf#316 as it was"][0]
     )
+    status = squash_message.main([])
+    out, err = capfd.readouterr()
+    breaking_footer_state.assert_refused(17, ATTRIBUTION, status, out, err)
 
 
 def test_edtf_316_with_the_attribution_above_the_footer(
-    breaking_footer_state: BreakingFooter, capfd: pytest.CaptureFixture[str]
+    breaking_footer_state: BreakingFooter,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """#1924: the footers end the body, so the break is the footer alone."""
+    breaking_footer_state.enter(
+        monkeypatch,
+        "feat: x",
+        BREAKING_ROWS["edtf#316, attribution above the footer"][0],
+    )
+    status = squash_message.main([])
+    out, err = capfd.readouterr()
     breaking_footer_state.assert_passes(
-        "edtf#316, attribution above the footer", capfd=capfd
+        "edtf#316, attribution above the footer", status, out, err
     )
 
 
 def test_hyphened_token_then_a_paragraph(
-    breaking_footer_state: BreakingFooter, capfd: pytest.CaptureFixture[str]
+    breaking_footer_state: BreakingFooter,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """#1924: BREAKING-CHANGE is the same footer (§16)."""
-    breaking_footer_state.assert_refused(
-        "hyphened token, then a paragraph", 3, "A paragraph.", capfd=capfd
+    breaking_footer_state.enter(
+        monkeypatch, "feat: x", BREAKING_ROWS["hyphened token, then a paragraph"][0]
     )
+    status = squash_message.main([])
+    out, err = capfd.readouterr()
+    breaking_footer_state.assert_refused(3, "A paragraph.", status, out, err)
 
 
 def test_footer_after_a_footer_line_then_a_paragraph(
-    breaking_footer_state: BreakingFooter, capfd: pytest.CaptureFixture[str]
+    breaking_footer_state: BreakingFooter,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """#1924: a footer not first in its paragraph is still read."""
-    breaking_footer_state.assert_refused(
-        "footer after a footer line, then a paragraph",
-        4,
-        "A paragraph.",
-        capfd=capfd,
+    breaking_footer_state.enter(
+        monkeypatch,
+        "feat: x",
+        BREAKING_ROWS["footer after a footer line, then a paragraph"][0],
     )
+    status = squash_message.main([])
+    out, err = capfd.readouterr()
+    breaking_footer_state.assert_refused(4, "A paragraph.", status, out, err)
 
 
 def test_a_footer_after_the_blank_line(
-    breaking_footer_state: BreakingFooter, capfd: pytest.CaptureFixture[str]
+    breaking_footer_state: BreakingFooter,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """#1924: the next footer ends the break's value."""
-    breaking_footer_state.assert_passes("a footer after the blank line", capfd=capfd)
+    breaking_footer_state.enter(
+        monkeypatch, "feat: x", BREAKING_ROWS["a footer after the blank line"][0]
+    )
+    status = squash_message.main([])
+    out, err = capfd.readouterr()
+    breaking_footer_state.assert_passes(
+        "a footer after the blank line", status, out, err
+    )
 
 
 def test_a_paragraph_after_another_footer(
-    breaking_footer_state: BreakingFooter, capfd: pytest.CaptureFixture[str]
+    breaking_footer_state: BreakingFooter,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """#1924: other footers' values are never rendered."""
-    breaking_footer_state.assert_passes("a paragraph after another footer", capfd=capfd)
+    breaking_footer_state.enter(
+        monkeypatch, "feat: x", BREAKING_ROWS["a paragraph after another footer"][0]
+    )
+    status = squash_message.main([])
+    out, err = capfd.readouterr()
+    breaking_footer_state.assert_passes(
+        "a paragraph after another footer", status, out, err
+    )
 
 
 def test_lower_case_is_not_the_token(
-    breaking_footer_state: BreakingFooter, capfd: pytest.CaptureFixture[str]
+    breaking_footer_state: BreakingFooter,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """#1924: the token is upper case only (§15)."""
-    breaking_footer_state.assert_passes("lower case is not the token", capfd=capfd)
+    breaking_footer_state.enter(
+        monkeypatch, "feat: x", BREAKING_ROWS["lower case is not the token"][0]
+    )
+    status = squash_message.main([])
+    out, err = capfd.readouterr()
+    breaking_footer_state.assert_passes("lower case is not the token", status, out, err)
 
 
 def test_a_two_line_value(
-    breaking_footer_state: BreakingFooter, capfd: pytest.CaptureFixture[str]
+    breaking_footer_state: BreakingFooter,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """#1924: a value may span lines; only a blank line splits it."""
-    breaking_footer_state.assert_passes("a two-line value", capfd=capfd)
+    breaking_footer_state.enter(
+        monkeypatch, "feat: x", BREAKING_ROWS["a two-line value"][0]
+    )
+    status = squash_message.main([])
+    out, err = capfd.readouterr()
+    breaking_footer_state.assert_passes("a two-line value", status, out, err)
 
 
 def test_trailing_blank_lines(
-    breaking_footer_state: BreakingFooter, capfd: pytest.CaptureFixture[str]
+    breaking_footer_state: BreakingFooter,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """#1924: blank lines that nothing follows are not a finding."""
-    breaking_footer_state.assert_passes("trailing blank lines", capfd=capfd)
+    breaking_footer_state.enter(
+        monkeypatch, "feat: x", BREAKING_ROWS["trailing blank lines"][0]
+    )
+    status = squash_message.main([])
+    out, err = capfd.readouterr()
+    breaking_footer_state.assert_passes("trailing blank lines", status, out, err)
 
 
 @pytest.mark.usefixtures("breaking_footer_state")

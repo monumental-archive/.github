@@ -195,38 +195,31 @@ def step_env(ref: str, base: str, group: str, *, env: support.Env) -> dict[str, 
 
     """
     environ = scrubbed(env=env)
-    environ.update({
-        "ORG_QUEUE_REF": ref,
-        "ORG_QUEUE_BASE": base,
-        "ORG_QUEUE_GROUP": group,
-        "ORG_QUEUE_TOKEN": "not-a-real-token",
-    })
+    environ.update(
+        {
+            "ORG_QUEUE_REF": ref,
+            "ORG_QUEUE_BASE": base,
+            "ORG_QUEUE_GROUP": group,
+            "ORG_QUEUE_TOKEN": "not-a-real-token",
+        }
+    )
     return environ
 
 
-def run_helper(
+def as_the_step(
+    monkeypatch: pytest.MonkeyPatch,
     cwd: pathlib.Path,
     ref: str,
     base: str,
     group: str,
     *,
-    capfd: pytest.CaptureFixture[str],
     env: support.Env,
-) -> tuple[int, str, str]:
-    """Call the helper in-process in a checkout, as the step runs it (#1697).
-
-    Returns:
-        The status and both streams.
-
-    """
-    with pytest.MonkeyPatch.context() as patched:
-        patched.setattr(sys, "argv", [STEP])
-        for name, value in step_env(ref, base, group, env=env).items():
-            patched.setenv(name, value)
-        patched.chdir(cwd)
-        status = queue_head.main([])
-    out, err = capfd.readouterr()
-    return status, out, err
+) -> None:
+    """Set the step's world in a checkout, as the step runs it (#1697)."""
+    monkeypatch.setattr(sys, "argv", [STEP])
+    for name, value in step_env(ref, base, group, env=env).items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.chdir(cwd)
 
 
 class QueueHead:
@@ -280,20 +273,25 @@ def passed(done: tuple[int, str, str], group: str, head: str, base: str) -> None
 
 
 def test_a_group_built_from_an_older_head_is_refused(
-    queue_head_state: QueueHead, capfd: pytest.CaptureFixture[str], env: support.Env
+    queue_head_state: QueueHead,
+    capfd: pytest.CaptureFixture[str],
+    env: support.Env,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A squash of the older head, checked against a moved head, is red."""
     repos, older, current = queue_head_state.moved()
     repos.clone()
     group = repos.squash(repos.base, older)
-    status, out, err = run_helper(
+    as_the_step(
+        monkeypatch,
         repos.checkout,
         queue_ref(NUMBER, repos.base),
         repos.base,
         group,
-        capfd=capfd,
         env=env,
     )
+    status = queue_head.main([])
+    out, err = capfd.readouterr()
     have = git(repos.checkout, "rev-parse", f"{group}^{{tree}}", env=env)
     want = git(
         repos.checkout, "merge-tree", "--write-tree", repos.base, current, env=env
@@ -309,25 +307,33 @@ def test_a_group_built_from_an_older_head_is_refused(
 
 
 def test_a_group_built_from_the_current_head_passes(
-    queue_head_state: QueueHead, capfd: pytest.CaptureFixture[str], env: support.Env
+    queue_head_state: QueueHead,
+    capfd: pytest.CaptureFixture[str],
+    env: support.Env,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A squash of the head the pull request holds is green."""
     repos, _, current = queue_head_state.moved()
     repos.clone()
     group = repos.squash(repos.base, current)
-    status, out, err = run_helper(
+    as_the_step(
+        monkeypatch,
         repos.checkout,
         queue_ref(NUMBER, repos.base),
         repos.base,
         group,
-        capfd=capfd,
         env=env,
     )
+    status = queue_head.main([])
+    out, err = capfd.readouterr()
     passed((status, out, err), group, current, repos.base)
 
 
 def test_edtf_265_is_refused(
-    queue_head_state: QueueHead, capfd: pytest.CaptureFixture[str], env: support.Env
+    queue_head_state: QueueHead,
+    capfd: pytest.CaptureFixture[str],
+    env: support.Env,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The real case: edtf#265's group carries its old head's tree."""
     checkout = queue_head_state.tmp / "checkout"
@@ -368,14 +374,16 @@ def test_edtf_265_is_refused(
         git(checkout, "merge-tree", "--write-tree", EDTF_BASE, EDTF_OLD_HEAD, env=env)
         == EDTF_MERGED_TREE
     )
-    status, out, err = run_helper(
+    as_the_step(
+        monkeypatch,
         checkout,
         queue_ref("265", EDTF_BASE),
         EDTF_BASE,
         EDTF_GROUP,
-        capfd=capfd,
         env=env,
     )
+    status = queue_head.main([])
+    out, err = capfd.readouterr()
     assert status == 1, out + err
     assert err == (
         f"::error::{STEP}: the merge group {EDTF_GROUP} was not built from"
@@ -387,15 +395,20 @@ def test_edtf_265_is_refused(
 
 
 def test_a_ref_that_is_not_a_queue_ref_is_refused(
-    queue_head_state: QueueHead, capfd: pytest.CaptureFixture[str], env: support.Env
+    queue_head_state: QueueHead,
+    capfd: pytest.CaptureFixture[str],
+    env: support.Env,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A merge group whose head_ref names no queue entry is red."""
     repos, _, current = queue_head_state.moved()
     repos.clone()
     group = repos.squash(repos.base, current)
-    status, out, err = run_helper(
-        repos.checkout, "refs/heads/main", repos.base, group, capfd=capfd, env=env
+    as_the_step(
+        monkeypatch, repos.checkout, "refs/heads/main", repos.base, group, env=env
     )
+    status = queue_head.main([])
+    out, err = capfd.readouterr()
     refused(
         (status, out, err),
         "the merge group's head_ref 'refs/heads/main' is not a merge-queue ref"
@@ -405,16 +418,21 @@ def test_a_ref_that_is_not_a_queue_ref_is_refused(
 
 
 def test_a_missing_base_is_refused(
-    queue_head_state: QueueHead, capfd: pytest.CaptureFixture[str], env: support.Env
+    queue_head_state: QueueHead,
+    capfd: pytest.CaptureFixture[str],
+    env: support.Env,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A base the checkout does not hold is red."""
     repos, _, current = queue_head_state.moved()
     repos.clone()
     group = repos.squash(repos.base, current)
     absent = "0" * 40
-    status, out, err = run_helper(
-        repos.checkout, queue_ref(NUMBER, absent), absent, group, capfd=capfd, env=env
+    as_the_step(
+        monkeypatch, repos.checkout, queue_ref(NUMBER, absent), absent, group, env=env
     )
+    status = queue_head.main([])
+    out, err = capfd.readouterr()
     refused(
         (status, out, err),
         f"the merge group's base commit '{absent}' is not in the checkout,"
@@ -423,20 +441,25 @@ def test_a_missing_base_is_refused(
 
 
 def test_a_missing_group_is_refused(
-    queue_head_state: QueueHead, capfd: pytest.CaptureFixture[str], env: support.Env
+    queue_head_state: QueueHead,
+    capfd: pytest.CaptureFixture[str],
+    env: support.Env,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A group commit the checkout does not hold is red."""
     repos, _, _ = queue_head_state.moved()
     repos.clone()
     absent = "f" * 40
-    status, out, err = run_helper(
+    as_the_step(
+        monkeypatch,
         repos.checkout,
         queue_ref(NUMBER, repos.base),
         repos.base,
         absent,
-        capfd=capfd,
         env=env,
     )
+    status = queue_head.main([])
+    out, err = capfd.readouterr()
     refused(
         (status, out, err),
         f"the merge group's group commit '{absent}' is not in the checkout,"
@@ -445,21 +468,26 @@ def test_a_missing_group_is_refused(
 
 
 def test_a_fetch_that_fails_is_refused(
-    queue_head_state: QueueHead, capfd: pytest.CaptureFixture[str], env: support.Env
+    queue_head_state: QueueHead,
+    capfd: pytest.CaptureFixture[str],
+    env: support.Env,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """No refs/pull/<n>/head on origin: the fetch fails, and it is red."""
     repos, _, current = queue_head_state.moved()
     git(repos.origin, "update-ref", "-d", f"refs/pull/{NUMBER}/head", env=env)
     repos.clone()
     group = repos.squash(repos.base, current)
-    status, out, err = run_helper(
+    as_the_step(
+        monkeypatch,
         repos.checkout,
         queue_ref(NUMBER, repos.base),
         repos.base,
         group,
-        capfd=capfd,
         env=env,
     )
+    status = queue_head.main([])
+    out, err = capfd.readouterr()
     assert status == 1, out + err
     assert re.search(
         rf"^::error::{STEP}: fetching pull request #{NUMBER}'s head"
@@ -470,7 +498,10 @@ def test_a_fetch_that_fails_is_refused(
 
 
 def test_a_merge_that_conflicts_is_refused(
-    queue_head_state: QueueHead, capfd: pytest.CaptureFixture[str], env: support.Env
+    queue_head_state: QueueHead,
+    capfd: pytest.CaptureFixture[str],
+    env: support.Env,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A head that conflicts with the base is red, not compared."""
     repos, _, current = queue_head_state.moved()
@@ -478,14 +509,16 @@ def test_a_merge_that_conflicts_is_refused(
     repos.write("a.txt", "one\nZWEI\nthree\n")
     moved_base = repos.commit("main moved")
     repos.clone()
-    status, out, err = run_helper(
+    as_the_step(
+        monkeypatch,
         repos.checkout,
         queue_ref(NUMBER, moved_base),
         moved_base,
         moved_base,
-        capfd=capfd,
         env=env,
     )
+    status = queue_head.main([])
+    out, err = capfd.readouterr()
     refused(
         (status, out, err),
         f"pull request #{NUMBER}'s current head {current} conflicts with the"
@@ -494,7 +527,10 @@ def test_a_merge_that_conflicts_is_refused(
 
 
 def test_the_second_entry_of_a_batch_passes(
-    queue_head_state: QueueHead, capfd: pytest.CaptureFixture[str], env: support.Env
+    queue_head_state: QueueHead,
+    capfd: pytest.CaptureFixture[str],
+    env: support.Env,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Entry two's base is entry one's group commit, and it is green."""
     repos = Repos(queue_head_state.tmp, env=env)
@@ -508,19 +544,24 @@ def test_the_second_entry_of_a_batch_passes(
     repos.clone()
     group_one = repos.squash(repos.base, first)
     group_two = repos.squash(group_one, second)
-    status, out, err = run_helper(
+    as_the_step(
+        monkeypatch,
         repos.checkout,
         queue_ref(NUMBER, group_one),
         group_one,
         group_two,
-        capfd=capfd,
         env=env,
     )
+    status = queue_head.main([])
+    out, err = capfd.readouterr()
     passed((status, out, err), group_two, second, group_one)
 
 
 def test_a_merge_commit_group_passes(
-    queue_head_state: QueueHead, capfd: pytest.CaptureFixture[str], env: support.Env
+    queue_head_state: QueueHead,
+    capfd: pytest.CaptureFixture[str],
+    env: support.Env,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A merge-commit queue's group is green."""
     repos, _, current = queue_head_state.moved()
@@ -543,19 +584,24 @@ def test_a_merge_commit_group_passes(
         "merge",
         env=env,
     )
-    status, out, err = run_helper(
+    as_the_step(
+        monkeypatch,
         repos.checkout,
         queue_ref(NUMBER, moved_base),
         moved_base,
         group,
-        capfd=capfd,
         env=env,
     )
+    status = queue_head.main([])
+    out, err = capfd.readouterr()
     passed((status, out, err), group, current, moved_base)
 
 
 def test_a_rebased_group_passes(
-    queue_head_state: QueueHead, capfd: pytest.CaptureFixture[str], env: support.Env
+    queue_head_state: QueueHead,
+    capfd: pytest.CaptureFixture[str],
+    env: support.Env,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A rebase queue's group, the head's commits replayed, is green."""
     repos, _, current = queue_head_state.moved()
@@ -567,14 +613,16 @@ def test_a_rebased_group_passes(
     git(repos.checkout, "rebase", "-q", moved_base, env=env)
     group = git(repos.checkout, "rev-parse", "HEAD", env=env)
     assert group != current
-    status, out, err = run_helper(
+    as_the_step(
+        monkeypatch,
         repos.checkout,
         queue_ref(NUMBER, moved_base),
         moved_base,
         group,
-        capfd=capfd,
         env=env,
     )
+    status = queue_head.main([])
+    out, err = capfd.readouterr()
     passed((status, out, err), group, current, moved_base)
 
 
