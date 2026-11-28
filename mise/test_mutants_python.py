@@ -1342,5 +1342,211 @@ class Readers(unittest.TestCase):
         self.assertEqual(helper.statement_lines("def (:\n"), list[tuple[int, int]]())
 
 
+# THE REAL TOOL ON WHAT A CHANGE TOUCHES (#1432, the owner's ruling on
+# fork 5): every row below runs the leg under `ci:mutants`
+# (MUTANTS_DIFF) with the real cosmic-ray 8.9.0 the belt pins, on a
+# fixture repository with a base commit and a change on top. `add` is
+# killed whole; `sub(5, 0) == 5` lets `a - b` survive as `a + b` (and
+# as `a | b`, `a ^ b`, `a >> b`, `a << b`); `spin`'s one mutant,
+# `done = False`, never ends, and the leg's 10 s floor kills it.
+REAL_MODULE = """def add(a, b):
+    return a + b
+
+
+def sub(a, b):
+    return a - b
+
+
+def spin(done):
+    while not done:
+        done = True
+    return done
+"""
+REAL_TEST = """import unittest
+
+import m
+
+
+class T(unittest.TestCase):
+    def test_add(self):
+        self.assertEqual(m.add(2, 3), 5)
+
+    def test_sub(self):
+        self.assertEqual(m.sub(5, 0), 5)
+
+    def test_spin(self):
+        self.assertIs(m.spin(False), True)
+"""
+REAL_CONFIG = CONFIG
+SUB_ADD = "core/ReplaceBinaryOperator_Sub_Add"
+
+
+class RealDiff(unittest.TestCase):
+    """The leg's diff mode, end to end, with the real cosmic-ray (#1432)."""
+
+    @override
+    def setUp(self) -> None:
+        """Plant the fixture's base commit."""
+        scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(scratch.cleanup)
+        self.tree = Path(scratch.name) / "tree"
+        init_tree(self.tree)
+        git_in(self.tree, "config", "commit.gpgsign", "false")
+        self.write("cosmic-ray.toml", REAL_CONFIG)
+        self.write("pkg/m.py", REAL_MODULE)
+        self.write("pkg/test_m.py", REAL_TEST)
+        self.base = self.commit("base")
+        self.env = hermetic.env(MISE_TASK_NAME="ci:mutants") | {
+            "PATH": os.environ["PATH"],
+            "ORG_BELT_DIR": str(BELT),
+            "ORG_PYTHON": sys.executable,
+            "MUTANTS_DIFF": "1",
+        }
+        # The real tool, or the row is red by name.
+        hermetic.tool("cosmic-ray")
+
+    def write(self, path: str, text: str) -> None:
+        """Write one file of the fixture."""
+        (self.tree / path).parent.mkdir(parents=True, exist_ok=True)
+        (self.tree / path).write_text(text, encoding="utf-8")
+
+    def commit(self, message: str) -> str:
+        """Commit the fixture.
+
+        Returns:
+            The commit.
+
+        """
+        git_in(self.tree, "add", ".")
+        git_in(self.tree, "commit", "-q", "-m", message)
+        return git_out(self.tree, "rev-parse", "HEAD")
+
+    def change(self, old: str, new: str) -> None:
+        """Commit one edit of the module on top of the base."""
+        self.write("pkg/m.py", REAL_MODULE.replace(old, new, 1))
+        self.commit("change")
+
+    def leg(self, base: str | None = None) -> subprocess.CompletedProcess[str]:
+        """Run the leg on what the change touched.
+
+        Returns:
+            The finished leg.
+
+        """
+        return subprocess.run(
+            [BASH, str(SCRIPT)],
+            cwd=self.tree,
+            env=self.env | {"ORG_MUTANTS_BASE": self.base if base is None else base},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    @staticmethod
+    def summary(done: subprocess.CompletedProcess[str]) -> str:
+        """Read the leg's summary line.
+
+        Returns:
+            The line, or "" when it printed none.
+
+        """
+        lines = [x for x in done.stdout.splitlines() if " mutants, " in x]
+        return lines[-1] if lines else ""
+
+    def test_a_survivor_on_a_changed_line_is_red_by_file_line_and_mutator(
+        self,
+    ) -> None:
+        """`a - b` touched: its survivors are red, each named."""
+        self.change("return a - b", "return a - b  # touched")
+        done = self.leg()
+        self.assertEqual(1, done.returncode, done.stderr)
+        self.assertIn(f"{LABEL}: survived: pkg/m.py:6: {SUB_ADD} #0 (sub)", done.stdout)
+        self.assertIn("ci:mutants: python: judging the changed lines", done.stdout)
+        self.assertEqual(
+            f"{LABEL}: 11 mutants, 6 killed, 5 survived, 0 excluded",
+            self.summary(done),
+        )
+
+    def test_a_survivor_on_an_untouched_line_is_not_judged(self) -> None:
+        """Only `a + b` touched: `sub`'s survivors are never judged."""
+        self.change("return a + b", "return a + b  # touched")
+        done = self.leg()
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertNotIn("pkg/m.py:6", done.stdout)
+        self.assertEqual(
+            f"{LABEL}: 11 mutants, 11 killed, 0 survived, 0 excluded",
+            self.summary(done),
+        )
+
+    def test_an_explained_survivor_on_a_changed_line_is_green(self) -> None:
+        """The touched line carries its reasoned pragma: excluded, green."""
+        self.change(
+            "return a - b",
+            "return a - b  # pragma: no mutate -- the fixture's survivor",
+        )
+        done = self.leg()
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertEqual(
+            f"{LABEL}: 0 mutants, 0 killed, 0 survived, 11 excluded",
+            self.summary(done),
+        )
+
+    def test_a_changed_adoption_file_judges_the_whole_population(self) -> None:
+        """cosmic-ray.toml touched, no module line: every mutant is judged."""
+        self.write("cosmic-ray.toml", REAL_CONFIG + "# touched\n")
+        self.commit("adoption")
+        done = self.leg()
+        self.assertEqual(1, done.returncode, done.stderr)
+        self.assertIn(
+            "ci:mutants: python: judging the whole population:"
+            " the change touches cosmic-ray.toml",
+            done.stdout,
+        )
+        self.assertIn(f"{LABEL}: survived: pkg/m.py:6: {SUB_ADD} #0 (sub)", done.stdout)
+        self.assertEqual(
+            f"{LABEL}: 25 mutants, 20 killed, 5 survived, 0 excluded",
+            self.summary(done),
+        )
+
+    def test_a_mutant_that_times_out_counts_as_caught(self) -> None:
+        """`done = False` never ends: the 10 s floor kills it, green."""
+        self.change("done = True", "done = True  # touched")
+        done = self.leg()
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertEqual(
+            f"{LABEL}: 1 mutants, 1 killed, 0 survived, 0 excluded",
+            self.summary(done),
+        )
+
+    def test_no_base_judges_the_whole_population(self) -> None:
+        """An empty base: every mutant, `sub`'s survivors red."""
+        done = self.leg(base="")
+        self.assertEqual(1, done.returncode, done.stderr)
+        self.assertIn(
+            "ci:mutants: python: judging the whole population: no base to diff against",
+            done.stdout,
+        )
+        self.assertEqual(
+            f"{LABEL}: 25 mutants, 20 killed, 5 survived, 0 excluded",
+            self.summary(done),
+        )
+
+    def test_a_row_with_nothing_in_its_share_runs_no_suite(self) -> None:
+        """A shard whose share of the change is empty measures nothing."""
+        self.change("done = True", "done = True  # touched")
+        done = subprocess.run(
+            [BASH, str(SCRIPT)],
+            cwd=self.tree,
+            env=self.env | {"ORG_MUTANTS_BASE": self.base, "MUTANTS_SHARD": "1/2"},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertIn(
+            f"{LABEL}: plan: 1 mutants, none in shard 1/2: no suite run", done.stdout
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

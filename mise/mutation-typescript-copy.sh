@@ -38,6 +38,12 @@ done <<< "${tools}"
 docker=$(command -v docker || true)
 [[ -z ${docker} ]] || path+=":${docker%/*}"
 path+=":/usr/bin:/bin"
+# Docker's daemon, read here: the copy's DOCKER_CONFIG holds no
+# contexts, so the endpoint is passed as DOCKER_HOST.
+docker_host="${DOCKER_HOST:-}"
+if [[ -n ${docker} && -z ${docker_host} ]]; then
+  docker_host=$(docker context inspect --format '{{.Endpoints.docker.Host}}' 2> /dev/null || true)
+fi
 base=""
 if [[ -n ${MUTANTS_DIFF:-} ]]; then
   base=$("${ORG_PYTHON}" "${belt}/mutants_diff.py" base)
@@ -47,6 +53,20 @@ rc=0
 scratch=$(mktemp -d)
 trap 'rc=$?; rm -rf "${scratch}"; [ -n "${org_done:-}" ] || [ "${rc}" -ne 0 ] || rc=1; exit "${rc}"' EXIT
 mkdir "${scratch}/home"
+# Docker's CLI plugins (compose among them) without its config: on
+# Docker Desktop they are found through ~/.docker/cli-plugins, beside
+# config.json's registry credentials and the contexts. The copy's
+# DOCKER_CONFIG holds only `cli-plugins`, each plugin linked to its
+# resolved target (the orchestrator's measurement, #1432).
+mkdir -p "${scratch}/docker/cli-plugins"
+plugins="${DOCKER_CONFIG:-${HOME}/.docker}/cli-plugins"
+if [[ -d ${plugins} ]]; then
+  for plugin in "${plugins}"/*; do
+    [[ -e ${plugin} ]] || continue
+    target=$("${ORG_PYTHON}" -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "${plugin}")
+    ln -s "${target}" "${scratch}/docker/cli-plugins/${plugin##*/}"
+  done
+fi
 head=$(git rev-parse HEAD)
 git clone -q --no-hardlinks --no-checkout . "${scratch}/tree"
 git -C "${scratch}/tree" checkout -q --detach "${head}"
@@ -67,12 +87,13 @@ elif [[ -f ${scratch}/tree/package-lock.json ]]; then
 fi
 
 # The fixed list, and nothing else, for everything run in the copy.
-cleared=(env -i "PATH=${path}" "HOME=${scratch}/home" CI=1
+cleared=(env -i "PATH=${path}" "HOME=${scratch}/home" CI=1 "DOCKER_CONFIG=${scratch}/docker"
   "ORG_BELT_DIR=${belt}" "ORG_PYTHON=${ORG_PYTHON}" "MISE_TASK_NAME=${MISE_TASK_NAME}")
 for name in MUTANTS_DIFF MUTANTS_SHARD MUTANTS_SUMMARY_DIR ORG_FINDINGS; do
   [[ -z ${!name:-} ]] || cleared+=("${name}=${!name}")
 done
 [[ -z ${MUTANTS_DIFF:-} ]] || cleared+=("ORG_MUTANTS_BASE=${base}")
+[[ -z ${docker_host} ]] || cleared+=("DOCKER_HOST=${docker_host}")
 
 envs() { # envs <when>: red on any untracked .env* in the copy
   local found

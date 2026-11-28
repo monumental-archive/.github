@@ -25,11 +25,11 @@ of none, is today's `ci:<leg>`.
 
 THE MUTATION LEG (#1432) is `ci:mutants`: the belt's mutation legs on
 what the change touches. Its rows are per language, one for each the
-tree adopts (MUTATED, the file each leg's guard reads), at the
-repository's `[mutants]` count, the one repo-mutants.yml's weekly run
-uses, else the canon's. A row runs `ci:mutants` with MUTANTS_LEG (its
-language, which ci.yml sets from the row) and MUTANTS_SHARD=k/n counted
-from 0, as the weekly run counts them. A tree adopting none gets one
+tree adopts (MUTATED, the file each leg's guard reads), one row each
+(mutation_count, the one place that count is decided). A row runs
+`ci:mutants` with MUTANTS_LEG (its language, which ci.yml sets from
+the row), and a row of several shards MUTANTS_SHARD=k/n counted from
+0, as the weekly run counts them. A tree adopting none gets one
 `ci:mutants` row, which skips clean. Nothing is unioned: a mutation
 shard's verdict is its own.
 
@@ -526,11 +526,10 @@ def mutated(language: str, files: list[str]) -> bool:
 
 
 def mutation_rows(costs: Costs, counts: Counts, files: list[str]) -> list[Row]:
-    """Lay out the mutation leg (#1432): each adopted language's shards.
+    """Lay out the mutation leg (#1432): each adopted language's rows.
 
-    The counts are the repository's `[mutants]`, the ones repo-mutants.yml
-    runs the weekly whole population at, else the canon's. A tree that
-    adopts no language gets one row, `ci:mutants`, which skips clean.
+    Each language's count is mutation_count's. A tree that adopts no
+    language gets one row, `ci:mutants`, which skips clean.
 
     Returns:
         The leg's rows, each adopted language in LANGUAGES order.
@@ -550,16 +549,17 @@ def mutation_rows(costs: Costs, counts: Counts, files: list[str]) -> list[Row]:
 def mutation_count(language: str, costs: Costs, counts: Counts) -> int:
     """Count one language's rows of the gate's mutation leg.
 
-    THE ONE PLACE the gate leg's count is decided (#1432). Today it is
-    the weekly run's `[mutants]` count, the repository's or the canon's;
-    what the gate leg's count should be is still open on #1432, and is
-    changed here alone.
+    THE ONE PLACE the gate leg's count is decided (#1432): one row per
+    adopted language, the owner's word on #1432. The weekly run's
+    `[mutants]` count is repo-mutants.yml's, never the gate's; a change
+    touches a share of the population, and each row plans for itself.
 
     Returns:
-        The language's shard count.
+        The language's row count.
 
     """
-    return (costs.languages["mutants"] | counts.languages.get("mutants", {}))[language]
+    del language, costs, counts
+    return 1
 
 
 def leg_tasks(

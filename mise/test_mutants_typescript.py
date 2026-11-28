@@ -251,33 +251,6 @@ class Adoption(Planted):
         self.assertEqual(done.stderr.splitlines(), want)
         self.assertEqual(log, list[str]())
 
-    def test_a_workstation_is_refused_by_name(self) -> None:
-        """No CI: adopted, the leg refuses before anything runs."""
-        self.plant(*KILLED)
-        env = dict(self.env)
-        del env["CI"]
-        done = subprocess.run(
-            [BASH, str(SCRIPT)],
-            cwd=self.tree,
-            env=env,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        self.assertEqual(done.returncode, 1)
-        want = [
-            (
-                f"{LABEL}: CI is unset — mutants run in place with the tree's own"
-                " environment,"
-            ),
-            (
-                "  so this leg runs on a runner only (repo-mutants.yml), never a"
-                " workstation"
-            ),
-        ]
-        self.assertEqual(done.stderr.splitlines(), want)
-        self.assertEqual(self.log.read_text(encoding="utf-8"), "")
-
     def test_stryker_missing_is_red_by_name(self) -> None:
         """Adopted with no StrykerJS installed: red, naming what to add."""
         self.track("stryker.config.json", json.dumps(CONFIG))
@@ -830,6 +803,169 @@ class Verdict(Planted):
             f"{LABEL}: not judged: the report holds no mutant — nothing was mutated",
             done.stderr.splitlines(),
         )
+
+
+# OFF A RUNNER (#1432, the owner's ruling): the leg runs itself in a
+# clean copy under `env -i`. Every tool it asks is a stand-in on the
+# copy's PATH, read from `mise bin-paths`, because nothing outside the
+# fixed list reaches the copy: `mise` names the stand-ins' directory,
+# `pnpm` answers the store and cache and, installing, puts a StrykerJS
+# stand-in in the copy (and a `.env`, where the row plants one),
+# `docker` names a daemon. The StrykerJS stand-in writes what it saw
+# (its directory, its environment, whether the real HOME's file reads,
+# its DOCKER_CONFIG) to files whose paths are baked into it.
+COPY_STRYKER = """#!/bin/bash
+printf 'stryker %s\\n' "$*" >> {log}
+pwd -P > {seen}/cwd
+env > {seen}/env
+cat "$HOME/secret" > {seen}/secret 2>&1 || echo unreadable > {seen}/secret
+ls -A "$DOCKER_CONFIG" > {seen}/docker-config
+mkdir -p reports/mutation
+cp {report} reports/mutation/mutation.json
+"""
+COPY_TOOLS = {
+    "mise": """#!/bin/bash
+[[ $1 == bin-paths ]] && echo {tools}
+""",
+    "pnpm": """#!/bin/bash
+case "$1 $2" in
+  "store path") echo {tmp}/store ;;
+  "config get") echo undefined ;;
+  install*)
+    printf 'pnpm %s\\n' "$*" >> {log}
+    mkdir -p node_modules/.bin
+    cp {tools}/stryker-stub node_modules/.bin/stryker
+    [[ ! -e {tools}/plant-env ]] || echo SECRET=1 > .env
+    ;;
+esac
+""",
+    "docker": """#!/bin/bash
+[[ $1 == context ]] && echo unix:///planted/docker.sock
+""",
+}
+
+
+class OffRunner(Planted):
+    """CI unset: a clean copy, a cleared environment, a scratch HOME."""
+
+    @override
+    def setUp(self) -> None:
+        """Plant the stand-ins, a real HOME with secrets, and the tree."""
+        super().setUp()
+        self.tools = self.tmp / "tools"
+        self.tools.mkdir()
+        self.seen = self.tmp / "seen"
+        self.seen.mkdir()
+        fill = {
+            "log": str(self.log),
+            "seen": str(self.seen),
+            "report": str(self.planted),
+            "tools": str(self.tools),
+            "tmp": str(self.tmp),
+        }
+        for name, text in {**COPY_TOOLS, "stryker-stub": COPY_STRYKER}.items():
+            path = self.tools / name
+            path.write_text(text.format(**fill), encoding="utf-8")
+            path.chmod(0o755)
+        self.home = self.tmp / "realhome"
+        (self.home / ".docker" / "cli-plugins").mkdir(parents=True)
+        (self.home / "secret").write_text("the real home\n", encoding="utf-8")
+        (self.home / ".docker" / "config.json").write_text("{}", encoding="utf-8")
+        plugin = self.tmp / "compose-binary"
+        plugin.write_text("", encoding="utf-8")
+        (self.home / ".docker" / "cli-plugins" / "docker-compose").symlink_to(plugin)
+        del self.env["CI"]
+        self.env |= {
+            "HOME": str(self.home),
+            "PATH": f"{self.tools}:{Path(GIT).parent}:/usr/bin:/bin",
+            "ORG_PYTHON": sys.executable,
+            "OUTSIDE_SECRET": "never in the copy",
+        }
+        self.track("pnpm-lock.yaml", "lockfileVersion: '9.0'\n")
+        self.track("stryker.config.json", json.dumps(CONFIG))
+        self.git("commit", "-q", "-m", "plant")
+        self.planted.write_text(json.dumps(report(*KILLED)), encoding="utf-8")
+
+    def seen_file(self, name: str) -> str:
+        """Read what the StrykerJS stand-in saw.
+
+        Returns:
+            The file's text.
+
+        """
+        return (self.seen / name).read_text(encoding="utf-8")
+
+    def seen_env(self) -> dict[str, str]:
+        """Read the environment the StrykerJS stand-in saw.
+
+        Returns:
+            Each variable's value.
+
+        """
+        lines = self.seen_file("env").splitlines()
+        return dict(line.split("=", 1) for line in lines if "=" in line)
+
+    def test_runs_in_a_clean_copy_of_the_committed_tree(self) -> None:
+        """Green, in a copy, never in the tree; installed offline."""
+        done, log = self.run_leg()
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertIn(f"{LABEL}: off a runner — in a clean copy of", done.stdout)
+        self.assertNotEqual(str(self.tree.resolve()), self.seen_file("cwd").strip())
+        self.assertFalse((self.tree / "node_modules").exists())
+        store, cache = self.tmp / "store", self.home / "Library/Caches/pnpm"
+        linux_cache = self.home / ".cache/pnpm"
+        install = log[0].replace(str(linux_cache), str(cache))
+        self.assertEqual(
+            f"pnpm install --offline --frozen-lockfile --store-dir {store}"
+            f" --cache-dir {cache}",
+            install,
+        )
+        runs = [x for x in log if x.startswith("stryker run")]
+        self.assertEqual(1, len(runs))
+
+    def test_the_environment_is_the_fixed_list(self) -> None:
+        """A variable set outside never reaches the run; CI is set there."""
+        done, _ = self.run_leg()
+        self.assertEqual(0, done.returncode, done.stderr)
+        env = self.seen_env()
+        self.assertNotIn("OUTSIDE_SECRET", env)
+        self.assertEqual("1", env["CI"])
+        self.assertEqual("unix:///planted/docker.sock", env["DOCKER_HOST"])
+        self.assertTrue(env["PATH"].startswith(str(Path(sys.executable).parent)))
+        self.assertIn(str(self.tools), env["PATH"].split(":"))
+
+    def test_a_file_in_the_real_home_is_not_readable(self) -> None:
+        """HOME is an empty scratch directory: ~/secret does not read."""
+        done, _ = self.run_leg()
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertEqual("unreadable\n", self.seen_file("secret"))
+        env = self.seen_env()
+        self.assertNotEqual(str(self.home), env["HOME"])
+
+    def test_the_docker_config_holds_no_config_json(self) -> None:
+        """DOCKER_CONFIG holds only the CLI plugins, linked to their targets."""
+        done, _ = self.run_leg()
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertEqual("cli-plugins\n", self.seen_file("docker-config"))
+
+    def test_an_env_file_in_the_copy_is_refused(self) -> None:
+        """The install writes a `.env`: red by name, StrykerJS never runs."""
+        (self.tools / "plant-env").touch()
+        done, log = self.run_leg()
+        self.assertEqual(1, done.returncode)
+        self.assertIn(
+            f"{LABEL}: .env is in the copy after the install, untracked — refused",
+            done.stderr,
+        )
+        self.assertFalse(any(x.startswith("stryker") for x in log))
+
+    def test_a_dirty_tree_is_refused_before_the_copy(self) -> None:
+        """An uncommitted tracked edit would go unjudged: red, nothing run."""
+        (self.tree / "src/add.ts").write_text("// edited\n", encoding="utf-8")
+        done, log = self.run_leg()
+        self.assertEqual(1, done.returncode)
+        self.assertIn(f"{LABEL}: uncommitted:  M src/add.ts", done.stderr)
+        self.assertEqual(list[str](), log)
 
 
 class Run(Planted):

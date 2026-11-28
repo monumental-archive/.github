@@ -65,8 +65,7 @@ shared lives here and nowhere else. Five layers:
    own tracked `shards.toml`, with the belt's adapters handing each
    shard (`ORG_SHARD=k/n`) to the runner (#2160); anything unnamed
    gets the canon's default, `mise/gate-shards.toml`; the mutation
-   leg is a runner per shard of each adopted language, at the
-   repository's `[mutants]` count. Repos never define `ci` or a leg;
+   leg is a runner per adopted language. Repos never define `ci` or a leg;
    adding a `lint:<tool>` task here enforces that tool in every repo
    with no repo change. `fix:*` are write-mode siblings, never in the gate. `audit:*`
    are network-bound or noisy checks, structurally outside the gate;

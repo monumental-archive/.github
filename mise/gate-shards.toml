@@ -115,8 +115,10 @@ seconds = 23
 default = 2
 
 [test.cost]
+# Local, 2026-11-28: 46 s on the gate plus #1432's real cosmic-ray rows
+# (87 s on an M1); re-measured from this PR's gate.
+"mise/test_mutants_python.py" = 133
 "mise/test_gate_tools.py" = 46
-"mise/test_mutants_python.py" = 46
 "mise/test_python_types.py" = 34
 "mise/test_coverage_typescript.py" = 31
 "mise/test_python_properties.py" = 31

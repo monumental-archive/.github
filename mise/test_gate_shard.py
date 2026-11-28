@@ -8,18 +8,22 @@ plan to the split (one row per task, a count per task, today's matrix
 where nothing is split), every refusal of the file to its message, the
 table to the belt (every row a lint the belt defines), the deal to its
 two properties (each lint on exactly one shard; the costliest on
-different shards), and a cost to the tree.
+different shards), a cost to the tree, and the mutation leg (#1432):
+a row per adopted language's shard, each handed its share.
 
 stdlib `unittest`, run by `mise run test`.
 """
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
 from typing import override
+from unittest import mock
 
 import decoded
 import gate_shard
+import hermetic
 import unittest_guarded
 from tracked import tracked
 
@@ -359,6 +363,90 @@ class Plan(Planted):
         self.assertEqual(
             want, gate_shard.plan_languages("mutants", COSTS, files, self.tree)
         )
+
+
+class Mutation(Planted):
+    """The mutation leg: a row per adopted language's shard (#1432)."""
+
+    def mutants(self, files: list[str]) -> list[tuple[object, ...]]:
+        """Plan a tree and keep its mutation rows, language included.
+
+        Returns:
+            (language, shard, of) per row.
+
+        """
+        rows = gate_shard.plan(COSTS, files, self.tree)
+        return [
+            (r.get("language"), r["shard"], r["of"])
+            for r in rows
+            if r["leg"] == "mutants"
+        ]
+
+    def test_each_adopted_language_gets_one_row(self) -> None:
+        """Python and Rust adopted: one row each, whatever `[mutants]` says."""
+        files = [*self.plant(THREE, "[mutants]\npython = 2\n"), "cosmic-ray.toml"]
+        files.append(".cargo/mutants.toml")
+        want: list[tuple[object, ...]] = [("rust", 1, 1), ("python", 1, 1)]
+        self.assertEqual(want, self.mutants(files))
+
+    def test_an_adoption_file_below_the_root_adopts_nothing(self) -> None:
+        """Only a root file adopts, as each leg's guard reads it."""
+        files = [*self.plant(THREE), "sub/cosmic-ray.toml", "x/.cargo/mutants.toml"]
+        want: list[tuple[object, ...]] = [(None, 1, 1)]
+        self.assertEqual(want, self.mutants(files))
+
+    def test_any_stryker_config_gets_the_typescript_row(self) -> None:
+        """A StrykerJS config the leg cannot read still gets its red row."""
+        files = [*self.plant(THREE), "stryker.conf.js"]
+        want: list[tuple[object, ...]] = [("typescript", 1, 1)]
+        self.assertEqual(want, self.mutants(files))
+
+    def test_labels_name_the_language(self) -> None:
+        """`mutants python`; a tree adopting none, `mutants`."""
+        files = [*self.plant(THREE), "cosmic-ray.toml"]
+        rows = gate_shard.plan(COSTS, files, self.tree)
+        labels = [str(r["label"]) for r in rows if r["leg"] == "mutants"]
+        want: list[str] = ["mutants python"]
+        self.assertEqual(want, labels)
+        none = gate_shard.plan(COSTS, self.plant(THREE), self.tree)
+        alone = [str(r["label"]) for r in none if r["leg"] == "mutants"]
+        only: list[str] = ["mutants"]
+        self.assertEqual(only, alone)
+
+    def test_each_mutated_name_is_its_legs_guard(self) -> None:
+        """MUTATED names exactly the file each leg's guard reads."""
+        for language, names in gate_shard.MUTATED.items():
+            with self.subTest(language=language):
+                text = (HERE / f"mutants-{language}.sh").read_text(encoding="utf-8")
+                self.assertIn(names[0], text)
+
+    def test_a_row_hands_its_share_to_the_leg(self) -> None:
+        """Row k of n runs ci:mutants with MUTANTS_SHARD=(k-1)/n."""
+        seen: list[tuple[list[list[str]], dict[str, str]]] = []
+
+        def fake(_mise: str, tasks: list[list[str]], env: dict[str, str]) -> int:
+            seen.append((tasks, env))
+            return 0
+
+        with mock.patch.object(gate_shard, "run_tasks", fake):
+            leg: dict[str, str] = {"MUTANTS_LEG": "python"}
+            with mock.patch.dict(os.environ, leg):
+                self.assertEqual(0, gate_shard.run("mutants", "ci:mutants", 3, 4, "m"))
+            self.assertEqual(0, gate_shard.run("mutants", "ci:mutants", 1, 1, "m"))
+        shared: dict[str, str] = {"MUTANTS_SHARD": "2/4"}
+        whole: dict[str, str] = {}
+        want = [([["ci:mutants"]], shared), ([["ci:mutants"]], whole)]
+        self.assertEqual(want, seen)
+
+    def test_a_sharded_row_with_no_language_is_red(self) -> None:
+        """MUTANTS_LEG unset on a row of several: red, nothing run."""
+        unset: dict[str, str] = {"MUTANTS_LEG": ""}
+        with mock.patch.dict(os.environ, unset):
+            done = hermetic.call_main(
+                lambda: gate_shard.run_mutants(2, 4, "m"), env=dict(os.environ)
+            )
+        self.assertEqual(1, done.returncode)
+        self.assertIn("mutants 2/4: MUTANTS_LEG names no language", done.stderr)
 
 
 class Refused(Planted):

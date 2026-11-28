@@ -46,8 +46,10 @@
 # `env -i` and a fixed list: PATH is the belt's Python, the tree's own
 # `mise bin-paths` (the suite's tools, read here, never installed in
 # the copy: a repository's mise hook may write a `.env`), docker's
-# directory and /usr/bin:/bin; HOME is an empty scratch directory; and
-# the leg's own variables. What HOME used to supply is resolved first
+# directory and /usr/bin:/bin; HOME is an empty scratch directory;
+# DOCKER_CONFIG a scratch directory holding only docker's CLI plugins,
+# and DOCKER_HOST the daemon this machine's context names; and the
+# leg's own variables. What HOME used to supply is resolved first
 # and passed: pnpm's store and metadata cache, npm's cache. The copy's
 # dependencies come from its lockfile OFFLINE (`pnpm install --offline
 # --frozen-lockfile`, `npm ci --offline`); a lockfile that needs the

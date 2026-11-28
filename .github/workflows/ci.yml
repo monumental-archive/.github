@@ -187,8 +187,7 @@ jobs:
   # Each leg is a belt task, `ci:<leg>`, and `ci` is their sum, so a
   # laptop's `mise run ci` runs exactly what the four legs run together.
   # The fourth, `ci:mutants`, is mutation testing on what the change
-  # touches (#1432): one row per adopted language's shard, at the
-  # repository's `[mutants]` count. One job
+  # touches (#1432): one row per adopted language. One job
   # with a matrix, its setup written once: a step that belongs to one
   # leg says so in its `if:`. fail-fast is off: which legs pass is the
   # information, and a leg cancelled by its neighbour reports nothing.

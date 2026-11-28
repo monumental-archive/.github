@@ -798,9 +798,8 @@ dir = "{{cwd}}"
 # header says how it selects: by line where its tool can, by file where
 # it cannot (gomu). audit:mutants stays the weekly whole run, for what a
 # diff cannot see: a change that only weakens tests, or a tool upgrade
-# that adds mutators. Its rows are per language at the repository's
-# `[mutants]` count (mise/gate_shard.py); MUTANTS_LEG and MUTANTS_SHARD
-# select a row's share, as in the weekly run.
+# that adds mutators. Its rows are one per adopted language
+# (mise/gate_shard.py); MUTANTS_LEG names a row's language.
 env = { MUTANTS_DIFF = "1" }
 run = '"${ORG_BELT_DIR}/mutants.sh"'
 
