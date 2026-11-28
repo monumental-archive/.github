@@ -62,26 +62,10 @@ def dead_pid() -> int:
     return int(done.stdout)
 
 
-type Claim = Callable[[Path, Path], subprocess.CompletedProcess[str]]
-
-
 @fixture
-def claim(capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> Claim:
-    """Run the helper's `claim` as the belt does, in process.
-
-    Returns:
-        The claimer: `claim(target, run)`, giving the status and what it
-        wrote as a finished process's.
-
-    """
+def _as_test(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run `claim` under the task the belt runs it in."""
     monkeypatch.setenv("MISE_TASK_NAME", "test")
-
-    def run(target: Path, run_dir: Path) -> subprocess.CompletedProcess[str]:
-        status = coverage_owner.main(["claim", str(target), str(run_dir)])
-        out, err = capfd.readouterr()
-        return subprocess.CompletedProcess([], status, out, err)
-
-    return run
 
 
 def owner(target: Path) -> str:
@@ -116,68 +100,98 @@ def claim_state(tmp_path: Path) -> ClaimState:
     return ClaimState(tmp_path)
 
 
-def test_no_file_writes_this_run(claim_state: ClaimState, claim: Claim) -> None:
+@pytest.mark.usefixtures("_as_test")
+def test_no_file_writes_this_run(
+    claim_state: ClaimState, capfd: pytest.CaptureFixture[str]
+) -> None:
     """No claim yet, and no directory: made, and claimed for this run."""
-    out = claim(claim_state.target, claim_state.run_dir)
-    assert out.returncode == 0, out.stderr
-    assert out.stderr == ""
+    status = coverage_owner.main(
+        ["claim", str(claim_state.target), str(claim_state.run_dir)]
+    )
+    out, err = capfd.readouterr()
+    assert status == 0, err
+    assert err == ""
     assert f"{claim_state.run_dir}\n" == owner(claim_state.target)
 
 
-def test_this_runs_own_claim_is_kept(claim_state: ClaimState, claim: Claim) -> None:
+@pytest.mark.usefixtures("_as_test")
+def test_this_runs_own_claim_is_kept(
+    claim_state: ClaimState, capfd: pytest.CaptureFixture[str]
+) -> None:
     """A second call in the same run finds its own claim: 0."""
     claim_state.plant(claim_state.run_dir)
-    out = claim(claim_state.target, claim_state.run_dir)
-    assert out.returncode == 0, out.stderr
+    status = coverage_owner.main(
+        ["claim", str(claim_state.target), str(claim_state.run_dir)]
+    )
+    out, err = capfd.readouterr()
+    assert status == 0, err
     assert f"{claim_state.run_dir}\n" == owner(claim_state.target)
 
 
-def test_a_dead_pids_run_is_taken_over(claim_state: ClaimState, claim: Claim) -> None:
+@pytest.mark.usefixtures("_as_test")
+def test_a_dead_pids_run_is_taken_over(
+    claim_state: ClaimState, capfd: pytest.CaptureFixture[str]
+) -> None:
     """`org-coverage-<pid>` present, its pid gone: not live, taken over."""
     dead = claim_state.tmp / f"org-coverage-{dead_pid()}"
     dead.mkdir()
     claim_state.plant(dead)
-    out = claim(claim_state.target, claim_state.run_dir)
-    assert out.returncode == 0, out.stderr
+    status = coverage_owner.main(
+        ["claim", str(claim_state.target), str(claim_state.run_dir)]
+    )
+    out, err = capfd.readouterr()
+    assert status == 0, err
     assert f"{claim_state.run_dir}\n" == owner(claim_state.target)
 
 
+@pytest.mark.usefixtures("_as_test")
 def test_a_missing_gate_named_run_is_taken_over(
-    claim_state: ClaimState, claim: Claim
+    claim_state: ClaimState, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """A gate-named run whose directory is gone: not live, taken over."""
     claim_state.plant(claim_state.tmp / "coverage-run")
-    out = claim(claim_state.target, claim_state.run_dir)
-    assert out.returncode == 0, out.stderr
+    status = coverage_owner.main(
+        ["claim", str(claim_state.target), str(claim_state.run_dir)]
+    )
+    out, err = capfd.readouterr()
+    assert status == 0, err
     assert f"{claim_state.run_dir}\n" == owner(claim_state.target)
 
 
+@pytest.mark.usefixtures("_as_test")
 def test_a_live_other_run_is_refused_by_name(
-    claim_state: ClaimState, claim: Claim
+    claim_state: ClaimState, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """The test's own pid, its directory present: 1, and nothing written."""
     other = claim_state.tmp / f"org-coverage-{os.getpid()}"
     other.mkdir()
     claim_state.plant(other)
-    out = claim(claim_state.target, claim_state.run_dir)
-    assert out.returncode == 1
+    status = coverage_owner.main(
+        ["claim", str(claim_state.target), str(claim_state.run_dir)]
+    )
+    out, err = capfd.readouterr()
+    assert status == 1
     assert (
         f"test: {claim_state.target} is being measured by another run ({other});"
         " wait for it to finish\n"
-    ) == out.stderr
+    ) == err
     assert f"{other}\n" == owner(claim_state.target)
 
 
+@pytest.mark.usefixtures("_as_test")
 def test_a_present_gate_named_run_is_live(
-    claim_state: ClaimState, claim: Claim
+    claim_state: ClaimState, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """Any other name is live while its directory exists."""
     other = claim_state.tmp / "coverage-run"
     other.mkdir()
     claim_state.plant(other)
-    out = claim(claim_state.target, claim_state.run_dir)
-    assert out.returncode == 1
-    assert f"another run ({other})" in out.stderr
+    status = coverage_owner.main(
+        ["claim", str(claim_state.target), str(claim_state.run_dir)]
+    )
+    out, err = capfd.readouterr()
+    assert status == 1
+    assert f"another run ({other})" in err
 
 
 def test_two_concurrent_claimants_one_wins(claim_state: ClaimState) -> None:
@@ -223,65 +237,88 @@ def tag_state(tmp_path: Path) -> Tag:
     return Tag(tmp_path)
 
 
-def test_a_new_directory_carries_cargos_tag(tag_state: Tag, claim: Claim) -> None:
+@pytest.mark.usefixtures("_as_test")
+def test_a_new_directory_carries_cargos_tag(
+    tag_state: Tag, capfd: pytest.CaptureFixture[str]
+) -> None:
     """The planted row: on main the claim made the directory untagged."""
-    out = claim(tag_state.target, tag_state.run_dir)
-    assert out.returncode == 0, out.stderr
+    status = coverage_owner.main(
+        ["claim", str(tag_state.target), str(tag_state.run_dir)]
+    )
+    out, err = capfd.readouterr()
+    assert status == 0, err
     assert tag_state.tag() == CARGO_TAG
 
 
-def test_a_restored_untagged_directory_is_tagged(tag_state: Tag, claim: Claim) -> None:
+@pytest.mark.usefixtures("_as_test")
+def test_a_restored_untagged_directory_is_tagged(
+    tag_state: Tag, capfd: pytest.CaptureFixture[str]
+) -> None:
     """A cache saved by main's claim holds the directory with no tag."""
     tag_state.target.mkdir(parents=True)
     (tag_state.target / "stale").write_text("from an earlier build\n")
-    out = claim(tag_state.target, tag_state.run_dir)
-    assert out.returncode == 0, out.stderr
+    status = coverage_owner.main(
+        ["claim", str(tag_state.target), str(tag_state.run_dir)]
+    )
+    out, err = capfd.readouterr()
+    assert status == 0, err
     assert tag_state.tag() == CARGO_TAG
     assert (tag_state.target / "stale").exists()
 
 
-def test_an_invalid_tag_is_replaced(tag_state: Tag, claim: Claim) -> None:
+@pytest.mark.usefixtures("_as_test")
+def test_an_invalid_tag_is_replaced(
+    tag_state: Tag, capfd: pytest.CaptureFixture[str]
+) -> None:
     """A tag with the wrong signature is what cargo calls invalid."""
     tag_state.target.mkdir(parents=True)
     (tag_state.target / coverage_owner.TAG).write_text("Signature: wrong\n")
-    out = claim(tag_state.target, tag_state.run_dir)
-    assert out.returncode == 0, out.stderr
+    status = coverage_owner.main(
+        ["claim", str(tag_state.target), str(tag_state.run_dir)]
+    )
+    out, err = capfd.readouterr()
+    assert status == 0, err
     assert tag_state.tag() == CARGO_TAG
 
 
-def test_a_valid_tag_is_kept(tag_state: Tag, claim: Claim) -> None:
+@pytest.mark.usefixtures("_as_test")
+def test_a_valid_tag_is_kept(tag_state: Tag, capfd: pytest.CaptureFixture[str]) -> None:
     """Cargo's own tag, whatever its comments say, is left as it is."""
     tag_state.target.mkdir(parents=True)
     mine = "Signature: 8a477f597d28d172789f06886806bc55\n# written by cargo\n"
     (tag_state.target / coverage_owner.TAG).write_text(mine)
-    out = claim(tag_state.target, tag_state.run_dir)
-    assert out.returncode == 0, out.stderr
+    status = coverage_owner.main(
+        ["claim", str(tag_state.target), str(tag_state.run_dir)]
+    )
+    out, err = capfd.readouterr()
+    assert status == 0, err
     assert mine == tag_state.tag()
 
 
-def test_a_refusal_writes_no_tag(tag_state: Tag, claim: Claim) -> None:
+@pytest.mark.usefixtures("_as_test")
+def test_a_refusal_writes_no_tag(
+    tag_state: Tag, capfd: pytest.CaptureFixture[str]
+) -> None:
     """Another live run's directory is left exactly as it holds it."""
     other = tag_state.tmp / f"org-coverage-{os.getpid()}"
     other.mkdir()
     tag_state.target.mkdir(parents=True)
     (tag_state.target / coverage_owner.OWNER).write_text(f"{other}\n")
-    out = claim(tag_state.target, tag_state.run_dir)
-    assert out.returncode == 1
+    status = coverage_owner.main(
+        ["claim", str(tag_state.target), str(tag_state.run_dir)]
+    )
+    out, err = capfd.readouterr()
+    assert status == 1
     assert not (tag_state.target / coverage_owner.TAG).exists()
 
 
-type Clean = Callable[[str], tuple[subprocess.CompletedProcess[str], list[str]]]
-
-
 @fixture
-def clean(
-    tmp_path: Path, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
-) -> Clean:
-    """Run `clean` in process beside a stand-in cargo answering as told.
+def cargo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Callable[[str], Path]:
+    """Stand a cargo in for `clean`, answering as a row tells it.
 
     Returns:
-        The cleaner: `clean(how)`, giving the status and what it wrote
-        as a finished process's, and the stand-in's calls.
+        A function that makes the stand-in answer `how` and returns the
+        log of its calls.
 
     """
     stubs = tmp_path / "stubs"
@@ -297,43 +334,63 @@ def clean(
     }.items():
         monkeypatch.setenv(name, value)
 
-    def run(how: str) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+    def answer(how: str) -> Path:
         monkeypatch.setenv("STUB_CLEAN", how)
-        status = coverage_owner.main(["clean"])
-        out, err = capfd.readouterr()
-        calls = log.read_text().splitlines() if log.exists() else []
-        return subprocess.CompletedProcess([], status, out, err), calls
+        return log
 
-    return run
+    return answer
+
+
+def logged(log: Path) -> list[str]:
+    """Read the stand-in cargo's calls.
+
+    Returns:
+        One argument line per call, in order.
+
+    """
+    return log.read_text().splitlines() if log.exists() else []
 
 
 # `clean` is red when cargo-llvm-cov did not clean (#2070).
-def test_a_clean_that_ran_is_green(clean: Clean) -> None:
+def test_a_clean_that_ran_is_green(
+    cargo: Callable[[str], Path], capfd: pytest.CaptureFixture[str]
+) -> None:
     """Nothing reported: 0, and the workspace clean was the call."""
-    out, calls = clean("ok")
-    assert out.returncode == 0, out.stderr
-    assert out.stderr == ""
+    log = cargo("ok")
+    status = coverage_owner.main(["clean"])
+    out, err = capfd.readouterr()
+    calls = logged(log)
+    assert status == 0, err
+    assert err == ""
     expected: list[str] = ["llvm-cov clean --workspace"]
     assert expected == calls
 
 
-def test_a_refused_clean_is_red_by_name(clean: Clean) -> None:
+def test_a_refused_clean_is_red_by_name(
+    cargo: Callable[[str], Path], capfd: pytest.CaptureFixture[str]
+) -> None:
     """The planted row: cargo-llvm-cov exits 0 over a refused clean."""
-    out, _ = clean("refused")
-    assert out.returncode == 1
-    assert "missing or invalid `CACHEDIR.TAG` file\n" in out.stderr
+    cargo("refused")
+    status = coverage_owner.main(["clean"])
+    out, err = capfd.readouterr()
+    assert status == 1
+    assert "missing or invalid `CACHEDIR.TAG` file\n" in err
     assert (
         "test: the workspace clean of /work/target/llvm-cov-target-0123 did"
         " not happen — its old executables would join the figure with zero"
         " hits (#2061): cargo-llvm-cov reported the failure above as a"
         " warning\n"
-    ) in out.stderr
+    ) in err
 
 
-def test_a_failed_cargo_llvm_cov_is_its_status(clean: Clean) -> None:
+def test_a_failed_cargo_llvm_cov_is_its_status(
+    cargo: Callable[[str], Path], capfd: pytest.CaptureFixture[str]
+) -> None:
     """cargo-llvm-cov's own failure is passed through unchanged."""
-    out, _ = clean("failed")
-    assert out.returncode == 3
+    cargo("failed")
+    status = coverage_owner.main(["clean"])
+    out, err = capfd.readouterr()
+    assert status == 3
 
 
 # The sweep's liveness rule, read directly.
