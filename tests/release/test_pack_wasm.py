@@ -12,12 +12,13 @@ nothing, or fail.
 """
 
 import hashlib
+import itertools
 import json
 import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from tempfile import TemporaryDirectory
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -25,6 +26,9 @@ from belt import workflow_yaml
 from belt.release import pack_wasm
 from belt.typed_pytest import fixture
 from tests import support
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 CANON = support.CANON
 WORKFLOW = CANON / ".github" / "workflows" / "build-wasm-npm.yml"
@@ -88,22 +92,50 @@ class Run:
     pkg: str
 
 
-def run_helper(
-    manifest: object,
-    mode: str = "ok",
-    *,
-    capfd: pytest.CaptureFixture[str],
+@dataclass
+class Packing:
+    """One package laid out: where the helper writes and logs."""
+
+    npm_log: Path
+    outputs: Path
+    pkg: Path
+
+    def ran(self, status: int, said: tuple[str, str]) -> Run:
+        """Read what the helper's run did.
+
+        Returns:
+            Its status, output, the npm log and what it wrote.
+
+        """
+        out, err = said
+        log = self.npm_log
+        return Run(
+            status,
+            out,
+            err,
+            log.read_text().splitlines() if log.exists() else [],
+            self.outputs.read_text(),
+            str(self.pkg.resolve()),
+        )
+
+
+@fixture
+def pack(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
     canon: support.Canon,
     env: support.Env,
-) -> Run:
-    """Call the helper on one package.json, in this process.
+) -> Callable[..., Packing]:
+    """Lay out the step's world: a stub `npm`, the canon, one package.
 
     Returns:
-        Its status, output, the npm log and what it wrote.
+        A function that lays out one package.json and returns it.
 
     """
-    with TemporaryDirectory() as d:
-        tmp = Path(d)
+    made = itertools.count()
+
+    def lay_out(manifest: object, mode: str = "ok") -> Packing:
+        tmp = tmp_path / f"pack{next(made)}"
         stubs, work = tmp / "bin", tmp / "work"
         pkg = work / "crates" / "edtf-wasm" / "pkg"
         for p in (stubs, pkg):
@@ -124,21 +156,13 @@ def run_helper(
             STUB_MODE=mode,
             STUB_TARBALL=TARBALL,
         )
-        with pytest.MonkeyPatch.context() as patched:
-            for name, value in environ.items():
-                patched.setenv(name, value)
-            patched.chdir(work)
-            patched.setattr(sys, "argv", [COMMAND])
-            status = pack_wasm.main([])
-        out, err = capfd.readouterr()
-        return Run(
-            status,
-            out,
-            err,
-            log.read_text().splitlines() if log.exists() else [],
-            outputs.read_text(),
-            str(pkg.resolve()),
-        )
+        for name, value in environ.items():
+            monkeypatch.setenv(name, value)
+        monkeypatch.chdir(work)
+        monkeypatch.setattr(sys, "argv", [COMMAND])
+        return Packing(log, outputs, pkg)
+
+    return lay_out
 
 
 def package(**fields: object) -> dict[str, object]:
@@ -189,10 +213,12 @@ def test_the_shipped_step_calls_the_helper() -> None:
 
 # The exact bytes are packed, hashed and named.
 def test_the_tarball_is_hashed_into_every_output(
-    capfd: pytest.CaptureFixture[str], canon: support.Canon, env: support.Env
+    capfd: pytest.CaptureFixture[str], pack: Callable[..., Packing]
 ) -> None:
     """Subjects, package and registry-subjects carry one digest."""
-    run = run_helper(package(), capfd=capfd, canon=canon, env=env)
+    packing = pack(package())
+    status = pack_wasm.main([])
+    run = packing.ran(status, capfd.readouterr())
     assert run.returncode == 0, run.stdout + run.stderr
     line = f"{SUM}  {TARBALL}"
     assert f"{line}\n" == run.stdout
@@ -206,26 +232,22 @@ def test_the_tarball_is_hashed_into_every_output(
 
 @pytest.mark.parametrize("url", [f"git+{WANT}.git", f"git+{WANT}", f"{WANT}.git"])
 def test_the_git_url_forms_are_the_repository(
-    url: object,
-    capfd: pytest.CaptureFixture[str],
-    canon: support.Canon,
-    env: support.Env,
+    url: object, capfd: pytest.CaptureFixture[str], pack: Callable[..., Packing]
 ) -> None:
     """`git+` and `.git` are the same repository."""
-    run = run_helper(
-        package(repository={"type": "git", "url": url}),
-        capfd=capfd,
-        canon=canon,
-        env=env,
-    )
+    packing = pack(package(repository={"type": "git", "url": url}))
+    status = pack_wasm.main([])
+    run = packing.ran(status, capfd.readouterr())
     assert run.returncode == 0, run.stdout + run.stderr
 
 
 def test_a_string_repository_is_read(
-    capfd: pytest.CaptureFixture[str], canon: support.Canon, env: support.Env
+    capfd: pytest.CaptureFixture[str], pack: Callable[..., Packing]
 ) -> None:
     """The shorthand form names the repository too."""
-    run = run_helper(package(repository=WANT), capfd=capfd, canon=canon, env=env)
+    packing = pack(package(repository=WANT))
+    status = pack_wasm.main([])
+    run = packing.ran(status, capfd.readouterr())
     assert run.returncode == 0, run.stdout + run.stderr
 
 
@@ -242,61 +264,65 @@ def assert_refused(run: Run, message: str) -> None:
 
 
 def test_another_repository_is_refused_with_the_remedy(
-    capfd: pytest.CaptureFixture[str], canon: support.Canon, env: support.Env
+    capfd: pytest.CaptureFixture[str], pack: Callable[..., Packing]
 ) -> None:
     """The registry would refuse its provenance (the v0.14.1 run)."""
     other = "https://github.com/someone/fork"
-    run = run_helper(
-        package(repository={"type": "git", "url": other}),
-        capfd=capfd,
-        canon=canon,
-        env=env,
-    )
+    packing = pack(package(repository={"type": "git", "url": other}))
+    status = pack_wasm.main([])
+    run = packing.ran(status, capfd.readouterr())
     assert_refused(run, refusal(other))
 
 
 def test_no_repository_is_refused_with_the_remedy(
-    capfd: pytest.CaptureFixture[str], canon: support.Canon, env: support.Env
+    capfd: pytest.CaptureFixture[str], pack: Callable[..., Packing]
 ) -> None:
     """Cargo.toml without `repository` leaves none in package.json (#96)."""
+    packing = pack(package(repository=None))
+    status = pack_wasm.main([])
+    run = packing.ran(status, capfd.readouterr())
     assert_refused(
-        run_helper(package(repository=None), capfd=capfd, canon=canon, env=env),
+        run,
         refusal(""),
     )
 
 
 def test_a_repository_without_a_url_is_refused(
-    capfd: pytest.CaptureFixture[str], canon: support.Canon, env: support.Env
+    capfd: pytest.CaptureFixture[str], pack: Callable[..., Packing]
 ) -> None:
     """An object with no url is not this repository."""
-    run = run_helper(
-        package(repository={"type": "git"}), capfd=capfd, canon=canon, env=env
-    )
+    packing = pack(package(repository={"type": "git"}))
+    status = pack_wasm.main([])
+    run = packing.ran(status, capfd.readouterr())
     assert_refused(run, refusal('{"type": "git"}'))
 
 
 def test_a_version_that_is_not_the_tags_is_refused(
-    capfd: pytest.CaptureFixture[str], canon: support.Canon, env: support.Env
+    capfd: pytest.CaptureFixture[str], pack: Callable[..., Packing]
 ) -> None:
     """The package would publish under a version the tag does not name."""
-    run = run_helper(package(version="1.3.3"), capfd=capfd, canon=canon, env=env)
+    packing = pack(package(version="1.3.3"))
+    status = pack_wasm.main([])
+    run = packing.ran(status, capfd.readouterr())
     assert_refused(
         run, f"::error::pack-wasm: package.json says 1.3.3, tag says {VERSION}\n"
     )
 
 
 def test_no_version_is_refused(
-    capfd: pytest.CaptureFixture[str], canon: support.Canon, env: support.Env
+    capfd: pytest.CaptureFixture[str], pack: Callable[..., Packing]
 ) -> None:
     """A missing version reads as null, as jq read it."""
-    run = run_helper(package(version=None), capfd=capfd, canon=canon, env=env)
+    packing = pack(package(version=None))
+    status = pack_wasm.main([])
+    run = packing.ran(status, capfd.readouterr())
     assert_refused(
         run, f"::error::pack-wasm: package.json says null, tag says {VERSION}\n"
     )
 
 
 def test_a_repository_spanning_lines_stays_one_error(
-    capfd: pytest.CaptureFixture[str], canon: support.Canon, env: support.Env
+    capfd: pytest.CaptureFixture[str], pack: Callable[..., Packing]
 ) -> None:
     """A newline in the caller's text is escaped (#1556's audit seed).
 
@@ -305,17 +331,14 @@ def test_a_repository_spanning_lines_stays_one_error(
     command.
     """
     injected = "x\n::warning::injected\r%"
-    run = run_helper(
-        package(repository={"type": "git", "url": injected}),
-        capfd=capfd,
-        canon=canon,
-        env=env,
-    )
+    packing = pack(package(repository={"type": "git", "url": injected}))
+    status = pack_wasm.main([])
+    run = packing.ran(status, capfd.readouterr())
     assert_refused(run, refusal("x%0A::warning::injected%0D%25"))
 
 
 def test_a_package_json_that_is_not_an_object_is_refused(
-    capfd: pytest.CaptureFixture[str], canon: support.Canon, env: support.Env
+    capfd: pytest.CaptureFixture[str], pack: Callable[..., Packing]
 ) -> None:
     """`0` and `[]` refuse by name (#1556's shrunk examples).
 
@@ -323,8 +346,11 @@ def test_a_package_json_that_is_not_an_object_is_refused(
     """
     manifests: tuple[object, ...] = (0, [])
     for manifest in manifests:
+        packing = pack(manifest)
+        status = pack_wasm.main([])
+        run = packing.ran(status, capfd.readouterr())
         assert_refused(
-            run_helper(manifest, capfd=capfd, canon=canon, env=env),
+            run,
             "::error::pack-wasm: crates/edtf-wasm/pkg/package.json is not"
             " a JSON object\n",
         )
@@ -332,30 +358,36 @@ def test_a_package_json_that_is_not_an_object_is_refused(
 
 # npm pack must leave bytes behind.
 def test_an_empty_tarball_is_refused(
-    capfd: pytest.CaptureFixture[str], canon: support.Canon, env: support.Env
+    capfd: pytest.CaptureFixture[str], pack: Callable[..., Packing]
 ) -> None:
     """A zero-byte file is nothing to publish."""
-    run = run_helper(package(), mode="empty", capfd=capfd, canon=canon, env=env)
+    packing = pack(package(), mode="empty")
+    status = pack_wasm.main([])
+    run = packing.ran(status, capfd.readouterr())
     assert run.returncode == 1
     assert run.stderr == "::error::pack-wasm: npm pack produced nothing\n"
     assert run.outputs == ""
 
 
 def test_no_tarball_named_is_refused(
-    capfd: pytest.CaptureFixture[str], canon: support.Canon, env: support.Env
+    capfd: pytest.CaptureFixture[str], pack: Callable[..., Packing]
 ) -> None:
     """A pack that names no tarball is nothing to publish."""
-    run = run_helper(package(), mode="silent", capfd=capfd, canon=canon, env=env)
+    packing = pack(package(), mode="silent")
+    status = pack_wasm.main([])
+    run = packing.ran(status, capfd.readouterr())
     assert run.returncode == 1
     assert run.stderr == "::error::pack-wasm: npm pack produced nothing\n"
     assert run.outputs == ""
 
 
 def test_a_failing_npm_fails_the_step_with_its_status(
-    capfd: pytest.CaptureFixture[str], canon: support.Canon, env: support.Env
+    capfd: pytest.CaptureFixture[str], pack: Callable[..., Packing]
 ) -> None:
     """The failing npm's status and message, no outputs."""
-    run = run_helper(package(), mode="fail", capfd=capfd, canon=canon, env=env)
+    packing = pack(package(), mode="fail")
+    status = pack_wasm.main([])
+    run = packing.ran(status, capfd.readouterr())
     assert run.returncode == 7
     assert run.stderr == "npm error code E404\n"
     assert run.stdout == ""

@@ -111,23 +111,16 @@ class AttachAndPublish:
         for line in REBUILT.splitlines():
             (dist / line.split()[1]).write_text(line, encoding="utf-8")
 
-    def publish(
+    def enter(
         self,
+        monkeypatch: pytest.MonkeyPatch,
         draft: str,
         *,
         published: str = REBUILT,
         manifest: dict[str, object] | None = None,
         dry_run: str = "false",
-        capfd: pytest.CaptureFixture[str],
-    ) -> tuple[int, str, str, list[list[str]]]:
-        """Run the helper against a release in the given state.
-
-        In this process, as the step's command.
-
-        Returns:
-            The status, both streams, and every `gh` call's arguments.
-
-        """
+    ) -> None:
+        """Set the step's world for a release in the given state."""
         (self.fixtures / "checksums.txt").write_text(published, encoding="utf-8")
         if manifest is not None:
             (self.fixtures / "evidence-manifest.json").write_text(
@@ -148,15 +141,21 @@ class AttachAndPublish:
             # A workflow step's: the writer names the command (#1934).
             MISE_TASK_NAME="",
         )
-        with pytest.MonkeyPatch.context() as patched:
-            for name, value in env.items():
-                patched.setenv(name, value)
-            patched.chdir(self.work)
-            patched.setattr(sys, "argv", [COMMAND])
-            status = attach_publish.main([])
-        out, err = capfd.readouterr()
+        for name, value in env.items():
+            monkeypatch.setenv(name, value)
+        monkeypatch.chdir(self.work)
+        monkeypatch.setattr(sys, "argv", [COMMAND])
+
+    def calls(self) -> list[list[str]]:
+        """Read every `gh` call's arguments, in order.
+
+        Returns:
+            One list of arguments per call.
+
+        """
+        log = self.tmp / "gh-log"
         lines = log.read_text(encoding="utf-8").splitlines() if log.is_file() else []
-        return status, out, err, [line.split("\0")[:-1] for line in lines]
+        return [line.split("\0")[:-1] for line in lines]
 
 
 @fixture
@@ -166,13 +165,16 @@ def attach_and_publish(tmp_path: Path, env: support.Env) -> AttachAndPublish:
 
 
 def test_identical_published_release_converges(
-    attach_and_publish: AttachAndPublish, capfd: pytest.CaptureFixture[str]
+    attach_and_publish: AttachAndPublish,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """#316, #586: a resume converges on the build subjects alone."""
     resigned = REBUILT.replace("cccc", "dddd")  # a fresh signature
-    status, out, err, calls = attach_and_publish.publish(
-        "false", published=resigned, manifest=TYPED, capfd=capfd
-    )
+    attach_and_publish.enter(monkeypatch, "false", published=resigned, manifest=TYPED)
+    status = attach_publish.main([])
+    out, err = capfd.readouterr()
+    calls = attach_and_publish.calls()
     assert status == 0, out + err
     assert out == (
         f"::notice::{TAG} already published; build subjects verified"
@@ -183,25 +185,31 @@ def test_identical_published_release_converges(
 
 
 def test_untyped_release_with_identical_checksums_converges(
-    attach_and_publish: AttachAndPublish, capfd: pytest.CaptureFixture[str]
+    attach_and_publish: AttachAndPublish,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A schema-1 release converges on its whole set, uploading nothing (#330)."""
-    status, out, err, calls = attach_and_publish.publish(
-        "false", manifest={"schema": 1}, capfd=capfd
-    )
+    attach_and_publish.enter(monkeypatch, "false", manifest={"schema": 1})
+    status = attach_publish.main([])
+    out, err = capfd.readouterr()
+    calls = attach_and_publish.calls()
     assert status == 0, out + err
     assert "converging" in out
     assert "release upload" not in subcommands(calls)
 
 
 def test_checksums_differ_without_typing(
-    attach_and_publish: AttachAndPublish, capfd: pytest.CaptureFixture[str]
+    attach_and_publish: AttachAndPublish,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """No manifest: any differing asset refuses the resume."""
     resigned = REBUILT.replace("cccc", "dddd")
-    status, out, err, calls = attach_and_publish.publish(
-        "false", published=resigned, capfd=capfd
-    )
+    attach_and_publish.enter(monkeypatch, "false", published=resigned)
+    status = attach_publish.main([])
+    out, err = capfd.readouterr()
+    calls = attach_and_publish.calls()
     assert status == 1, out + err
     assert "-dddd  attestations.intoto.jsonl" in out
     assert "+cccc  attestations.intoto.jsonl" in out
@@ -214,13 +222,17 @@ def test_checksums_differ_without_typing(
 
 
 def test_typed_build_subjects_differ(
-    attach_and_publish: AttachAndPublish, capfd: pytest.CaptureFixture[str]
+    attach_and_publish: AttachAndPublish,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """stele#156: a differing build subject refuses, by name."""
     rebuilt_other = REBUILT.replace("aaaa", "ffff")
-    status, out, err, _ = attach_and_publish.publish(
-        "false", published=rebuilt_other, manifest=TYPED, capfd=capfd
+    attach_and_publish.enter(
+        monkeypatch, "false", published=rebuilt_other, manifest=TYPED
     )
+    status = attach_publish.main([])
+    out, err = capfd.readouterr()
     assert status == 1, out + err
     assert err == (
         f"::error::attach-publish: {TAG} is published and immutable but these"
@@ -231,25 +243,31 @@ def test_typed_build_subjects_differ(
 
 
 def test_typed_build_subject_missing_from_the_release(
-    attach_and_publish: AttachAndPublish, capfd: pytest.CaptureFixture[str]
+    attach_and_publish: AttachAndPublish,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A build subject the published list lacks is a difference."""
     partial = "bbbb  sbom.spdx.json\ncccc  attestations.intoto.jsonl\n"
-    status, out, err, _ = attach_and_publish.publish(
-        "false", published=partial, manifest=TYPED, capfd=capfd
-    )
+    attach_and_publish.enter(monkeypatch, "false", published=partial, manifest=TYPED)
+    status = attach_publish.main([])
+    out, err = capfd.readouterr()
     assert status == 1, out + err
     assert "differ from the published bytes: tool-1.2.3" in err
 
 
 def test_manifest_that_is_not_json(
-    attach_and_publish: AttachAndPublish, capfd: pytest.CaptureFixture[str]
+    attach_and_publish: AttachAndPublish,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A manifest that cannot be read refuses rather than guessing."""
     (attach_and_publish.fixtures / "evidence-manifest.json").write_text(
         "{", encoding="utf-8"
     )
-    status, out, err, _ = attach_and_publish.publish("false", capfd=capfd)
+    attach_and_publish.enter(monkeypatch, "false")
+    status = attach_publish.main([])
+    out, err = capfd.readouterr()
     assert status == 1, out + err
     assert err.startswith(
         "::error::attach-publish: published-manifest.json is not JSON:"
@@ -257,7 +275,9 @@ def test_manifest_that_is_not_json(
 
 
 def test_manifest_whose_entries_are_not_a_list(
-    attach_and_publish: AttachAndPublish, capfd: pytest.CaptureFixture[str]
+    attach_and_publish: AttachAndPublish,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """`{"entries": true}` refuses by name (#1556's shrunk example).
 
@@ -267,7 +287,9 @@ def test_manifest_whose_entries_are_not_a_list(
     (attach_and_publish.fixtures / "evidence-manifest.json").write_text(
         '{"entries": true}', encoding="utf-8"
     )
-    status, out, err, _ = attach_and_publish.publish("false", capfd=capfd)
+    attach_and_publish.enter(monkeypatch, "false")
+    status = attach_publish.main([])
+    out, err = capfd.readouterr()
     assert status == 1, out + err
     assert err == (
         "::error::attach-publish: published-manifest.json is not an evidence"
@@ -277,10 +299,15 @@ def test_manifest_whose_entries_are_not_a_list(
 
 
 def test_draft_uploads_and_publishes(
-    attach_and_publish: AttachAndPublish, capfd: pytest.CaptureFixture[str]
+    attach_and_publish: AttachAndPublish,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A draft takes every asset, then is published."""
-    status, out, err, calls = attach_and_publish.publish("true", capfd=capfd)
+    attach_and_publish.enter(monkeypatch, "true")
+    status = attach_publish.main([])
+    out, err = capfd.readouterr()
+    calls = attach_and_publish.calls()
     assert status == 0, out + err
     assert out == f"::notice::published {TAG}\n"
     want: list[str] = ["release view", "release upload", "release edit"]
@@ -297,12 +324,15 @@ def test_draft_uploads_and_publishes(
 
 
 def test_rehearsal_stays_a_draft_and_records_it(
-    attach_and_publish: AttachAndPublish, capfd: pytest.CaptureFixture[str]
+    attach_and_publish: AttachAndPublish,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """#597: a rehearsal uploads, keeps the draft, and says why."""
-    status, out, err, calls = attach_and_publish.publish(
-        "true", dry_run="true", capfd=capfd
-    )
+    attach_and_publish.enter(monkeypatch, "true", dry_run="true")
+    status = attach_publish.main([])
+    out, err = capfd.readouterr()
+    calls = attach_and_publish.calls()
     assert status == 0, out + err
     assert out.endswith(
         f"::warning::rehearsal: {TAG} left as a draft, nothing published\n"
@@ -317,13 +347,16 @@ def test_rehearsal_stays_a_draft_and_records_it(
 
 
 def test_a_failing_gh_fails_the_step(
-    attach_and_publish: AttachAndPublish, capfd: pytest.CaptureFixture[str]
+    attach_and_publish: AttachAndPublish,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A release that cannot be read stops the step with gh's status."""
     (attach_and_publish.bindir / "gh").write_text(
         "#!/usr/bin/env bash\nexit 4\n", "utf-8"
     )
+    attach_and_publish.enter(monkeypatch, "true")
     with pytest.raises(SystemExit) as stopped:
-        attach_and_publish.publish("true", capfd=capfd)
+        attach_publish.main([])
     assert stopped.value.code == 4
     assert capfd.readouterr().out == ""

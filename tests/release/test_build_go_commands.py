@@ -13,11 +13,12 @@ stub `go` first on PATH. The stub answers `list` with the row's main
 packages, one per line, and `build -o OUT PKG` by writing OUT.
 """
 
+import itertools
 import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from tempfile import TemporaryDirectory
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -25,6 +26,9 @@ from belt import workflow_yaml
 from belt.release import build_go_commands
 from belt.typed_pytest import fixture
 from tests import support
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 CANON = support.CANON
 WORKFLOW = CANON / ".github" / "workflows" / "build-go-binary.yml"
@@ -75,22 +79,48 @@ class Run:
     staged: list[str]
 
 
-def run_helper(
-    mains: str, broken: str = "", *, capfd: pytest.CaptureFixture[str], env: support.Env
-) -> Run:
-    """Run the helper on a module whose `go list` prints `mains`.
+@dataclass
+class Building:
+    """One module laid out: where the stub logs and the helper stages."""
 
-    In this process.
+    go_log: Path
+    staged: Path
+
+    def ran(self, status: int, said: tuple[str, str]) -> Run:
+        """Read what the helper's run did.
+
+        Returns:
+            Its status, output, the go log and what staged/ holds.
+
+        """
+        out, err = said
+        log, staged = self.go_log, self.staged
+        return Run(
+            status,
+            out,
+            err,
+            log.read_text().splitlines() if log.exists() else [],
+            sorted(p.name for p in staged.iterdir()) if staged.is_dir() else [],
+        )
+
+
+@fixture
+def build(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, env: support.Env
+) -> Callable[..., Building]:
+    """Lay out a module whose `go list` prints a row's mains.
 
     Returns:
-        Its status, output, the go log and what staged/ holds.
+        A function that lays out one module and returns it.
 
     """
-    with TemporaryDirectory() as d:
-        tmp = Path(d)
+    made = itertools.count()
+
+    def lay_out(mains: str, broken: str = "") -> Building:
+        tmp = tmp_path / f"build{next(made)}"
         stubs, work = tmp / "bin", tmp / "work"
         for p in (stubs, work):
-            p.mkdir()
+            p.mkdir(parents=True)
         (stubs / "go").write_text(GO_STUB)
         (stubs / "go").chmod(0o755)
         log = tmp / "go.log"
@@ -100,20 +130,12 @@ def run_helper(
             STUB_MAINS=mains,
             STUB_BROKEN=broken,
         )
-        with pytest.MonkeyPatch.context() as patched:
-            for name, value in environ.items():
-                patched.setenv(name, value)
-            patched.chdir(work)
-            status = build_go_commands.main([])
-        out, err = capfd.readouterr()
-        staged = work / "staged"
-        return Run(
-            status,
-            out,
-            err,
-            log.read_text().splitlines() if log.exists() else [],
-            sorted(p.name for p in staged.iterdir()) if staged.is_dir() else [],
-        )
+        for name, value in environ.items():
+            monkeypatch.setenv(name, value)
+        monkeypatch.chdir(work)
+        return Building(log, work / "staged")
+
+    return lay_out
 
 
 def step(name: str) -> dict[str, object]:
@@ -142,12 +164,12 @@ def test_the_shipped_step_calls_the_helper() -> None:
 
 # Every main package becomes one staged binary.
 def test_two_commands_build_two_binaries(
-    capfd: pytest.CaptureFixture[str], env: support.Env
+    capfd: pytest.CaptureFixture[str], build: Callable[..., Building]
 ) -> None:
     """Each named by its import path's last element."""
-    run = run_helper(
-        "example.com/m/cmd/stele\nexample.com/m/cmd/probe\n", capfd=capfd, env=env
-    )
+    building = build("example.com/m/cmd/stele\nexample.com/m/cmd/probe\n")
+    status = build_go_commands.main([])
+    run = building.ran(status, capfd.readouterr())
     assert run.returncode == 0, run.stdout + run.stderr
     staged: list[str] = ["probe", "stele"]
     assert staged == run.staged
@@ -161,10 +183,12 @@ def test_two_commands_build_two_binaries(
 
 
 def test_the_blank_lines_of_go_list_are_no_package(
-    capfd: pytest.CaptureFixture[str], env: support.Env
+    capfd: pytest.CaptureFixture[str], build: Callable[..., Building]
 ) -> None:
     """Non-main packages print an empty line each."""
-    run = run_helper("\n\nexample.com/m\n\n", capfd=capfd, env=env)
+    building = build("\n\nexample.com/m\n\n")
+    status = build_go_commands.main([])
+    run = building.ran(status, capfd.readouterr())
     assert run.returncode == 0, run.stdout + run.stderr
     staged: list[str] = ["m"]
     assert staged == run.staged
@@ -172,10 +196,12 @@ def test_the_blank_lines_of_go_list_are_no_package(
 
 # One row per refusal, each message asserted.
 def test_a_module_with_no_main_package_is_refused(
-    capfd: pytest.CaptureFixture[str], env: support.Env
+    capfd: pytest.CaptureFixture[str], build: Callable[..., Building]
 ) -> None:
     """A library is the wrong class."""
-    run = run_helper("\n\n", capfd=capfd, env=env)
+    building = build("\n\n")
+    status = build_go_commands.main([])
+    run = building.ran(status, capfd.readouterr())
     assert run.returncode == 1
     assert run.stderr == (
         "::error::build-go-commands: no main packages in this module —"
@@ -185,12 +211,12 @@ def test_a_module_with_no_main_package_is_refused(
 
 
 def test_two_commands_with_one_binary_name_are_refused(
-    capfd: pytest.CaptureFixture[str], env: support.Env
+    capfd: pytest.CaptureFixture[str], build: Callable[..., Building]
 ) -> None:
     """The second would overwrite the first; it is never built."""
-    run = run_helper(
-        "example.com/m/cmd/tool\nexample.com/m/internal/tool\n", capfd=capfd, env=env
-    )
+    building = build("example.com/m/cmd/tool\nexample.com/m/internal/tool\n")
+    status = build_go_commands.main([])
+    run = building.ran(status, capfd.readouterr())
     assert run.returncode == 1
     assert run.stderr == (
         "::error::build-go-commands: two main packages both build a binary named tool\n"
@@ -201,18 +227,17 @@ def test_two_commands_with_one_binary_name_are_refused(
 
 
 def test_a_failing_build_fails_the_step_with_its_status(
-    capfd: pytest.CaptureFixture[str], env: support.Env
+    capfd: pytest.CaptureFixture[str], build: Callable[..., Building]
 ) -> None:
     """The failing build's run.returncode and message; none after it is built.
 
     The script row: go's message is on the child's own stderr.
     """
-    run = run_helper(
-        "example.com/m/cmd/a\nexample.com/m/cmd/b\n",
-        broken="example.com/m/cmd/a",
-        capfd=capfd,
-        env=env,
+    building = build(
+        "example.com/m/cmd/a\nexample.com/m/cmd/b\n", broken="example.com/m/cmd/a"
     )
+    status = build_go_commands.main([])
+    run = building.ran(status, capfd.readouterr())
     assert run.returncode == 1
     assert run.stderr == "example.com/m/cmd/a: undefined: x\n"
     assert run.stdout == ""

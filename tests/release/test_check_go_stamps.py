@@ -12,12 +12,13 @@ contents, so a row plants the build info each binary reports by
 writing it as the binary; STUB_FAIL makes go fail instead.
 """
 
+import itertools
 import os
 import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from tempfile import TemporaryDirectory
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -25,6 +26,9 @@ from belt import workflow_yaml
 from belt.release import check_go_stamps
 from belt.typed_pytest import fixture
 from tests import support
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 CANON = support.CANON
 WORKFLOW = CANON / ".github" / "workflows" / "build-go-binary.yml"
@@ -119,27 +123,44 @@ def git(cwd: Path, *args: str, env: support.Env) -> str:
     ).stdout
 
 
-def run_helper(
-    binaries: dict[str, str] | None,
-    *,
-    fail: bool = False,
-    repo: bool = True,
-    capfd: pytest.CaptureFixture[str],
-    env: support.Env,
-) -> Run:
-    """Run the helper over staged/ holding `binaries` (name → build info).
+@dataclass
+class Stamping:
+    """One release laid out: the commit its binaries must name."""
+
+    head: str
+
+    def ran(self, status: int, said: tuple[str, str]) -> Run:
+        """Read what the helper's run did.
+
+        Returns:
+            Its status, output and the released commit.
+
+        """
+        out, err = said
+        return Run(status, out, err, self.head)
+
+
+@fixture
+def stamp(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, env: support.Env
+) -> Callable[..., Stamping]:
+    """Lay out staged/ holding a row's binaries (name -> build info).
 
     `{head}` in a build info is replaced by the repository's HEAD.
 
     Returns:
-        Its status, output and the released commit.
+        A function that lays out one release and returns it.
 
     """
-    with TemporaryDirectory() as d:
-        tmp = Path(d)
+    made = itertools.count()
+
+    def lay_out(
+        binaries: dict[str, str] | None, *, fail: bool = False, repo: bool = True
+    ) -> Stamping:
+        tmp = tmp_path / f"stamp{next(made)}"
         stubs, work = tmp / "bin", tmp / "work"
         for p in (stubs, work):
-            p.mkdir()
+            p.mkdir(parents=True)
         (stubs / "go").write_text(GO_STUB)
         (stubs / "go").chmod(0o755)
         head = ""
@@ -158,14 +179,13 @@ def run_helper(
             "STUB_FAIL": "1" if fail else "",
             "GIT_CEILING_DIRECTORIES": str(tmp),
         }
-        with pytest.MonkeyPatch.context() as patched:
-            for name, value in environ.items():
-                patched.setenv(name, value)
-            patched.chdir(work)
-            patched.setattr(sys, "argv", [COMMAND])
-            status = check_go_stamps.main([])
-        out, err = capfd.readouterr()
-        return Run(status, out, err, head)
+        for name, value in environ.items():
+            monkeypatch.setenv(name, value)
+        monkeypatch.chdir(work)
+        monkeypatch.setattr(sys, "argv", [COMMAND])
+        return Stamping(head)
+
+    return lay_out
 
 
 def step(name: str) -> dict[str, object]:
@@ -194,12 +214,12 @@ def test_the_shipped_step_calls_the_helper() -> None:
 
 # A clean build of the released commit passes, every binary.
 def test_every_binary_stamped_with_the_released_commit(
-    capfd: pytest.CaptureFixture[str], env: support.Env
+    capfd: pytest.CaptureFixture[str], stamp: Callable[..., Stamping]
 ) -> None:
     """Two binaries, both clean, both carrying their modules."""
-    run = run_helper(
-        {"tool": info("{head}"), "probe": info("{head}")}, capfd=capfd, env=env
-    )
+    stamping = stamp({"tool": info("{head}"), "probe": info("{head}")})
+    status = check_go_stamps.main([])
+    run = stamping.ran(status, capfd.readouterr())
     assert run.returncode == 0, run.stdout + run.stderr
     assert run.stdout == ""
 
@@ -212,58 +232,73 @@ def assert_refused(run: Run, want: str) -> None:
 
 
 def test_another_revision_is_refused(
-    capfd: pytest.CaptureFixture[str], env: support.Env
+    capfd: pytest.CaptureFixture[str], stamp: Callable[..., Stamping]
 ) -> None:
     """Bytes built from some other commit."""
     rev = "f" * 40
+    stamping = stamp({"tool": info(rev)})
+    status = check_go_stamps.main([])
+    run = stamping.ran(status, capfd.readouterr())
     assert_refused(
-        run_helper({"tool": info(rev)}, capfd=capfd, env=env),
+        run,
         f"tool: stamped revision {rev} is not the released commit HEAD",
     )
 
 
 def test_no_revision_is_refused(
-    capfd: pytest.CaptureFixture[str], env: support.Env
+    capfd: pytest.CaptureFixture[str], stamp: Callable[..., Stamping]
 ) -> None:
     """Bytes built outside a checkout or with -buildvcs=false."""
+    stamping = stamp({"tool": info(None)})
+    status = check_go_stamps.main([])
+    run = stamping.ran(status, capfd.readouterr())
     assert_refused(
-        run_helper({"tool": info(None)}, capfd=capfd, env=env),
+        run,
         "tool: stamped revision <none> is not the released commit HEAD",
     )
 
 
 def test_a_modified_tree_is_refused(
-    capfd: pytest.CaptureFixture[str], env: support.Env
+    capfd: pytest.CaptureFixture[str], stamp: Callable[..., Stamping]
 ) -> None:
     """Bytes that match no commit."""
+    stamping = stamp({"tool": info("{head}", "true")})
+    status = check_go_stamps.main([])
+    run = stamping.ran(status, capfd.readouterr())
     assert_refused(
-        run_helper({"tool": info("{head}", "true")}, capfd=capfd, env=env),
+        run,
         "tool: vcs.modified=true — a release builds a clean tree",
     )
 
 
 def test_no_modified_stamp_is_refused(
-    capfd: pytest.CaptureFixture[str], env: support.Env
+    capfd: pytest.CaptureFixture[str], stamp: Callable[..., Stamping]
 ) -> None:
     """A tree whose cleanliness the stamp does not state."""
+    stamping = stamp({"tool": info("{head}", None)})
+    status = check_go_stamps.main([])
+    run = stamping.ran(status, capfd.readouterr())
     assert_refused(
-        run_helper({"tool": info("{head}", None)}, capfd=capfd, env=env),
+        run,
         "tool: vcs.modified=<none> — a release builds a clean tree",
     )
 
 
 def test_no_module_stamp_is_refused(
-    capfd: pytest.CaptureFixture[str], env: support.Env
+    capfd: pytest.CaptureFixture[str], stamp: Callable[..., Stamping]
 ) -> None:
     """Bytes that carry no inventory at all."""
+    stamping = stamp({"tool": info("{head}", module=False)})
+    status = check_go_stamps.main([])
+    run = stamping.ran(status, capfd.readouterr())
     assert_refused(
-        run_helper({"tool": info("{head}", module=False)}, capfd=capfd, env=env),
+        run,
         "tool: no module stamp — the shipped bytes must carry their inventory",
     )
 
 
 def test_a_setting_value_that_spells_the_stamp_is_not_the_stamp(
-    capfd: pytest.CaptureFixture[str], env: support.Env
+    capfd: pytest.CaptureFixture[str], stamp: Callable[..., Stamping]
 ) -> None:
     """An -ldflags value naming HEAD is not a stamp (#1556's shrunk example).
 
@@ -277,47 +312,57 @@ def test_a_setting_value_that_spells_the_stamp_is_not_the_stamp(
         "\tbuild\t-ldflags=-X=main.v=vcs.revision={head}\n"
         "\tbuild\t-ldflags=-X=main.m=vcs.modified=false\n"
     )
+    stamping = stamp({"tool": spelled})
+    status = check_go_stamps.main([])
+    run = stamping.ran(status, capfd.readouterr())
     assert_refused(
-        run_helper({"tool": spelled}, capfd=capfd, env=env),
+        run,
         "tool: stamped revision <none> is not the released commit HEAD",
     )
 
 
 def test_the_first_bad_binary_in_name_order_is_named(
-    capfd: pytest.CaptureFixture[str], env: support.Env
+    capfd: pytest.CaptureFixture[str], stamp: Callable[..., Stamping]
 ) -> None:
     """staged/ is read in name order, as the shell's glob read it."""
-    run = run_helper(
-        {"b": info("{head}", "true"), "a": info("f" * 40)}, capfd=capfd, env=env
-    )
+    stamping = stamp({"b": info("{head}", "true"), "a": info("f" * 40)})
+    status = check_go_stamps.main([])
+    run = stamping.ran(status, capfd.readouterr())
     assert "::error::check-go-stamps: a: stamped revision" in run.stderr
 
 
 def test_an_empty_staged_directory_is_refused(
-    capfd: pytest.CaptureFixture[str], env: support.Env
+    capfd: pytest.CaptureFixture[str], stamp: Callable[..., Stamping]
 ) -> None:
     """Nothing built is nothing checked, and never a pass."""
+    stamping = stamp({})
+    status = check_go_stamps.main([])
+    run = stamping.ran(status, capfd.readouterr())
     assert_refused(
-        run_helper({}, capfd=capfd, env=env),
+        run,
         "staged/ holds no binary — nothing was built to check",
     )
 
 
 # go's or git's own failure fails the step with its status.
 def test_a_file_go_cannot_read_fails_the_step(
-    capfd: pytest.CaptureFixture[str], env: support.Env
+    capfd: pytest.CaptureFixture[str], stamp: Callable[..., Stamping]
 ) -> None:
     """Not a Go binary: go's run.returncode and message."""
-    run = run_helper({"tool": info("{head}")}, fail=True, capfd=capfd, env=env)
+    stamping = stamp({"tool": info("{head}")}, fail=True)
+    status = check_go_stamps.main([])
+    run = stamping.ran(status, capfd.readouterr())
     assert run.returncode == 1
     assert run.stderr == "go: not a Go binary\n"
     assert run.stdout == ""
 
 
 def test_outside_a_repository_git_fails_the_step(
-    capfd: pytest.CaptureFixture[str], env: support.Env
+    capfd: pytest.CaptureFixture[str], stamp: Callable[..., Stamping]
 ) -> None:
     """No released commit to hold the stamp to."""
-    run = run_helper({"tool": info("f" * 40)}, repo=False, capfd=capfd, env=env)
+    stamping = stamp({"tool": info("f" * 40)}, repo=False)
+    status = check_go_stamps.main([])
+    run = stamping.ran(status, capfd.readouterr())
     assert run.returncode == 128
     assert run.stdout == ""
